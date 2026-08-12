@@ -1,0 +1,218 @@
+using System.IO;
+using System.Collections.Specialized;
+using System.Runtime.InteropServices;
+using System.Windows;
+using System.Windows.Media.Imaging;
+using QuickClip.Native;
+
+namespace QuickClip.Services;
+
+/// <summary>粘贴服务：在后台 STA 线程回填剪贴板，并用 SendInput 模拟 Ctrl+V 粘贴到目标窗口，避免占用 UI 线程。</summary>
+public sealed class PasteService
+{
+    private volatile bool _isSelfPasting;
+    private IntPtr _lastTargetWindow = IntPtr.Zero;
+
+    /// <summary>是否处于自身粘贴回填状态（用于剪贴板监听过滤）。</summary>
+    public bool IsSelfPasting => _isSelfPasting;
+
+    /// <summary>记录唤起 QuickClip 之前的前台窗口，作为粘贴目标。</summary>
+    public void RememberTargetWindow()
+    {
+        _lastTargetWindow = NativeMethods.GetForegroundWindow();
+    }
+
+    // ---------- 粘贴（后台回填剪贴板后模拟 Ctrl+V，异常仅记录日志） ----------
+
+    public void PasteText(string? text, bool plainOnly = false)
+    {
+        DebugLog.Log($"粘贴文本: plainOnly={plainOnly}, 长度={(text?.Length ?? 0)}");
+        _ = RunPasteAsync(() => CopyTextCore(text, plainOnly));
+    }
+
+    public void PasteImage(string? previewPath)
+    {
+        _ = RunPasteAsync(() => CopyImageCore(previewPath));
+    }
+
+    public void PasteFiles(string[]? files)
+    {
+        _ = RunPasteAsync(() => CopyFilesCore(files));
+    }
+
+    /// <summary>
+    /// 将系统剪贴板中的文本以纯文本形式粘贴到前台窗口（全局 Ctrl+Shift+V）。
+    /// 剪贴板无文本时不做任何操作。
+    /// </summary>
+    public void PastePlainTextFromClipboard()
+    {
+        _ = RunPasteAsync(() =>
+        {
+            if (!System.Windows.Clipboard.ContainsText())
+            {
+                return;
+            }
+
+            string? text = System.Windows.Clipboard.GetText();
+            if (!string.IsNullOrEmpty(text))
+            {
+                CopyTextCore(text, plainOnly: true);
+            }
+        });
+    }
+
+    // ---------- 仅覆盖系统剪贴板（Ctrl+C 路径，返回 Task 便于调用方按序刷新） ----------
+
+    public Task CopyTextAsync(string? text, bool plainOnly = false) =>
+        CopyCoreAsync(() => CopyTextCore(text, plainOnly));
+
+    public Task CopyImageAsync(string? previewPath) =>
+        CopyCoreAsync(() => CopyImageCore(previewPath));
+
+    public Task CopyFilesAsync(string[]? files) =>
+        CopyCoreAsync(() => CopyFilesCore(files));
+
+    // ---------- 同步旧入口（内部转为后台执行，保持调用方签名不变） ----------
+
+    public void CopyText(string? text, bool plainOnly = false) =>
+        _ = CopyTextAsync(text, plainOnly);
+
+    public void CopyImage(string? previewPath) =>
+        _ = CopyImageAsync(previewPath);
+
+    public void CopyFiles(string[]? files) =>
+        _ = CopyFilesAsync(files);
+
+    /// <summary>模拟 Ctrl+V 粘贴到之前记录的目标窗口。</summary>
+    private void SimulatePaste()
+    {
+        if (_lastTargetWindow != IntPtr.Zero)
+        {
+            NativeMethods.SetForegroundWindow(_lastTargetWindow);
+        }
+
+        NativeMethods.SendCtrlV();
+    }
+
+    /// <summary>在后台 STA 线程回填剪贴板，完成后模拟粘贴；异常仅记录日志，不影响主流程。</summary>
+    private async Task RunPasteAsync(Action setter)
+    {
+        try
+        {
+            await CopyCoreAsync(setter);
+            SimulatePaste();
+        }
+        catch (Exception ex)
+        {
+            DebugLog.LogException("粘贴失败", ex);
+        }
+    }
+
+    /// <summary>在独立 STA 线程上执行剪贴板写入，避免 OpenClipboard 被占用时阻塞 UI 线程。</summary>
+    private Task CopyCoreAsync(Action setter) => StaTask.Run(() => SetClipboard(setter));
+
+    /// <summary>将文本覆盖到系统剪贴板（需在 STA 线程调用）。</summary>
+    private void CopyTextCore(string? text, bool plainOnly)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return;
+        }
+
+        SetClipboard(() =>
+        {
+            var data = new System.Windows.DataObject();
+            data.SetData(System.Windows.DataFormats.UnicodeText, text);
+            if (!plainOnly)
+            {
+                data.SetData(System.Windows.DataFormats.Text, text);
+            }
+
+            System.Windows.Clipboard.SetDataObject(data, true);
+        });
+    }
+
+    /// <summary>将图片覆盖到系统剪贴板（需在 STA 线程调用）。</summary>
+    private void CopyImageCore(string? previewPath)
+    {
+        if (string.IsNullOrEmpty(previewPath) || !File.Exists(previewPath))
+        {
+            return;
+        }
+
+        SetClipboard(() =>
+        {
+            var bitmap = new BitmapImage();
+            bitmap.BeginInit();
+            bitmap.CacheOption = BitmapCacheOption.OnLoad;
+            bitmap.UriSource = new Uri(previewPath, UriKind.Absolute);
+            bitmap.EndInit();
+            bitmap.Freeze();
+            System.Windows.Clipboard.SetImage(bitmap);
+        });
+    }
+
+    /// <summary>将文件列表覆盖到系统剪贴板（需在 STA 线程调用）。</summary>
+    private void CopyFilesCore(string[]? files)
+    {
+        if (files is not { Length: > 0 })
+        {
+            return;
+        }
+
+        SetClipboard(() =>
+        {
+            var collection = new StringCollection();
+            collection.AddRange(files);
+            System.Windows.Clipboard.SetFileDropList(collection);
+        });
+    }
+
+    /// <summary>
+    /// 自身回写系统剪贴板前通知（流水线用来忽略捕获，防止列表再插一条到顶部）。
+    /// </summary>
+    public event Action? SelfClipboardWrite;
+
+    /// <summary>设置剪贴板并短暂开启自粘贴标记，避免回填事件被重复捕获。</summary>
+    private void SetClipboard(Action setter)
+    {
+        _isSelfPasting = true;
+        try
+        {
+            // 先通知流水线进入抑制，再写剪贴板（顺序重要：避免 WM 先到）
+            try
+            {
+                SelfClipboardWrite?.Invoke();
+            }
+            catch
+            {
+                // 监听方异常不影响写剪贴板
+            }
+
+            RetrySet(() => setter());
+        }
+        finally
+        {
+            // 略加长：异步捕获 + 双击时复制+粘贴两次写剪贴板
+            _ = Task.Delay(2500).ContinueWith(_ => _isSelfPasting = false);
+        }
+    }
+
+    /// <summary>剪贴板被占用时重试。</summary>
+    private static void RetrySet(Action setter)
+    {
+        const int maxAttempts = 8;
+        for (int i = 0; i < maxAttempts; i++)
+        {
+            try
+            {
+                setter();
+                return;
+            }
+            catch (COMException) when (i < maxAttempts - 1)
+            {
+                Thread.Sleep(40);
+            }
+        }
+    }
+}

@@ -1,0 +1,810 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="terminal">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>QuickClip · 主题原型预览</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    /* ========== 主题令牌 ========== */
+    /* 1. Terminal 灰黑（当前产品默认） */
+    [data-theme="terminal"] {
+      --canvas: #0d0d0d;
+      --panel: #1c1c1c;
+      --panel-elevated: #262626;
+      --panel-hover: #3a3a3a;
+      --panel-selected: #1a2e22;
+      --border: #383838;
+      --border-strong: #5a5a5a;
+      --text: #e8e8e8;
+      --text-secondary: #9a9a9a;
+      --text-muted: #6b6b6b;
+      --accent: #3fb950;
+      --accent-muted: rgba(63, 185, 80, 0.15);
+      --accent-text: #ffffff;
+      --danger: #f85149;
+      --pin: #d4a017;
+      --search-bg: #282828;
+      --shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+      --chip: #222;
+      --badge: #3a3a3a;
+      --name: "Terminal";
+      --desc: "中性灰黑 · 当前默认，接近终端";
+    }
+
+    /* 2. One Dark（列表第二位） */
+    [data-theme="onedark"] {
+      --canvas: #21252b;
+      --panel: #282c34;
+      --panel-elevated: #2c313a;
+      --panel-hover: #404755;
+      --panel-selected: #223244;
+      --border: #3e4451;
+      --border-strong: #5c6370;
+      --text: #abb2bf;
+      --text-secondary: #9da5b4;
+      --text-muted: #5c6370;
+      --accent: #61afef;
+      --accent-muted: rgba(97, 175, 239, 0.16);
+      --accent-text: #282c34;
+      --danger: #e06c75;
+      --pin: #e5c07b;
+      --search-bg: #2c313a;
+      --shadow: 0 24px 64px rgba(0, 0, 0, 0.45);
+      --chip: #2c313a;
+      --badge: #3e4451;
+      --name: "One Dark";
+      --desc: "Atom / VS Code 经典";
+    }
+
+    /* 3. GitHub Dark */
+    [data-theme="github-dark"] {
+      --canvas: #0d1117;
+      --panel: #161b22;
+      --panel-elevated: #21262d;
+      --panel-hover: #333a42;
+      --panel-selected: #0d284a;
+      --border: #30363d;
+      --border-strong: #484f58;
+      --text: #e6edf3;
+      --text-secondary: #8b949e;
+      --text-muted: #6e7681;
+      --accent: #2f81f7;
+      --accent-muted: rgba(47, 129, 247, 0.15);
+      --accent-text: #ffffff;
+      --danger: #f85149;
+      --pin: #d29922;
+      --search-bg: #0d1117;
+      --shadow: 0 24px 64px rgba(1, 4, 9, 0.65);
+      --chip: #21262d;
+      --badge: #30363d;
+      --name: "GitHub Dark";
+      --desc: "GitHub 深色 · 蓝强调 + 冷灰面板";
+    }
+
+    /* 3. GitHub Light */
+    [data-theme="github-light"] {
+      --canvas: #f6f8fa;
+      --panel: #ffffff;
+      --panel-elevated: #f6f8fa;
+      --panel-hover: #e4e9ef;
+      --panel-selected: #ddf4ff;
+      --border: #d0d7de;
+      --border-strong: #afb8c1;
+      --text: #1f2328;
+      --text-secondary: #656d76;
+      --text-muted: #8c959f;
+      --accent: #0969da;
+      --accent-muted: rgba(9, 105, 218, 0.1);
+      --accent-text: #ffffff;
+      --danger: #cf222e;
+      --pin: #9a6700;
+      --search-bg: #f6f8fa;
+      --shadow: 0 16px 48px rgba(31, 35, 40, 0.12);
+      --chip: #eaeef2;
+      --badge: #ddf4ff;
+      --name: "GitHub Light";
+      --desc: "GitHub 浅色 · 日间清爽";
+    }
+
+    /* 4. Fluent Indigo（产品早期蓝紫） */
+    [data-theme="fluent"] {
+      --canvas: #0b0f1a;
+      --panel: #121826;
+      --panel-elevated: #1a2234;
+      --panel-hover: #2c3852;
+      --panel-selected: #20224a;
+      --border: #2a3548;
+      --border-strong: #3d4f6f;
+      --text: #f1f5f9;
+      --text-secondary: #94a3b8;
+      --text-muted: #64748b;
+      --accent: #6366f1;
+      --accent-muted: rgba(99, 102, 241, 0.18);
+      --accent-text: #ffffff;
+      --danger: #f43f5e;
+      --pin: #fbbf24;
+      --search-bg: #1a2234;
+      --shadow: 0 24px 64px rgba(2, 6, 23, 0.7);
+      --chip: #1e293b;
+      --badge: #312e81;
+      --name: "Fluent Indigo";
+      --desc: "早期效果图 · 靛蓝强调";
+    }
+
+    /* 5. Nord */
+    [data-theme="nord"] {
+      --canvas: #2e3440;
+      --panel: #3b4252;
+      --panel-elevated: #434c5e;
+      --panel-hover: #505b70;
+      --panel-selected: #364c56;
+      --border: #4c566a;
+      --border-strong: #5e6a7e;
+      --text: #eceff4;
+      --text-secondary: #d8dee9;
+      --text-muted: #a3b1c6;
+      --accent: #88c0d0;
+      --accent-muted: rgba(136, 192, 208, 0.18);
+      --accent-text: #2e3440;
+      --danger: #bf616a;
+      --pin: #ebcb8b;
+      --search-bg: #434c5e;
+      --shadow: 0 24px 64px rgba(46, 52, 64, 0.55);
+      --chip: #434c5e;
+      --badge: #5e81ac;
+      --name: "Nord";
+      --desc: "北极冷色 · 柔和青蓝";
+    }
+
+    /* 6. Catppuccin Mocha */
+    [data-theme="catppuccin"] {
+      --canvas: #11111b;
+      --panel: #1e1e2e;
+      --panel-elevated: #313244;
+      --panel-hover: #484a5e;
+      --panel-selected: #342a4c;
+      --border: #45475a;
+      --border-strong: #585b70;
+      --text: #cdd6f4;
+      --text-secondary: #a6adc8;
+      --text-muted: #6c7086;
+      --accent: #cba6f7;
+      --accent-muted: rgba(203, 166, 247, 0.16);
+      --accent-text: #1e1e2e;
+      --danger: #f38ba8;
+      --pin: #f9e2af;
+      --search-bg: #313244;
+      --shadow: 0 24px 64px rgba(17, 17, 27, 0.7);
+      --chip: #313244;
+      --badge: #45475a;
+      --name: "Catppuccin";
+      --desc: "摩卡紫调 · 柔和马卡龙";
+    }
+
+    /* ========== 布局 ========== */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: Inter, "Segoe UI", system-ui, sans-serif;
+      background: var(--canvas);
+      color: var(--text);
+      min-height: 100vh;
+      transition: background 0.25s ease, color 0.2s ease;
+    }
+
+    .page {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 28px 20px 48px;
+    }
+
+    header.hero {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 22px;
+    }
+
+    .hero h1 {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+
+    .hero p {
+      margin-top: 6px;
+      color: var(--text-secondary);
+      font-size: 13.5px;
+      max-width: 520px;
+      line-height: 1.55;
+    }
+
+    .theme-meta {
+      text-align: right;
+      font-size: 12.5px;
+      color: var(--text-muted);
+    }
+
+    .theme-meta strong {
+      display: block;
+      color: var(--text);
+      font-size: 14px;
+      margin-bottom: 2px;
+    }
+
+    /* 主题切换条 */
+    .theme-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding: 12px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      margin-bottom: 24px;
+      box-shadow: var(--shadow);
+      transition: background 0.25s, border-color 0.25s;
+    }
+
+    .theme-btn {
+      appearance: none;
+      border: 1px solid var(--border);
+      background: var(--panel-elevated);
+      color: var(--text-secondary);
+      font: inherit;
+      font-size: 12.5px;
+      font-weight: 500;
+      padding: 8px 12px;
+      border-radius: 999px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      transition: 0.15s ease;
+    }
+
+    .theme-btn:hover {
+      border-color: var(--border-strong);
+      color: var(--text);
+    }
+
+    .theme-btn.active {
+      background: var(--accent-muted);
+      border-color: var(--accent);
+      color: var(--text);
+      box-shadow: 0 0 0 1px var(--accent);
+    }
+
+    .swatch {
+      width: 14px;
+      height: 14px;
+      border-radius: 4px;
+      border: 1px solid rgba(127, 127, 127, 0.35);
+      flex-shrink: 0;
+    }
+
+    .stage {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      align-items: start;
+    }
+
+    @media (max-width: 900px) {
+      .stage { grid-template-columns: 1fr; }
+      .theme-meta { text-align: left; }
+    }
+
+    /* 模拟窗口 */
+    .win {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      transition: background 0.25s, border-color 0.25s, box-shadow 0.25s;
+    }
+
+    .win-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .win-title .actions {
+      display: flex;
+      gap: 6px;
+      color: var(--text-muted);
+      font-size: 14px;
+    }
+
+    .win-body { padding: 12px; }
+
+    /* 主面板 mock */
+    .search-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+
+    .search {
+      flex: 1;
+      height: 36px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--search-bg);
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      padding: 0 12px;
+      font-size: 13px;
+      transition: 0.15s;
+    }
+
+    .search:focus-within {
+      border-color: var(--accent);
+      color: var(--text-secondary);
+      box-shadow: 0 0 0 2px var(--accent-muted);
+    }
+
+    .filter {
+      width: 88px;
+      height: 36px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--search-bg);
+      color: var(--text-secondary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12.5px;
+      gap: 4px;
+    }
+
+    .card {
+      position: relative;
+      background: var(--panel-elevated);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px 12px 10px;
+      margin-bottom: 8px;
+      transition: 0.15s;
+      cursor: default;
+    }
+
+    .card:hover {
+      background: var(--panel-hover);
+      border-color: var(--border-strong);
+    }
+
+    /* 选中：专用底色 + 强调色整圈边框 + 左侧条，序号保持中性 */
+    .card.active {
+      background: var(--panel-selected);
+      border-color: var(--accent);
+      border-width: 1.5px;
+    }
+
+    .card.active::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 10px;
+      bottom: 10px;
+      width: 3px;
+      border-radius: 2px;
+      background: var(--accent);
+    }
+
+    .card-top {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+    }
+
+    .idx {
+      width: 20px;
+      height: 20px;
+      border-radius: 6px;
+      background: var(--badge);
+      color: var(--text-secondary);
+      font-size: 11px;
+      font-weight: 600;
+      display: grid;
+      place-items: center;
+      flex-shrink: 0;
+    }
+
+    .card-main { flex: 1; min-width: 0; }
+    .card-title {
+      font-size: 13.5px;
+      line-height: 1.4;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .card-meta {
+      margin-top: 5px;
+      font-size: 11.5px;
+      color: var(--text-muted);
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+    .card-meta .pin { color: var(--pin); }
+
+    .thumb {
+      margin: 10px 0 0 30px;
+      height: 72px;
+      border-radius: 8px;
+      background: linear-gradient(135deg, var(--chip), var(--panel));
+      border: 1px solid var(--border);
+    }
+
+    .status {
+      margin-top: 10px;
+      padding: 8px 12px;
+      border-radius: 8px;
+      background: var(--panel-elevated);
+      border: 1px solid var(--border);
+      font-size: 11.5px;
+      color: var(--text-muted);
+      display: flex;
+      justify-content: space-between;
+    }
+
+    /* 设置 mock */
+    .sec-title {
+      font-size: 15px;
+      font-weight: 600;
+      margin: 4px 0 8px;
+    }
+    .sec-hint {
+      font-size: 11.5px;
+      color: var(--text-muted);
+      line-height: 1.5;
+      margin-bottom: 12px;
+    }
+    .group {
+      background: var(--panel-elevated);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px;
+      margin-bottom: 14px;
+    }
+    .group-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: none;
+      margin-bottom: 10px;
+    }
+    .row {
+      display: grid;
+      grid-template-columns: 140px 1fr auto;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .row:last-child { margin-bottom: 0; }
+    .row-label { font-size: 13px; }
+    .row-sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+    .field {
+      height: 32px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--search-bg);
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      padding: 0 10px;
+      font-size: 12.5px;
+      font-family: "JetBrains Mono", ui-monospace, monospace;
+    }
+    .btn {
+      height: 32px;
+      padding: 0 12px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--chip);
+      color: var(--text-secondary);
+      font-size: 12px;
+      display: grid;
+      place-items: center;
+      white-space: nowrap;
+    }
+    .btn.primary {
+      background: var(--accent);
+      border-color: transparent;
+      color: var(--accent-text);
+      font-weight: 600;
+    }
+    .lock {
+      font-size: 11px;
+      padding: 4px 8px;
+      border-radius: 6px;
+      background: var(--accent-muted);
+      color: var(--accent);
+      font-weight: 600;
+    }
+    .check {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12.5px;
+      color: var(--text-secondary);
+      margin-top: 8px;
+      margin-left: 150px;
+    }
+    .check i {
+      width: 16px;
+      height: 16px;
+      border-radius: 4px;
+      background: var(--accent);
+      display: grid;
+      place-items: center;
+      color: var(--accent-text);
+      font-style: normal;
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .palette {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 20px;
+      padding: 14px;
+      border-radius: 12px;
+      border: 1px dashed var(--border);
+      background: var(--panel);
+    }
+    .palette span {
+      font-size: 11px;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-right: 8px;
+    }
+    .dot {
+      width: 18px;
+      height: 18px;
+      border-radius: 5px;
+      border: 1px solid var(--border);
+    }
+
+    footer.note {
+      margin-top: 22px;
+      font-size: 12px;
+      color: var(--text-muted);
+      line-height: 1.6;
+    }
+    footer.note code {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 11px;
+      background: var(--panel-elevated);
+      padding: 1px 6px;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header class="hero">
+      <div>
+        <h1>QuickClip · 主题原型</h1>
+        <p>设置页将提供主题切换。下列为候选方案：主列表 + 设置分组同一套 token，先确认观感再接入 WPF。</p>
+      </div>
+      <div class="theme-meta">
+        <strong id="themeName">Terminal</strong>
+        <span id="themeDesc">中性灰黑 · 当前默认，接近终端</span>
+      </div>
+    </header>
+
+    <div class="theme-bar" id="themeBar" role="tablist" aria-label="主题切换"></div>
+
+    <div class="stage">
+      <!-- 主列表面板 -->
+      <section class="win" aria-label="主列表面板预览">
+        <div class="win-title">
+          <span>QuickClip</span>
+          <div class="actions">📌 ⚙ ✕</div>
+        </div>
+        <div class="win-body">
+          <div class="search-row">
+            <div class="search">搜索剪贴板（支持关键词 / 拼音首字母）…</div>
+            <div class="filter">全部 ▾</div>
+          </div>
+
+          <div class="card active">
+            <div class="card-top">
+              <div class="idx">1</div>
+              <div class="card-main">
+                <div class="card-title">图片预览</div>
+                <div class="card-meta"><span class="pin">📌</span> 图片 · 361.5 KB · 03:18</div>
+              </div>
+            </div>
+            <div class="thumb"></div>
+          </div>
+
+          <div class="card">
+            <div class="card-top">
+              <div class="idx">2</div>
+              <div class="card-main">
+                <div class="card-title">已按你的要求推进，任务没有丢。当前状态如下…</div>
+                <div class="card-meta">文本 · 1,830 字符 · 02:50</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-top">
+              <div class="idx">3</div>
+              <div class="card-main">
+                <div class="card-title" style="font-family:JetBrains Mono,monospace;font-size:12.5px">
+                  dotnet run --project src/QuickClip/QuickClip.csproj
+                </div>
+                <div class="card-meta">文本 · 51 字符 · 02:48</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-top">
+              <div class="idx">4</div>
+              <div class="card-main">
+                <div class="card-title">https://github.com/soldier-cv/quick-clip</div>
+                <div class="card-meta">链接 · 02:36</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="status">
+            <span>已捕获</span>
+            <span>?</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- 设置面板 -->
+      <section class="win" aria-label="设置页预览">
+        <div class="win-title">
+          <span>QuickClip 设置</span>
+          <div class="actions">✕</div>
+        </div>
+        <div class="win-body">
+          <div class="sec-title">快捷键</div>
+          <div class="sec-hint">点击输入框后按下新组合即可绑定。Win + V 系统保留不可改。</div>
+
+          <div class="group">
+            <div class="group-label">全局</div>
+            <div class="row">
+              <div>
+                <div class="row-label">唤起 / 隐藏面板</div>
+                <div class="row-sub">系统保留</div>
+              </div>
+              <div class="field">Win + V</div>
+              <div class="lock">锁定</div>
+            </div>
+            <div class="row">
+              <div>
+                <div class="row-label">全局纯文本粘贴</div>
+                <div class="row-sub">任意程序可用</div>
+              </div>
+              <div class="field">Ctrl + Shift + V</div>
+              <div class="btn">默认</div>
+            </div>
+            <div class="check"><i>✓</i> 启用此全局热键</div>
+          </div>
+
+          <div class="group">
+            <div class="group-label">面板内</div>
+            <div class="row">
+              <div class="row-label">粘贴选中项</div>
+              <div class="field">Enter</div>
+              <div class="btn">默认</div>
+            </div>
+            <div class="row">
+              <div class="row-label">窗口置顶 / 取消</div>
+              <div class="field">Ctrl + P</div>
+              <div class="btn">默认</div>
+            </div>
+          </div>
+
+          <div class="sec-title">外观</div>
+          <div class="group">
+            <div class="group-label">主题（示意）</div>
+            <div class="row">
+              <div class="row-label">当前主题</div>
+              <div class="field" id="settingsThemeField">Terminal</div>
+              <div class="btn primary">应用</div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="palette" id="palette"></div>
+
+    <footer class="note">
+      打开方式：浏览器打开 <code>docs/themes-preview.html</code>，点上方主题胶囊切换。<br />
+      产品内主题顺序：Terminal（默认）→ One Dark → GitHub Dark / Light → Fluent Indigo → Nord → Catppuccin。
+    </footer>
+  </div>
+
+  <script>
+    const themes = [
+      { id: "terminal", label: "Terminal", colors: ["#1c1c1c", "#282828", "#3fb950"] },
+      { id: "onedark", label: "One Dark", colors: ["#282c34", "#2c313a", "#61afef"] },
+      { id: "github-dark", label: "GitHub Dark", colors: ["#161b22", "#21262d", "#2f81f7"] },
+      { id: "github-light", label: "GitHub Light", colors: ["#ffffff", "#f6f8fa", "#0969da"] },
+      { id: "fluent", label: "Fluent Indigo", colors: ["#121826", "#1a2234", "#6366f1"] },
+      { id: "nord", label: "Nord", colors: ["#3b4252", "#434c5e", "#88c0d0"] },
+      { id: "catppuccin", label: "Catppuccin", colors: ["#1e1e2e", "#313244", "#cba6f7"] },
+    ];
+
+    const bar = document.getElementById("themeBar");
+    const nameEl = document.getElementById("themeName");
+    const descEl = document.getElementById("themeDesc");
+    const fieldEl = document.getElementById("settingsThemeField");
+    const paletteEl = document.getElementById("palette");
+
+    function applyTheme(id) {
+      document.documentElement.setAttribute("data-theme", id);
+      bar.querySelectorAll(".theme-btn").forEach((b) => {
+        b.classList.toggle("active", b.dataset.id === id);
+      });
+      const styles = getComputedStyle(document.documentElement);
+      // name/desc 写在 CSS 自定义属性上不方便读字符串，用 map
+      const meta = {
+        terminal: ["Terminal", "中性灰黑 · 默认；强调色仅绿色（非系统蓝）"],
+        onedark: ["One Dark", "Atom / VS Code 经典"],
+        "github-dark": ["GitHub Dark", "GitHub 深色 · 蓝强调 + 冷灰面板"],
+        "github-light": ["GitHub Light", "GitHub 浅色 · 日间清爽"],
+        fluent: ["Fluent Indigo", "早期效果图 · 靛蓝强调"],
+        nord: ["Nord", "北极冷色 · 柔和青蓝"],
+        catppuccin: ["Catppuccin", "摩卡紫调 · 柔和马卡龙"],
+      }[id];
+      nameEl.textContent = meta[0];
+      descEl.textContent = meta[1];
+      fieldEl.textContent = meta[0];
+
+      const tokens = [
+        ["panel", "--panel"],
+        ["elevated", "--panel-elevated"],
+        ["border", "--border"],
+        ["text", "--text"],
+        ["accent", "--accent"],
+        ["canvas", "--canvas"],
+      ];
+      paletteEl.innerHTML = tokens
+        .map(([label, key]) => {
+          const c = styles.getPropertyValue(key).trim();
+          return `<span><i class="dot" style="background:${c}"></i>${label} ${c}</span>`;
+        })
+        .join("");
+    }
+
+    themes.forEach((t) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "theme-btn" + (t.id === "terminal" ? " active" : "");
+      btn.dataset.id = t.id;
+      btn.innerHTML = `<span class="swatch" style="background:linear-gradient(135deg,${t.colors[0]},${t.colors[2]})"></span>${t.label}`;
+      btn.addEventListener("click", () => applyTheme(t.id));
+      bar.appendChild(btn);
+    });
+
+    applyTheme("terminal");
+  </script>
+</body>
+</html>

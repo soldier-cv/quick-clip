@@ -1,0 +1,1156 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>QuickClip - Windows 11 Fluent 极速剪贴板</title>
+  <!-- 引入现代精美字体 -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cascadia+Code:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  
+  <style>
+    :root {
+      /* 效果图 1:1 像素级色彩体系与光影材质 */
+      --canvas-bg: #07090e;
+      --panel-bg: rgba(18, 22, 32, 0.75);
+      --panel-border: rgba(255, 255, 255, 0.08);
+      --panel-border-top: rgba(255, 255, 255, 0.2);
+      --panel-shadow: 
+        0 30px 90px -15px rgba(0, 0, 0, 0.85),
+        0 0 0 1px rgba(255, 255, 255, 0.08),
+        0 0 40px -10px rgba(99, 102, 241, 0.15);
+      --panel-blur: blur(50px) saturate(210%);
+
+      /* 卡片材质与高光 */
+      --card-bg: rgba(255, 255, 255, 0.032);
+      --card-border: rgba(255, 255, 255, 0.065);
+      --card-border-top: rgba(255, 255, 255, 0.12);
+      --card-hover-bg: rgba(255, 255, 255, 0.065);
+      --card-hover-border: rgba(255, 255, 255, 0.18);
+      --card-active-bg: rgba(99, 102, 241, 0.14);
+      --card-active-border: rgba(99, 102, 241, 0.55);
+      --card-active-glow: 0 0 24px rgba(99, 102, 241, 0.22);
+
+      /* 霓虹与强调色彩 (效果图一致) */
+      --accent-indigo: #6366f1;
+      --accent-cyan: #38bdf8;
+      --accent-emerald: #34d399;
+      --accent-pink: #f472b6;
+      --accent-purple: #a855f7;
+      
+      --gradient-brand: linear-gradient(135deg, #6366f1 0%, #38bdf8 100%);
+      --glow-brand: rgba(99, 102, 241, 0.35);
+
+      /* 文本与元数据 */
+      --text-white: #ffffff;
+      --text-main: #f1f5f9;
+      --text-sub: #94a3b8;
+      --text-dim: #64748b;
+
+      --radius-win: 18px;
+      --radius-card: 12px;
+      --radius-sm: 6px;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body {
+      font-family: 'Plus Jakarta Sans', "Segoe UI Variable Display", -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--canvas-bg);
+      background-image: 
+        radial-gradient(circle at 15% 15%, rgba(99, 102, 241, 0.18) 0%, transparent 45%),
+        radial-gradient(circle at 85% 70%, rgba(56, 189, 248, 0.12) 0%, transparent 45%),
+        radial-gradient(circle at 50% 90%, rgba(168, 85, 247, 0.08) 0%, transparent 50%);
+      color: var(--text-main);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      padding: 24px 16px;
+      overflow-x: hidden;
+    }
+
+    /* 顶部控制横条 (演示控制) */
+    .top-controls {
+      width: 100%;
+      max-width: 520px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 16px;
+      background: rgba(20, 24, 36, 0.6);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 12px;
+      margin-bottom: 18px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    }
+
+    .brand-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .brand-gem {
+      width: 26px;
+      height: 26px;
+      background: var(--gradient-brand);
+      border-radius: 7px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      color: #fff;
+      box-shadow: 0 0 14px var(--glow-brand);
+    }
+
+    .brand-title {
+      font-size: 13.5px;
+      font-weight: 700;
+      letter-spacing: -0.2px;
+      color: #fff;
+    }
+
+    .ctrl-action-btns {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .ctrl-btn {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: var(--text-sub);
+      font-size: 12px;
+      font-weight: 500;
+      padding: 4px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      transition: all 0.15s ease;
+      font-family: inherit;
+    }
+
+    .ctrl-btn:hover {
+      background: rgba(255, 255, 255, 0.12);
+      color: #fff;
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+
+    .ctrl-btn.primary {
+      background: var(--gradient-brand);
+      border: none;
+      color: #fff;
+      font-weight: 600;
+      box-shadow: 0 0 14px var(--glow-brand);
+    }
+
+    /* 效果图 1:1 核心浮动主窗口 (Windows 11 Fluent 亚克力悬浮) */
+    .clipboard-frame {
+      position: relative;
+      width: 100%;
+      max-width: 500px;
+      background: var(--panel-bg);
+      backdrop-filter: var(--panel-blur);
+      -webkit-backdrop-filter: var(--panel-blur);
+      border: 1px solid var(--panel-border);
+      border-top: 1px solid var(--panel-border-top);
+      border-radius: var(--radius-win);
+      box-shadow: var(--panel-shadow);
+      display: flex;
+      flex-direction: column;
+      overflow: visible; /* 允许悬浮 Popover 自然超出 */
+      animation: enterMotion 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+      transition: all 0.25s ease;
+    }
+
+    @keyframes enterMotion {
+      from { opacity: 0; transform: translateY(14px) scale(0.98); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    .clipboard-frame.dismissed {
+      opacity: 0;
+      transform: translateY(24px) scale(0.95);
+      pointer-events: none;
+    }
+
+    /* 顶部搜索与分类胶囊栏 (1:1 效果图) */
+    .search-panel {
+      padding: 14px 16px 10px 16px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      background: rgba(0, 0, 0, 0.18);
+      border-radius: var(--radius-win) var(--radius-win) 0 0;
+    }
+
+    .search-input-wrapper {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 9px;
+      padding: 9px 12px;
+      transition: all 0.2s ease;
+      box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.25);
+    }
+
+    .search-input-wrapper:focus-within {
+      background: rgba(0, 0, 0, 0.45);
+      border-color: var(--accent-cyan);
+      box-shadow: inset 0 2px 4px rgba(0,0,0,0.3), 0 0 0 2px rgba(56, 189, 248, 0.35);
+    }
+
+    .search-glyph {
+      color: var(--accent-cyan);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .search-text-input {
+      flex: 1;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: #fff;
+      font-size: 14px;
+      font-family: inherit;
+    }
+
+    .search-text-input::placeholder {
+      color: var(--text-dim);
+    }
+
+    .search-shortcut-pill {
+      font-size: 11px;
+      color: var(--text-dim);
+      background: rgba(255, 255, 255, 0.06);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-weight: 500;
+    }
+
+    .pill-tabs-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 10px;
+      overflow-x: auto;
+    }
+
+    .pill-tabs-row::-webkit-scrollbar { display: none; }
+
+    .category-pill {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      color: var(--text-sub);
+      font-size: 11.5px;
+      font-weight: 500;
+      padding: 3px 10px;
+      border-radius: 20px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.15s ease;
+    }
+
+    .category-pill:hover {
+      background: rgba(255, 255, 255, 0.09);
+      color: #fff;
+    }
+
+    .category-pill.active {
+      background: rgba(99, 102, 241, 0.22);
+      border-color: rgba(99, 102, 241, 0.5);
+      color: #a5b4fc;
+      font-weight: 600;
+      box-shadow: 0 0 12px rgba(99, 102, 241, 0.25);
+    }
+
+    /* 核心瀑布流卡片列表 (1:1 效果图排版) */
+    .cards-flow-container {
+      max-height: 520px;
+      overflow-y: auto;
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .cards-flow-container::-webkit-scrollbar {
+      width: 5px;
+    }
+    .cards-flow-container::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.12);
+      border-radius: 4px;
+    }
+
+    /* 单个卡片 (Card) */
+    .fluent-card {
+      position: relative;
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-top: 1px solid var(--card-border-top);
+      border-radius: var(--radius-card);
+      padding: 11px 13px;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+      transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .fluent-card:hover {
+      background: var(--card-hover-bg);
+      border-color: var(--card-hover-border);
+      transform: translateY(-1px);
+    }
+
+    .fluent-card.active-selected {
+      background: var(--card-active-bg);
+      border-color: var(--card-active-border);
+      box-shadow: var(--card-active-glow);
+    }
+
+    /* 卡片顶部元数据与序号 */
+    .card-meta-line {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .meta-left {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+
+    /* 发光立体数字徽章 [1] ~ [9] */
+    .key-badge-3d {
+      width: 20px;
+      height: 20px;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 5px;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text-sub);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+    }
+
+    .fluent-card.active-selected .key-badge-3d {
+      background: var(--gradient-brand);
+      color: #fff;
+      border-color: transparent;
+      box-shadow: 0 0 10px var(--glow-brand);
+    }
+
+    .tag-chip {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 7px;
+      border-radius: 4px;
+      letter-spacing: 0.2px;
+    }
+
+    .tag-chip.link { background: rgba(56, 189, 248, 0.15); color: var(--accent-cyan); border: 1px solid rgba(56, 189, 248, 0.3); }
+    .tag-chip.qr { background: rgba(52, 211, 153, 0.15); color: var(--accent-emerald); border: 1px solid rgba(52, 211, 153, 0.3); }
+    .tag-chip.ocr { background: rgba(244, 114, 182, 0.15); color: var(--accent-pink); border: 1px solid rgba(244, 114, 182, 0.3); }
+    .tag-chip.code { background: rgba(168, 85, 247, 0.15); color: var(--accent-purple); border: 1px solid rgba(168, 85, 247, 0.3); }
+    .tag-chip.text { background: rgba(255, 255, 255, 0.08); color: var(--text-sub); }
+
+    .app-source-label {
+      font-size: 11px;
+      color: var(--text-dim);
+    }
+
+    .time-stamp {
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-left: auto;
+    }
+
+    /* 悬浮微操作栏 */
+    .card-hover-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .action-chip-btn {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      color: var(--text-main);
+      font-size: 11px;
+      font-weight: 600;
+      padding: 3px 8px;
+      border-radius: 5px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      transition: all 0.15s ease;
+      font-family: inherit;
+    }
+
+    .action-chip-btn:hover {
+      background: var(--accent-indigo);
+      border-color: var(--accent-indigo);
+      color: #fff;
+      box-shadow: 0 0 10px var(--glow-brand);
+    }
+
+    .action-chip-btn.glow-cyan {
+      background: rgba(56, 189, 248, 0.16);
+      border-color: rgba(56, 189, 248, 0.35);
+      color: var(--accent-cyan);
+    }
+
+    .action-chip-btn.glow-cyan:hover {
+      background: var(--accent-cyan);
+      color: #000;
+      box-shadow: 0 0 12px rgba(56, 189, 248, 0.4);
+    }
+
+    .action-chip-btn.glow-pink {
+      background: rgba(244, 114, 182, 0.16);
+      border-color: rgba(244, 114, 182, 0.35);
+      color: var(--accent-pink);
+    }
+
+    .action-chip-btn.glow-pink:hover {
+      background: var(--accent-pink);
+      color: #000;
+      box-shadow: 0 0 12px rgba(244, 114, 182, 0.4);
+    }
+
+    /* 文本内容与链接展示 */
+    .card-text-body {
+      font-size: 13.5px;
+      line-height: 1.5;
+      color: var(--text-main);
+      word-break: break-all;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .card-text-body.link-color {
+      color: var(--accent-cyan);
+      font-weight: 500;
+      text-decoration: underline;
+      text-underline-offset: 3px;
+      text-decoration-color: rgba(56, 189, 248, 0.3);
+    }
+
+    /* 1:1 效果图：发光二维码悬浮弹窗 (Hover Popover) */
+    .qr-glow-popover {
+      position: absolute;
+      right: 10px;
+      top: -8px;
+      transform: translateY(-100%);
+      background: rgba(14, 18, 26, 0.96);
+      backdrop-filter: blur(28px);
+      border: 1px solid rgba(56, 189, 248, 0.45);
+      box-shadow: 
+        0 16px 40px rgba(0, 0, 0, 0.8),
+        0 0 24px rgba(56, 189, 248, 0.3);
+      border-radius: 12px;
+      padding: 12px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      z-index: 1000;
+      animation: popoverFloat 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+      pointer-events: auto;
+    }
+
+    @keyframes popoverFloat {
+      from { opacity: 0; transform: translateY(-85%) scale(0.92); }
+      to { opacity: 1; transform: translateY(-100%) scale(1); }
+    }
+
+    .popover-qr-canvas-box {
+      width: 92px;
+      height: 92px;
+      background: #ffffff;
+      padding: 5px;
+      border-radius: 8px;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .popover-qr-canvas-box canvas {
+      width: 100% !important;
+      height: 100% !important;
+    }
+
+    .popover-desc {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .popover-desc h5 {
+      font-size: 12.5px;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .popover-desc p {
+      font-size: 11px;
+      color: var(--text-sub);
+      line-height: 1.35;
+    }
+
+    .popover-desc code {
+      font-family: 'Cascadia Code', monospace;
+      font-size: 10.5px;
+      color: var(--accent-cyan);
+      background: rgba(56, 189, 248, 0.12);
+      padding: 1px 5px;
+      border-radius: 3px;
+      max-width: 170px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* 1:1 效果图：截图/图片直观展示 (大图一眼看清) */
+    .card-image-showcase {
+      position: relative;
+      width: 100%;
+      height: 140px;
+      border-radius: 8px;
+      overflow: hidden;
+      background: #000;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .card-image-showcase img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transition: transform 0.3s ease;
+    }
+
+    .fluent-card:hover .card-image-showcase img {
+      transform: scale(1.025);
+    }
+
+    /* 二维码识别悬浮微标 */
+    .image-detected-qr-strip {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: linear-gradient(to top, rgba(7, 18, 14, 0.95) 0%, rgba(7, 18, 14, 0.7) 80%, transparent 100%);
+      padding: 8px 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+    }
+
+    .qr-pill-label {
+      font-size: 11.5px;
+      font-weight: 600;
+      color: var(--accent-emerald);
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* OCR 提取结果展开抽屉 */
+    .ocr-extracted-drawer {
+      background: rgba(0, 0, 0, 0.4);
+      border: 1px solid rgba(244, 114, 182, 0.35);
+      border-radius: 8px;
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      animation: drawerSlide 0.2s ease;
+    }
+
+    @keyframes drawerSlide {
+      from { opacity: 0; transform: translateY(-6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .ocr-drawer-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11.5px;
+      font-weight: 700;
+      color: var(--accent-pink);
+    }
+
+    .ocr-text-content {
+      font-size: 12.5px;
+      line-height: 1.5;
+      color: #f1f5f9;
+      white-space: pre-wrap;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+    }
+
+    /* 1:1 效果图：代码高亮块 (VS Code Dark+ 风格) */
+    .code-syntax-block {
+      font-family: 'Cascadia Code', Consolas, 'Courier New', monospace;
+      font-size: 12.5px;
+      line-height: 1.55;
+      background: rgba(0, 0, 0, 0.45);
+      border-left: 3px solid var(--accent-purple);
+      border-radius: 6px;
+      padding: 8px 12px;
+      color: #d4d4d4;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    .code-kw { color: #c586c0; font-weight: 600; }
+    .code-fn { color: #dcdcaa; }
+    .code-str { color: #ce9178; }
+    .code-type { color: #4ec9b0; }
+    .code-param { color: #9cdcfe; }
+
+    /* 底部旗舰按键指南栏 (1:1 效果图) */
+    .dock-bar-footer {
+      background: rgba(10, 14, 22, 0.7);
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11.5px;
+      color: var(--text-dim);
+      border-radius: 0 0 var(--radius-win) var(--radius-win);
+    }
+
+    .keycap-shortcuts-list {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .keycap-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .keycap-btn {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-bottom: 2px solid rgba(255, 255, 255, 0.28);
+      border-radius: 4px;
+      padding: 1px 5px;
+      font-size: 10.5px;
+      font-weight: 700;
+      color: #fff;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+    }
+
+    .engine-status-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--accent-emerald);
+      font-weight: 500;
+    }
+
+    .pulse-green-dot {
+      width: 6px;
+      height: 6px;
+      background: var(--accent-emerald);
+      border-radius: 50%;
+      box-shadow: 0 0 8px var(--accent-emerald);
+    }
+
+    /* 动态 Toast */
+    .fluent-toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: rgba(18, 22, 32, 0.95);
+      backdrop-filter: blur(20px);
+      border: 1px solid var(--accent-indigo);
+      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.7), 0 0 20px var(--glow-brand);
+      color: #fff;
+      padding: 11px 18px;
+      border-radius: 9px;
+      font-size: 13.5px;
+      font-weight: 500;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      opacity: 0;
+      transform: translateY(14px);
+      transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      z-index: 9999;
+      pointer-events: none;
+    }
+
+    .fluent-toast.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 顶部交互控制台 -->
+  <div class="top-controls">
+    <div class="brand-group">
+      <div class="brand-gem">⚡</div>
+      <div class="brand-title">QuickClip (Windows 11 Fluent)</div>
+    </div>
+    <div class="ctrl-action-btns">
+      <button class="ctrl-btn primary" onclick="toggleMainFrame()">
+        <span class="keycap-btn" style="font-size:10px;padding:0 3px;">Win+V</span>
+        模拟呼出/隐藏
+      </button>
+      <button class="ctrl-btn" onclick="addNewText()">+ 复制文本</button>
+      <button class="ctrl-btn" onclick="addNewImage()">+ 复制截图</button>
+    </div>
+  </div>
+
+  <!-- 核心剪贴板浮动主面板 (1:1 效果图结构) -->
+  <div class="clipboard-frame" id="clipboardFrame">
+    
+    <!-- 顶部搜索与分类胶囊 -->
+    <div class="search-panel">
+      <div class="search-input-wrapper">
+        <span class="search-glyph">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+        </span>
+        <input 
+          type="text" 
+          id="searchField" 
+          class="search-text-input" 
+          placeholder="搜索剪贴板历史 (支持拼音/关键词即搜)..." 
+          oninput="onSearchChange(this.value)"
+          autofocus
+        />
+        <span class="search-shortcut-pill">按 1~9 秒选</span>
+      </div>
+
+      <div class="pill-tabs-row">
+        <div class="category-pill active" onclick="switchCategory('all', this)">全部</div>
+        <div class="category-pill" onclick="switchCategory('link', this)">🔗 链接</div>
+        <div class="category-pill" onclick="switchCategory('qr', this)">📱 二维码图片</div>
+        <div class="category-pill" onclick="switchCategory('ocr', this)">🔍 截图 OCR</div>
+        <div class="category-pill" onclick="switchCategory('code', this)">💻 代码</div>
+      </div>
+    </div>
+
+    <!-- 瀑布流卡片列表 -->
+    <div class="cards-flow-container" id="cardsFlow">
+      <!-- 动态数据渲染 -->
+    </div>
+
+    <!-- 底部按键流指南 -->
+    <div class="dock-bar-footer">
+      <div class="keycap-shortcuts-list">
+        <div class="keycap-item"><span class="keycap-btn">1~9</span> 快速粘贴</div>
+        <div class="keycap-item"><span class="keycap-btn">↵ Enter</span> 粘贴</div>
+        <div class="keycap-item"><span class="keycap-btn">⇧ Enter</span> 纯文本粘贴</div>
+        <div class="keycap-item"><span class="keycap-btn">Ctrl+Shift+V</span> 全局纯文本</div>
+        <div class="keycap-item"><span class="keycap-btn">⎋ Esc</span> 隐藏</div>
+      </div>
+      <div class="engine-status-tag">
+        <div class="pulse-green-dot"></div>
+        <span>24h 自动淘汰引擎</span>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Toast 消息 -->
+  <div class="fluent-toast" id="fluentToast">
+    <span id="toastSymbol">📋</span>
+    <span id="toastMessage">已将内容粘贴至目标程序！</span>
+  </div>
+
+  <!-- 离线纯前端 QRCode 引擎 -->
+  <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
+
+  <script>
+    // 优质高质感剪贴板数据集 (与效果图 1:1 呼应)
+    let clipList = [
+      {
+        id: 1,
+        type: 'link',
+        title: 'https://github.com/microsoft/winui3',
+        sourceApp: 'Chrome',
+        time: '3 分钟前',
+        popoverVisible: false,
+        qrTarget: 'https://github.com/microsoft/winui3'
+      },
+      {
+        id: 2,
+        type: 'qr',
+        title: '微信扫码登录二维码截图',
+        isImage: true,
+        // 高质量二维码图片
+        imgSrc: 'https://images.unsplash.com/photo-1595079672139-545c6001d897?w=600&auto=format&fit=crop&q=80',
+        qrDetectedUrl: 'https://work.weixin.qq.com/ca/login/auth_token_9831aef',
+        sourceApp: 'WeChat',
+        time: '12 分钟前'
+      },
+      {
+        id: 3,
+        type: 'ocr',
+        title: 'Win11 架构示意图截图',
+        isImage: true,
+        // 高质量架构图截图
+        imgSrc: 'https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=600&auto=format&fit=crop&q=80',
+        sourceApp: 'Snipaste',
+        time: '25 分钟前',
+        ocrExpanded: false,
+        ocrExtractedText: 'Windows 11 Fluent Mica Backdrop Architecture 2026\nWH_KEYBOARD_LL Native Hook Interceptor\nLocal SQLite 24H Clean Engine'
+      },
+      {
+        id: 4,
+        type: 'code',
+        title: 'Win32 底层键盘钩子注册',
+        sourceApp: 'VS Code',
+        time: '40 分钟前',
+        codeHtml: '<span class="code-kw">public static void</span> <span class="code-fn">RegisterNativeHook</span>()\n{\n    <span class="code-type">IntPtr</span> hMod = <span class="code-fn">GetModuleHandle</span>(<span class="code-kw">null</span>);\n    <span class="code-fn">SetWindowsHookEx</span>(WH_KEYBOARD_LL, HookProc, hMod, <span class="code-str">0</span>);\n}'
+      }
+    ];
+
+    let currentSelectedIdx = 0;
+    let selectedCategory = 'all';
+    let filterQuery = '';
+
+    function getDisplayList() {
+      return clipList.filter(item => {
+        if (selectedCategory !== 'all') {
+          if (selectedCategory === 'link' && item.type !== 'link') return false;
+          if (selectedCategory === 'qr' && item.type !== 'qr') return false;
+          if (selectedCategory === 'ocr' && item.type !== 'ocr') return false;
+          if (selectedCategory === 'code' && item.type !== 'code') return false;
+        }
+        if (filterQuery.trim()) {
+          const q = filterQuery.toLowerCase();
+          const matchTitle = (item.title || '').toLowerCase();
+          const matchQr = (item.qrDetectedUrl || '').toLowerCase();
+          return matchTitle.includes(q) || matchQr.includes(q);
+        }
+        return true;
+      });
+    }
+
+    // 渲染卡片
+    function renderCards() {
+      const container = document.getElementById('cardsFlow');
+      const list = getDisplayList();
+
+      if (list.length === 0) {
+        container.innerHTML = `
+          <div style="text-align:center;padding:40px 10px;color:var(--text-dim);font-size:13px;">
+            <div style="font-size:24px;margin-bottom:6px;">🔍</div>
+            未找到匹配的历史记录
+          </div>
+        `;
+        return;
+      }
+
+      if (currentSelectedIdx >= list.length) currentSelectedIdx = 0;
+
+      container.innerHTML = list.map((item, idx) => {
+        const isSelected = idx === currentSelectedIdx;
+        const keyNum = idx < 9 ? (idx + 1) : '•';
+
+        let tagHtml = '';
+        if (item.type === 'link') tagHtml = `<span class="tag-chip link">🔗 链接</span>`;
+        else if (item.type === 'qr') tagHtml = `<span class="tag-chip qr">📱 二维码</span>`;
+        else if (item.type === 'ocr') tagHtml = `<span class="tag-chip ocr">🔍 图片</span>`;
+        else if (item.type === 'code') tagHtml = `<span class="tag-chip code">💻 代码</span>`;
+        else tagHtml = `<span class="tag-chip text">📝 文本</span>`;
+
+        // 悬浮工具栏
+        let toolbarHtml = '';
+        if (item.type === 'link') {
+          toolbarHtml = `
+            <div class="card-hover-toolbar">
+              <button class="action-chip-btn glow-cyan" onmouseenter="showQrPopup(${item.id}, event)" onmouseleave="hideQrPopup(${item.id})">📱 转二维码</button>
+              <button class="action-chip-btn" onclick="event.stopPropagation(); copyText('${escapeStr(item.title)}')">📋 复制</button>
+            </div>
+          `;
+        } else if (item.type === 'qr') {
+          toolbarHtml = `
+            <div class="card-hover-toolbar">
+              <button class="action-chip-btn glow-cyan" onclick="event.stopPropagation(); copyText('${escapeStr(item.qrDetectedUrl)}')">📋 复制提取链接</button>
+            </div>
+          `;
+        } else if (item.type === 'ocr') {
+          toolbarHtml = `
+            <div class="card-hover-toolbar">
+              <button class="action-chip-btn glow-pink" onclick="event.stopPropagation(); toggleOcrExtract(${item.id})">🔍 提取文字 (OCR)</button>
+              <button class="action-chip-btn" onclick="event.stopPropagation(); copyText('截图已复制')">📋 复制图片</button>
+            </div>
+          `;
+        }
+
+        // 主体内容
+        let bodyHtml = '';
+        if (item.isImage) {
+          bodyHtml = `
+            <div class="card-image-showcase">
+              <img src="${item.imgSrc}" alt="${item.title}" />
+              ${item.type === 'qr' ? `
+                <div class="image-detected-qr-strip">
+                  <div class="qr-pill-label">
+                    <span>📱 [已识别二维码]</span>
+                    <span style="font-family:monospace;font-size:11px;">${item.qrDetectedUrl}</span>
+                  </div>
+                </div>
+              ` : ''}
+            </div>
+          `;
+        } else if (item.type === 'code') {
+          bodyHtml = `<div class="code-syntax-block">${item.codeHtml}</div>`;
+        } else {
+          bodyHtml = `<div class="card-text-body ${item.type === 'link' ? 'link-color' : ''}">${item.title}</div>`;
+        }
+
+        // OCR 展开抽屉
+        let ocrDrawerHtml = '';
+        if (item.ocrExpanded) {
+          ocrDrawerHtml = `
+            <div class="ocr-extracted-drawer" onclick="event.stopPropagation()">
+              <div class="ocr-drawer-header">
+                <span>⚡ Windows 原生离线 OCR 提取结果:</span>
+                <button class="action-chip-btn glow-pink" onclick="copyText('${escapeStr(item.ocrExtractedText)}')">📋 复制文字</button>
+              </div>
+              <div class="ocr-text-content">${item.ocrExtractedText}</div>
+            </div>
+          `;
+        }
+
+        // 二维码发光浮窗 (Popover)
+        let popoverHtml = '';
+        if (item.popoverVisible) {
+          popoverHtml = `
+            <div class="qr-glow-popover" id="popover_box_${item.id}">
+              <div class="popover-qr-canvas-box">
+                <canvas id="qr_canvas_item_${item.id}"></canvas>
+              </div>
+              <div class="popover-desc">
+                <h5>📱 离线生成二维码</h5>
+                <p>纯本地 QRCoder 引擎渲染<br>手机扫码即可跨屏接力</p>
+                <code>${item.qrTarget}</code>
+              </div>
+            </div>
+          `;
+        }
+
+        return `
+          <div class="fluent-card ${isSelected ? 'active-selected' : ''}" onclick="selectAndPasteItem(${idx})">
+            <div class="card-meta-line">
+              <div class="meta-left">
+                <span class="key-badge-3d">${keyNum}</span>
+                ${tagHtml}
+                <span class="app-source-label">${item.sourceApp}</span>
+              </div>
+              <span class="time-stamp">${item.time}</span>
+              ${toolbarHtml}
+            </div>
+            ${bodyHtml}
+            ${ocrDrawerHtml}
+            ${popoverHtml}
+          </div>
+        `;
+      }).join('');
+
+      // 实时绘制 Canvas 二维码
+      list.forEach(item => {
+        if (item.popoverVisible) {
+          setTimeout(() => {
+            const cvs = document.getElementById(`qr_canvas_item_${item.id}`);
+            if (cvs && window.QRCode) {
+              QRCode.toCanvas(cvs, item.qrTarget, {
+                width: 82,
+                margin: 0,
+                color: { dark: '#000000', light: '#ffffff' }
+              });
+            }
+          }, 10);
+        }
+      });
+    }
+
+    function showQrPopup(id, e) {
+      e.stopPropagation();
+      const item = clipList.find(i => i.id === id);
+      if (item) {
+        item.popoverVisible = true;
+        renderCards();
+      }
+    }
+
+    function hideQrPopup(id) {
+      const item = clipList.find(i => i.id === id);
+      if (item) {
+        item.popoverVisible = false;
+        renderCards();
+      }
+    }
+
+    function toggleOcrExtract(id) {
+      const item = clipList.find(i => i.id === id);
+      if (item) {
+        item.ocrExpanded = !item.ocrExpanded;
+        renderCards();
+        if (item.ocrExpanded) {
+          showToast('⚡ Windows 原生离线 OCR 提取成功！');
+        }
+      }
+    }
+
+    function selectAndPasteItem(idx) {
+      currentSelectedIdx = idx;
+      renderCards();
+      const list = getDisplayList();
+      const item = list[idx];
+      showToast(`⚡ 已回填粘贴 [${idx + 1}]: ${item.title.substring(0, 20)}`);
+    }
+
+    function copyText(txt) {
+      navigator.clipboard.writeText(txt).catch(() => {});
+      showToast('📋 内容已复制到系统剪贴板！');
+    }
+
+    function onSearchChange(val) {
+      filterQuery = val;
+      currentSelectedIdx = 0;
+      renderCards();
+    }
+
+    function switchCategory(cat, el) {
+      selectedCategory = cat;
+      document.querySelectorAll('.category-pill').forEach(p => p.classList.remove('active'));
+      el.classList.add('active');
+      currentSelectedIdx = 0;
+      renderCards();
+    }
+
+    // 键盘全局操作
+    window.addEventListener('keydown', (e) => {
+      const list = getDisplayList();
+      if (e.key >= '1' && e.key <= '9' && document.activeElement.id !== 'searchField') {
+        const num = parseInt(e.key);
+        if (num <= list.length) {
+          selectAndPasteItem(num - 1);
+        }
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (currentSelectedIdx < list.length - 1) {
+          currentSelectedIdx++;
+          renderCards();
+        }
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (currentSelectedIdx > 0) {
+          currentSelectedIdx--;
+          renderCards();
+        }
+      } else if (e.key === 'Enter') {
+        if (list[currentSelectedIdx]) {
+          selectAndPasteItem(currentSelectedIdx);
+        }
+      } else if (e.key === 'Escape') {
+        toggleMainFrame();
+      }
+    });
+
+    function toggleMainFrame() {
+      const frame = document.getElementById('clipboardFrame');
+      frame.classList.toggle('dismissed');
+      if (!frame.classList.contains('dismissed')) {
+        document.getElementById('searchField').focus();
+        showToast('⚡ Win+V 键盘钩子触发，秒级唤出剪贴板');
+      }
+    }
+
+    function addNewText() {
+      clipList.unshift({
+        id: Date.now(),
+        type: 'link',
+        title: 'https://docs.microsoft.com/en-us/windows/winui/',
+        sourceApp: 'Edge',
+        time: '刚刚',
+        popoverVisible: false,
+        qrTarget: 'https://docs.microsoft.com/en-us/windows/winui/'
+      });
+      currentSelectedIdx = 0;
+      renderCards();
+      showToast('📋 捕获到新复制链接！');
+    }
+
+    function addNewImage() {
+      clipList.unshift({
+        id: Date.now(),
+        type: 'ocr',
+        title: '新设计稿截图',
+        isImage: true,
+        imgSrc: 'https://images.unsplash.com/photo-1507238691740-187a5b1d37b8?w=600&auto=format&fit=crop&q=80',
+        sourceApp: 'Figma',
+        time: '刚刚',
+        ocrExpanded: false,
+        ocrExtractedText: 'Design System Typography & Color Tokens 2026\nFluent Acrylic 2.0 Material Spec'
+      });
+      currentSelectedIdx = 0;
+      renderCards();
+      showToast('🖼️ 捕获新截图，直接在流中直观展示！');
+    }
+
+    function showToast(msg) {
+      const t = document.getElementById('fluentToast');
+      document.getElementById('toastMessage').innerText = msg;
+      t.classList.add('visible');
+      clearTimeout(window._tId);
+      window._tId = setTimeout(() => t.classList.remove('visible'), 2200);
+    }
+
+    function escapeStr(str) {
+      return (str || '').replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\n/g, "\\n");
+    }
+
+    // 初始化渲染
+    renderCards();
+  </script>
+</body>
+</html>

@@ -1,0 +1,166 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!--
+      主题化细滚动条（约 6px）：
+      · 槽/列底一律透明或跟随 ScrollViewer Background，避免白条/黑条色块
+      · 仅滑块可见
+    -->
+
+    <Style x:Key="ThemeScrollBarThumb" TargetType="Thumb">
+        <Setter Property="OverridesDefaultStyle" Value="True" />
+        <Setter Property="IsTabStop" Value="False" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Thumb">
+                    <Border x:Name="Pill"
+                            Margin="1,2"
+                            CornerRadius="3"
+                            Background="{DynamicResource Theme.TextMuted}"
+                            Opacity="0.5" />
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Pill" Property="Background" Value="{DynamicResource Theme.BorderStrong}" />
+                            <Setter TargetName="Pill" Property="Opacity" Value="0.85" />
+                        </Trigger>
+                        <Trigger Property="IsDragging" Value="True">
+                            <Setter TargetName="Pill" Property="Background" Value="{DynamicResource Theme.TextSecondary}" />
+                            <Setter TargetName="Pill" Property="Opacity" Value="1" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="ThemeScrollBarPageButton" TargetType="RepeatButton">
+        <Setter Property="OverridesDefaultStyle" Value="True" />
+        <Setter Property="IsTabStop" Value="False" />
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RepeatButton">
+                    <Border Background="Transparent" />
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <ControlTemplate x:Key="ThemeVerticalScrollBar" TargetType="ScrollBar">
+        <Grid Background="Transparent" Width="6">
+            <Track x:Name="PART_Track" IsDirectionReversed="True">
+                <Track.DecreaseRepeatButton>
+                    <RepeatButton Command="ScrollBar.PageUpCommand"
+                                  Style="{StaticResource ThemeScrollBarPageButton}" />
+                </Track.DecreaseRepeatButton>
+                <Track.Thumb>
+                    <Thumb Style="{StaticResource ThemeScrollBarThumb}" />
+                </Track.Thumb>
+                <Track.IncreaseRepeatButton>
+                    <RepeatButton Command="ScrollBar.PageDownCommand"
+                                  Style="{StaticResource ThemeScrollBarPageButton}" />
+                </Track.IncreaseRepeatButton>
+            </Track>
+        </Grid>
+    </ControlTemplate>
+
+    <ControlTemplate x:Key="ThemeHorizontalScrollBar" TargetType="ScrollBar">
+        <Grid Background="Transparent" Height="6">
+            <Track x:Name="PART_Track" IsDirectionReversed="False">
+                <Track.DecreaseRepeatButton>
+                    <RepeatButton Command="ScrollBar.PageLeftCommand"
+                                  Style="{StaticResource ThemeScrollBarPageButton}" />
+                </Track.DecreaseRepeatButton>
+                <Track.Thumb>
+                    <Thumb Style="{StaticResource ThemeScrollBarThumb}" />
+                </Track.Thumb>
+                <Track.IncreaseRepeatButton>
+                    <RepeatButton Command="ScrollBar.PageRightCommand"
+                                  Style="{StaticResource ThemeScrollBarPageButton}" />
+                </Track.IncreaseRepeatButton>
+            </Track>
+        </Grid>
+    </ControlTemplate>
+
+    <Style TargetType="ScrollBar">
+        <Setter Property="OverridesDefaultStyle" Value="True" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Width" Value="6" />
+        <Setter Property="MinWidth" Value="6" />
+        <Setter Property="Template" Value="{StaticResource ThemeVerticalScrollBar}" />
+        <Style.Triggers>
+            <Trigger Property="Orientation" Value="Horizontal">
+                <Setter Property="Width" Value="Auto" />
+                <Setter Property="MinWidth" Value="0" />
+                <Setter Property="Height" Value="6" />
+                <Setter Property="MinHeight" Value="6" />
+                <Setter Property="Template" Value="{StaticResource ThemeHorizontalScrollBar}" />
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <!--
+      标准双列 ScrollViewer：滚动条列 Width=Auto（不可见时为 0），
+      整格背景 = TemplateBinding Background，内容撑高后 extent 会跟着变，
+      不会出现「引擎面板展开后右侧留一条死色带」。
+    -->
+    <ControlTemplate x:Key="ThemeOverlayScrollViewer" TargetType="ScrollViewer">
+        <Grid x:Name="Root" Background="{TemplateBinding Background}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <!-- 右下角交汇格也铺同色，杜绝露底 -->
+            <Rectangle Grid.Column="1"
+                       Grid.Row="1"
+                       Fill="{TemplateBinding Background}" />
+
+            <!--
+              CanHorizontally/VerticallyScroll=False：由 ScrollViewer 托管滚动，
+              与默认模板一致，避免首次布局 extent 算错。
+            -->
+            <ScrollContentPresenter x:Name="PART_ScrollContentPresenter"
+                                    Grid.Column="0"
+                                    Grid.Row="0"
+                                    Margin="{TemplateBinding Padding}"
+                                    CanContentScroll="{TemplateBinding CanContentScroll}"
+                                    CanHorizontallyScroll="False"
+                                    CanVerticallyScroll="False"
+                                    Content="{TemplateBinding Content}"
+                                    ContentTemplate="{TemplateBinding ContentTemplate}"
+                                    ContentTemplateSelector="{TemplateBinding ContentTemplateSelector}" />
+
+            <!-- Maximum/Value 不在此绑定，交给 ScrollViewer.OnApplyTemplate 接线，避免与 TemplateBinding 抢状态 -->
+            <ScrollBar x:Name="PART_VerticalScrollBar"
+                       Grid.Column="1"
+                       Grid.Row="0"
+                       Width="6"
+                       Margin="0,2,2,2"
+                       Orientation="Vertical"
+                       Cursor="Arrow"
+                       Background="Transparent"
+                       BorderThickness="0"
+                       Minimum="0"
+                       ViewportSize="{TemplateBinding ViewportHeight}"
+                       Visibility="{TemplateBinding ComputedVerticalScrollBarVisibility}" />
+
+            <ScrollBar x:Name="PART_HorizontalScrollBar"
+                       Grid.Column="0"
+                       Grid.Row="1"
+                       Height="6"
+                       Margin="2,0,2,2"
+                       Orientation="Horizontal"
+                       Cursor="Arrow"
+                       Background="Transparent"
+                       BorderThickness="0"
+                       Minimum="0"
+                       ViewportSize="{TemplateBinding ViewportWidth}"
+                       Visibility="{TemplateBinding ComputedHorizontalScrollBarVisibility}" />
+        </Grid>
+    </ControlTemplate>
+</ResourceDictionary>

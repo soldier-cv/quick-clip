@@ -1,0 +1,62 @@
+# Build outputs
+[Bb]in/
+[Oo]bj/
+artifacts/
+publish/
+dist/
+out/
+
+# .NET / NuGet
+*.nupkg
+*.snupkg
+project.lock.json
+**/[Pp]ackages/*
+!**/[Pp]ackages/build/
+project.fragment.lock.json
+*.nuget.props
+*.nuget.targets
+
+# IDE
+.vs/
+*.user
+*.userosscache
+*.suo
+*.rsuser
+*.DotSettings.user
+.idea/
+.vscode/
+*.swp
+*~
+
+# Test / coverage
+[Tt]est[Rr]esult*/
+*.coverage
+*.coveragexml
+coverage*/
+
+# Runtime user data (never commit)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+previews/
+debug.log
+settings.json
+
+# OS junk
+Thumbs.db
+Desktop.ini
+.DS_Store
+$RECYCLE.BIN/
+
+# Temp / local scratch
+*.tmp
+*.temp
+*.bak
+*.orig
+tmp_*/
+tmp_*
+
+# Local screenshots
+Snipaste_*.png
+*.log

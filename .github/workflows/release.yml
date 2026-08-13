@@ -90,18 +90,12 @@ jobs:
         shell: pwsh
         run: |
           $env:QUICKCLIP_VERSION = '${{ steps.ver.outputs.version }}'
-          $isccDir = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6'
-          $iscc = Join-Path $isccDir 'ISCC.exe'
+          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
           if (-not (Test-Path $iscc)) { throw "ISCC.exe not found: $iscc" }
-          $iss = 'setup\QuickClip.iss'
-          $isl = Join-Path $isccDir 'Languages\ChineseSimplified.isl'
-          if (-not (Test-Path $isl)) {
-            Write-Host 'ChineseSimplified.isl missing, compile with English only'
-            $tmp = Join-Path $env:RUNNER_TEMP 'QuickClip.iss'
-            (Get-Content $iss -Raw) -replace '(?m)^Name: "chinesesimp";.*\r?\n', '' | Set-Content -Path $tmp -Encoding utf8
-            $iss = $tmp
+          if (-not (Test-Path 'setup\languages\ChineseSimplified.isl')) {
+            throw 'setup/languages/ChineseSimplified.isl missing'
           }
-          & $iscc $iss
+          & $iscc setup\QuickClip.iss
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed: $LASTEXITCODE" }
           $setup = 'publish/setup/QuickClip-Setup-win-x64.exe'
           if (-not (Test-Path $setup)) { throw "Installer missing: $setup" }

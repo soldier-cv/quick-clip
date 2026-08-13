@@ -396,19 +396,6 @@
                                            Stretch="Uniform"
                                            Margin="4" />
                                 </Border>
-
-                                <Border Grid.Row="1"
-                                        Margin="56,8,0,0"
-                                        Padding="10,5"
-                                        CornerRadius="8"
-                                        Background="#1434D399"
-                                        Visibility="{Binding HasQr, Converter={StaticResource BoolToVis}}">
-                                    <TextBlock Text="{Binding QrText}"
-                                               Foreground="#9FE8C6"
-                                               FontSize="11.5"
-                                               TextTrimming="CharacterEllipsis"
-                                               ToolTip="{Binding QrText}" />
-                                </Border>
                             </Grid>
                         </Grid>
                     </Border>
@@ -518,6 +505,44 @@
                                MaxHeight="300"
                                Stretch="Uniform"
                                Visibility="{Binding IsImage, Converter={StaticResource BoolToVis}}" />
+                        <Border x:Name="PreviewQrDecodePanel"
+                                Margin="0,12,0,0"
+                                Padding="10,8,10,8"
+                                CornerRadius="8"
+                                Visibility="Collapsed">
+                            <Grid>
+                                <Border x:Name="PreviewQrDecodeBar"
+                                        Width="3"
+                                        CornerRadius="2"
+                                        HorizontalAlignment="Left"
+                                        VerticalAlignment="Stretch" />
+                                <StackPanel Margin="12,0,0,0">
+                                    <StackPanel Orientation="Horizontal">
+                                        <ui:SymbolIcon x:Name="PreviewQrDecodeIcon"
+                                                       Symbol="ScanQrCode24"
+                                                       FontSize="13"
+                                                       VerticalAlignment="Center" />
+                                        <TextBlock x:Name="PreviewQrDecodeLabel"
+                                                   Text="已识别二维码"
+                                                   FontSize="11"
+                                                   Margin="6,0,0,0"
+                                                   VerticalAlignment="Center" />
+                                    </StackPanel>
+                                    <ScrollViewer x:Name="PreviewQrDecodeScroll"
+                                                  Margin="0,6,0,0"
+                                                  MaxHeight="140"
+                                                  HorizontalScrollBarVisibility="Disabled"
+                                                  VerticalScrollBarVisibility="Auto">
+                                        <TextBlock x:Name="PreviewQrDecodeText"
+                                                   Text="{Binding QrText}"
+                                                   FontSize="13"
+                                                   LineHeight="20"
+                                                   TextWrapping="Wrap"
+                                                   MaxWidth="400" />
+                                    </ScrollViewer>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
                         <ScrollViewer x:Name="PreviewScroll"
                                       MaxHeight="340"
                                       HorizontalScrollBarVisibility="Disabled"
@@ -545,7 +570,8 @@
                                        TextAlignment="Center"
                                        TextWrapping="Wrap"
                                        MaxWidth="240"
-                                       Text="手机扫码接力" />
+                                       Visibility="Collapsed"
+                                       Text="" />
                         </StackPanel>
                     </StackPanel>
                 </Border>
@@ -566,7 +592,7 @@
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center">
                 <StackPanel>
-                    <TextBlock Text="二维码 · 手机扫码接力"
+                    <TextBlock Text="二维码"
                                Foreground="{DynamicResource Theme.Text}"
                                FontSize="15"
                                FontWeight="SemiBold"
@@ -582,7 +608,8 @@
                                TextTrimming="CharacterEllipsis"
                                Foreground="{DynamicResource Theme.TextSecondary}"
                                FontSize="12"
-                               TextAlignment="Center" />
+                               TextAlignment="Center"
+                               Visibility="Collapsed" />
                     <ui:Button Appearance="Primary"
                                Margin="0,14,0,0"
                                Height="36"

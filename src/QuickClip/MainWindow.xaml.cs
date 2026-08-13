@@ -142,6 +142,14 @@ public partial class MainWindow : FluentWindow
         PreviewBodyText.Foreground = text;
         PreviewQrCaption.Foreground = muted;
         PreviewScroll.Background = System.Windows.Media.Brushes.Transparent;
+
+        var accentMuted = WindowChromeHelper.CreateSolidBrush(p.AccentMuted);
+        PreviewQrDecodePanel.Background = accentMuted;
+        PreviewQrDecodeBar.Background = accent;
+        PreviewQrDecodeIcon.Foreground = accent;
+        PreviewQrDecodeLabel.Foreground = secondary;
+        PreviewQrDecodeText.Foreground = accent;
+        PreviewQrDecodeScroll.Background = System.Windows.Media.Brushes.Transparent;
     }
 
     /// <summary>窗口句柄创建后挂载剪贴板监听。</summary>
@@ -519,6 +527,7 @@ public partial class MainWindow : FluentWindow
 
         ApplyHoverPreviewTheme();
         PreviewPopup.DataContext = vm;
+        PreviewTypeIcon.ClearValue(Wpf.Ui.Controls.SymbolIcon.SymbolProperty);
         SetPreviewContentMode(showQr: false);
         PreviewPopup.PlacementTarget = this;
         PreviewPopup.Placement = System.Windows.Controls.Primitives.PlacementMode.Relative;
@@ -548,14 +557,38 @@ public partial class MainWindow : FluentWindow
         {
             PreviewHoverImage.Visibility = Visibility.Collapsed;
             PreviewScroll.Visibility = Visibility.Collapsed;
+            PreviewQrDecodePanel.Visibility = Visibility.Collapsed;
             PreviewQrPanel.Visibility = Visibility.Visible;
             return;
         }
 
         PreviewQrPanel.Visibility = Visibility.Collapsed;
         PreviewQrImage.Source = null;
+        SetQrCaption(null);
         PreviewHoverImage.ClearValue(UIElement.VisibilityProperty);
         PreviewScroll.ClearValue(UIElement.VisibilityProperty);
+        // 解码绿块不能靠 HasQr 绑定：Popup 里绑定失败或 ClearValue 后会回默认 Visible，任何预览都带一块绿
+        PreviewQrDecodePanel.Visibility = ShouldShowQrDecodePanel()
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+    }
+
+    private bool ShouldShowQrDecodePanel() =>
+        !_previewQrMode &&
+        PreviewPopup.DataContext is ClipboardItemViewModel { IsImage: true, HasQr: true };
+
+    /// <summary>生成预览只在失败/进行中显示状态，成功后不把原文铺在码下面。</summary>
+    private void SetQrCaption(string? text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            PreviewQrCaption.Text = string.Empty;
+            PreviewQrCaption.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        PreviewQrCaption.Text = text;
+        PreviewQrCaption.Visibility = Visibility.Visible;
     }
 
     /// <summary>内容测量完成后按条目位置重定位浮层（左右自适应 + 垂直对齐 + 屏幕边界钳制）。</summary>
@@ -890,7 +923,7 @@ public partial class MainWindow : FluentWindow
         PreviewPopup.Placement = System.Windows.Controls.Primitives.PlacementMode.Relative;
         SetPreviewContentMode(showQr: true);
         PreviewQrImage.Source = null;
-        PreviewQrCaption.Text = "生成中…";
+        SetQrCaption("生成中…");
 
         if (!PreviewPopup.IsOpen)
         {
@@ -906,7 +939,7 @@ public partial class MainWindow : FluentWindow
         {
             if (gen == _previewQrGeneration && _previewQrMode)
             {
-                PreviewQrCaption.Text = "当前条目无法生成二维码";
+                SetQrCaption("当前条目无法生成二维码");
             }
 
             return;
@@ -942,8 +975,7 @@ public partial class MainWindow : FluentWindow
             }
 
             PreviewQrImage.Source = bmp;
-            string caption = content.Length <= 48 ? content : content[..48] + "…";
-            PreviewQrCaption.Text = caption;
+            SetQrCaption(null);
             PreviewTypeIcon.Symbol = Wpf.Ui.Controls.SymbolRegular.QrCode24;
             RepositionPreview();
             _ = Dispatcher.BeginInvoke(RepositionPreview, DispatcherPriority.Loaded);
@@ -953,7 +985,7 @@ public partial class MainWindow : FluentWindow
             DebugLog.LogException("悬停生成二维码失败", ex);
             if (gen == _previewQrGeneration && _previewQrMode)
             {
-                PreviewQrCaption.Text = "二维码生成失败";
+                SetQrCaption("二维码生成失败");
             }
         }
     }
@@ -969,8 +1001,7 @@ public partial class MainWindow : FluentWindow
         {
             ApplyHoverPreviewTheme();
             SetPreviewContentMode(showQr: false);
-            // 恢复类型图标（悬停二维码时可能改成了 QrCode）
-            PreviewTypeIcon.Symbol = vm.TypeIcon;
+            PreviewTypeIcon.ClearValue(Wpf.Ui.Controls.SymbolIcon.SymbolProperty);
             RepositionPreview();
             return;
         }
@@ -1068,7 +1099,7 @@ public partial class MainWindow : FluentWindow
         bitmap.EndInit();
         bitmap.Freeze();
         QrImage.Source = bitmap;
-        QrTextBlock.Text = _viewModel.SelectedItem?.Item.TextContent ?? string.Empty;
+        QrTextBlock.Text = string.Empty;
         QrOverlay.Visibility = Visibility.Visible;
         QrOverlay.IsHitTestVisible = true;
     }

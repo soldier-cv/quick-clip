@@ -131,7 +131,8 @@ public sealed class ClipboardItemViewModel : INotifyPropertyChanged
         string text = item.TextContent ?? string.Empty;
         if (item.ContentType == ClipboardContentType.Image)
         {
-            return !string.IsNullOrEmpty(item.QrContent) ? $"已识别二维码: {item.QrContent}" : "图片预览";
+            // 列表只标识别状态，解码正文放到悬停预览，避免卡片标题被 URL 撑满
+            return !string.IsNullOrEmpty(item.QrContent) ? "已识别二维码" : "图片预览";
         }
 
         string oneLine = text.Replace("\r\n", " / ").Replace('\n', ' ').Trim();

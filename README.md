@@ -25,9 +25,9 @@
 文本 / 链接悬停即可生成，点一下放大给手机扫。复制一张码，自动抽出链接。
 
 <p align="center">
-  <img src="docs/assets/qr-generate.png" width="360" alt="悬停生成二维码，手机扫码接力">
+  <img src="docs/assets/qr-generate.png" width="360" alt="悬停生成二维码">
   &nbsp;
-  <img src="docs/assets/qr-decode.png" width="360" alt="图片中的二维码自动识别并展示链接">
+  <img src="docs/assets/qr-decode.png" width="360" alt="图片中的二维码自动识别，列表只保留识别标记">
 </p>
 
 ## 还有这些

@@ -364,14 +364,6 @@
                                   Content="自动检查并下载更新"
                                   Checked="OnAutoCheckUpdatesToggled"
                                   Unchecked="OnAutoCheckUpdatesToggled" />
-                        <ui:Button x:Name="AdminRestartButton"
-                                   Margin="0,14,0,0"
-                                   Appearance="Secondary"
-                                   Height="34"
-                                   HorizontalAlignment="Left"
-                                   Padding="14,0"
-                                   Content="以管理员身份重启"
-                                   Click="OnAdminRestartClicked" />
                     </StackPanel>
                 </Border>
 

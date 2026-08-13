@@ -20,7 +20,7 @@ public partial class App : System.Windows.Application
         AppDomain.CurrentDomain.UnhandledException += OnAppDomainUnhandledException;
         TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
 
-        // 单实例保护：以管理员身份重启时旧实例可能尚未完全退出，短暂重试避免误报
+        // 单实例保护：旧实例退出未完成时短暂重试，避免误报「已在运行」
         _mutex = new Mutex(false, @"Local\QuickClip_SingleInstance");
         bool acquired = false;
         for (int attempt = 0; attempt < 10 && !acquired; attempt++)

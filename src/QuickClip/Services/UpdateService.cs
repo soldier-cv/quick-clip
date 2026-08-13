@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO;
+using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
@@ -29,13 +30,14 @@ public sealed class UpdateService : IDisposable
     private const string RepoName = "quick-clip";
     private const string LatestReleaseApi = $"https://api.github.com/repos/{RepoOwner}/{RepoName}/releases/latest";
     private const string ReleasesPageUrl = $"https://github.com/{RepoOwner}/{RepoName}/releases";
+    private const string LatestReleasePageUrl = $"{ReleasesPageUrl}/latest";
     private const string InstalledMarkerFileName = "QuickClip.installed";
     private const long MaxDownloadBytes = 400L * 1024 * 1024;
     private static readonly TimeSpan SilentDelay = TimeSpan.FromSeconds(90);
     private static readonly TimeSpan SilentInterval = TimeSpan.FromHours(24);
-    private static readonly TimeSpan ApiTimeout = TimeSpan.FromSeconds(8);
+    private static readonly TimeSpan ApiTimeout = TimeSpan.FromSeconds(25);
 
-    private readonly HttpClient _http = new() { Timeout = TimeSpan.FromMinutes(10) };
+    private readonly HttpClient _http = CreateHttpClient();
     private readonly SemaphoreSlim _gate = new(1, 1);
     private AppPaths? _paths;
     private SettingsService? _settings;
@@ -80,55 +82,134 @@ public sealed class UpdateService : IDisposable
 
     /// <summary>
     /// 检查 GitHub Releases 是否有更新版本。
-    /// 网络/API 失败时 Status=Failed，不会伪装成“已是最新”。
+    /// 先走 api.github.com；403/超时后再用 Releases/latest 页面回退（国内 API 常被拒）。
     /// </summary>
     public async Task<UpdateCheckResult> CheckForUpdateAsync()
+    {
+        var api = await TryCheckViaApiAsync();
+        if (api.Status != UpdateCheckStatus.Failed)
+        {
+            return api;
+        }
+
+        DebugLog.Log($"GitHub API 不可用，回退 Releases 页面: {api.Message}");
+        var page = await TryCheckViaLatestPageAsync();
+        if (page.Status != UpdateCheckStatus.Failed)
+        {
+            return page;
+        }
+
+        return UpdateCheckResult.Fail(
+            $"检查更新失败：{api.Message}。页面回退也失败。可手动访问 {ReleasesPageUrl}");
+    }
+
+    private async Task<UpdateCheckResult> TryCheckViaApiAsync()
     {
         try
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, LatestReleaseApi);
-            ApplyGitHubHeaders(request);
+            ApplyGitHubHeaders(request, api: true);
 
             using var cts = new CancellationTokenSource(ApiTimeout);
             using var response = await _http.SendAsync(request, cts.Token);
             if (!response.IsSuccessStatusCode)
             {
                 int code = (int)response.StatusCode;
-                DebugLog.Log($"检查更新失败: HTTP {code}");
+                string body = await ReadBodySnippetAsync(response);
+                string limit = response.Headers.TryGetValues("X-RateLimit-Remaining", out var rem)
+                    ? $" remaining={string.Join(',', rem)}"
+                    : string.Empty;
+                DebugLog.Log($"检查更新 API 失败: HTTP {code}{limit} {body}");
                 string detail = code == 404
                     ? "仓库尚无 Releases 或地址不可用"
-                    : $"HTTP {code}";
-                return UpdateCheckResult.Fail($"检查更新失败：{detail}。可手动访问 {ReleasesPageUrl}");
+                    : code == 403
+                        ? "HTTP 403（接口被拒或额度用尽）"
+                        : $"HTTP {code}";
+                return UpdateCheckResult.Fail(detail);
             }
 
             var dto = await response.Content.ReadFromJsonAsync<GitHubReleaseDto>();
             if (dto == null || string.IsNullOrEmpty(dto.TagName))
             {
-                return UpdateCheckResult.Fail("检查更新失败：无法解析 GitHub 响应");
+                return UpdateCheckResult.Fail("无法解析 GitHub API 响应");
             }
 
-            var release = BuildReleaseInfo(dto);
-            DebugLog.Log(
-                $"检查更新完成: 最新 {release.TagName}，当前 v{CurrentVersion}，渠道 {CurrentChannel}");
-
-            if (!IsNewer(release.Version, CurrentVersion))
-            {
-                return UpdateCheckResult.UpToDate();
-            }
-
-            if (string.IsNullOrEmpty(release.DownloadUrl))
-            {
-                return UpdateCheckResult.Fail(
-                    $"发现新版本 {release.TagName}，但该版本没有对应「{ChannelLabel}」安装包。可手动访问 {ReleasesPageUrl}");
-            }
-
-            return UpdateCheckResult.UpdateAvailable(release);
+            return FinishCheck(BuildReleaseInfo(dto), "API");
+        }
+        catch (Exception ex) when (ex is TaskCanceledException or TimeoutException or OperationCanceledException)
+        {
+            DebugLog.LogException("检查更新 API 超时", ex);
+            return UpdateCheckResult.Fail("连接 GitHub API 超时");
         }
         catch (Exception ex)
         {
-            DebugLog.LogException("检查更新异常", ex);
-            return UpdateCheckResult.Fail($"检查更新失败：{ex.Message}。可手动访问 {ReleasesPageUrl}");
+            DebugLog.LogException("检查更新 API 异常", ex);
+            return UpdateCheckResult.Fail(ex.Message);
         }
+    }
+
+    /// <summary>不经过 api.github.com：跟随 /releases/latest 跳转到 /releases/tag/vX.Y.Z。</summary>
+    private async Task<UpdateCheckResult> TryCheckViaLatestPageAsync()
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, LatestReleasePageUrl);
+            ApplyGitHubHeaders(request, api: false);
+
+            using var cts = new CancellationTokenSource(ApiTimeout);
+            using var response = await _http.SendAsync(
+                request, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+            if (!response.IsSuccessStatusCode)
+            {
+                DebugLog.Log($"检查更新页面失败: HTTP {(int)response.StatusCode}");
+                return UpdateCheckResult.Fail($"HTTP {(int)response.StatusCode}");
+            }
+
+            string? final = response.RequestMessage?.RequestUri?.AbsolutePath
+                            ?? response.Headers.Location?.OriginalString;
+            if (!TryParseTagFromLatestUrl(final, out string tag, out string version))
+            {
+                return UpdateCheckResult.Fail("无法从 Releases 页面解析版本号");
+            }
+
+            var release = new ReleaseInfo
+            {
+                Version = version,
+                TagName = tag,
+                DownloadUrl = BuildDirectDownloadUrl(tag),
+                AssetSize = 0
+            };
+            return FinishCheck(release, "页面");
+        }
+        catch (Exception ex) when (ex is TaskCanceledException or TimeoutException or OperationCanceledException)
+        {
+            DebugLog.LogException("检查更新页面超时", ex);
+            return UpdateCheckResult.Fail("连接 GitHub 页面超时");
+        }
+        catch (Exception ex)
+        {
+            DebugLog.LogException("检查更新页面异常", ex);
+            return UpdateCheckResult.Fail(ex.Message);
+        }
+    }
+
+    private UpdateCheckResult FinishCheck(ReleaseInfo release, string source)
+    {
+        DebugLog.Log(
+            $"检查更新完成({source}): 最新 {release.TagName}，当前 v{CurrentVersion}，渠道 {CurrentChannel}");
+
+        if (!IsNewer(release.Version, CurrentVersion))
+        {
+            return UpdateCheckResult.UpToDate();
+        }
+
+        if (string.IsNullOrEmpty(release.DownloadUrl))
+        {
+            return UpdateCheckResult.Fail(
+                $"发现新版本 {release.TagName}，但该版本没有对应「{ChannelLabel}」安装包。可手动访问 {ReleasesPageUrl}");
+        }
+
+        return UpdateCheckResult.UpdateAvailable(release);
     }
 
     /// <summary>检查并按当前渠道下载。interactive 为 false 时失败只写日志。</summary>
@@ -422,7 +503,7 @@ public sealed class UpdateService : IDisposable
             }
 
             using var request = new HttpRequestMessage(HttpMethod.Get, release.DownloadUrl);
-            ApplyGitHubHeaders(request);
+            ApplyGitHubHeaders(request, api: false);
             using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
             if (!response.IsSuccessStatusCode)
             {
@@ -560,10 +641,88 @@ public sealed class UpdateService : IDisposable
                || host.EndsWith(".githubusercontent.com", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static void ApplyGitHubHeaders(HttpRequestMessage request)
+    private static HttpClient CreateHttpClient()
     {
-        request.Headers.TryAddWithoutValidation("User-Agent", $"QuickClip/{CurrentVersion}");
-        request.Headers.TryAddWithoutValidation("Accept", "application/vnd.github+json");
+        var handler = new HttpClientHandler
+        {
+            UseProxy = true,
+            Proxy = HttpClient.DefaultProxy,
+            DefaultProxyCredentials = CredentialCache.DefaultCredentials,
+            AutomaticDecompression = DecompressionMethods.All,
+            AllowAutoRedirect = true
+        };
+        return new HttpClient(handler) { Timeout = TimeSpan.FromMinutes(10) };
+    }
+
+    private static void ApplyGitHubHeaders(HttpRequestMessage request, bool api)
+    {
+        request.Headers.TryAddWithoutValidation(
+            "User-Agent",
+            $"QuickClip/{CurrentVersion} (+https://github.com/{RepoOwner}/{RepoName})");
+        if (api)
+        {
+            request.Headers.TryAddWithoutValidation("Accept", "application/vnd.github+json");
+            request.Headers.TryAddWithoutValidation("X-GitHub-Api-Version", "2022-11-28");
+            return;
+        }
+
+        request.Headers.TryAddWithoutValidation("Accept", "text/html,application/xhtml+xml");
+    }
+
+    private static string BuildDirectDownloadUrl(string tag) =>
+        CurrentChannel == ReleaseChannel.Setup
+            ? $"https://github.com/{RepoOwner}/{RepoName}/releases/download/{tag}/QuickClip-Setup-win-x64.exe"
+            : $"https://github.com/{RepoOwner}/{RepoName}/releases/download/{tag}/QuickClip.exe";
+
+    private static bool TryParseTagFromLatestUrl(string? pathOrUrl, out string tag, out string version)
+    {
+        tag = string.Empty;
+        version = string.Empty;
+        if (string.IsNullOrEmpty(pathOrUrl))
+        {
+            return false;
+        }
+
+        const string marker = "/releases/tag/";
+        int i = pathOrUrl.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (i < 0)
+        {
+            return false;
+        }
+
+        tag = pathOrUrl[(i + marker.Length)..].Trim().Trim('/');
+        int q = tag.IndexOfAny(['?', '#']);
+        if (q >= 0)
+        {
+            tag = tag[..q];
+        }
+
+        if (string.IsNullOrEmpty(tag))
+        {
+            return false;
+        }
+
+        version = tag.TrimStart('v');
+        return true;
+    }
+
+    private static async Task<string> ReadBodySnippetAsync(HttpResponseMessage response)
+    {
+        try
+        {
+            string text = await response.Content.ReadAsStringAsync();
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return string.Empty;
+            }
+
+            string one = text.Replace('\r', ' ').Replace('\n', ' ').Trim();
+            return one.Length <= 160 ? one : one[..160] + "…";
+        }
+        catch
+        {
+            return string.Empty;
+        }
     }
 
     private static ReleaseChannel DetectChannel()

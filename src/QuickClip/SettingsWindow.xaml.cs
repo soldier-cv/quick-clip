@@ -524,26 +524,6 @@ public partial class SettingsWindow : Window
         }
     }
 
-    private void OnAdminRestartClicked(object sender, RoutedEventArgs e)
-    {
-        if (AdminService.IsAdministrator())
-        {
-            UpdateStatusText.Text = "当前已以管理员身份运行";
-            return;
-        }
-
-        // 仅 UAC 确认成功后退出；取消授权时保持当前窗口，并给出明确反馈
-        if (AdminService.RestartAsAdministrator())
-        {
-            UpdateStatusText.Text = "已请求管理员权限，正在重启…";
-            System.Windows.Application.Current.Shutdown();
-        }
-        else
-        {
-            UpdateStatusText.Text = "未获得管理员授权（已取消 UAC 或启动失败），当前实例继续运行";
-        }
-    }
-
     private void OnOpenDataFolderClicked(object sender, RoutedEventArgs e)
     {
         try

@@ -53,7 +53,6 @@ public partial class MainWindow : FluentWindow
         _services.Tray.ExitRequested += ExitApp;
         _services.Tray.SettingsRequested += OpenSettingsWindow;
         _services.Tray.AutoStartToggleRequested += ToggleAutoStart;
-        _services.Tray.RestartAsAdminRequested += RestartAsAdmin;
         _services.Tray.CheckUpdateRequested += CheckUpdateAsync;
         _services.Tray.InstallUpdateRequested += ApplyPendingUpdate;
         _services.Tray.OpenDataFolderRequested += OpenDataFolderFromTray;
@@ -1259,25 +1258,6 @@ public partial class MainWindow : FluentWindow
     {
         // 设置变更事件会同步注册表与托盘勾选状态
         _services.Settings.SetAutoStart(enabled);
-    }
-
-    private void RestartAsAdmin()
-    {
-        if (AdminService.IsAdministrator())
-        {
-            _services.Tray.ShowBalloonTip("QuickClip", "当前已以管理员身份运行");
-            return;
-        }
-
-        // 仅在 UAC 确认并成功拉起提权进程后才退出；用户取消则保持当前实例
-        if (AdminService.RestartAsAdministrator())
-        {
-            ExitApp();
-        }
-        else
-        {
-            _services.Tray.ShowBalloonTip("QuickClip", "未获得管理员授权，已取消重启");
-        }
     }
 
     private async void CheckUpdateAsync()

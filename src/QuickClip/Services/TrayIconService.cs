@@ -4,7 +4,7 @@ using QuickClip.Native;
 
 namespace QuickClip.Services;
 
-/// <summary>系统托盘图标服务：打开、设置、数据目录、清除今日、自启动、管理员、更新、退出。</summary>
+/// <summary>系统托盘图标服务：打开、设置、数据目录、清除今日、自启动、更新、退出。</summary>
 public sealed class TrayIconService : IDisposable
 {
     private readonly NotifyIcon _notifyIcon;
@@ -17,7 +17,6 @@ public sealed class TrayIconService : IDisposable
     public event Action? ExitRequested;
     public event Action? SettingsRequested;
     public event Action<bool>? AutoStartToggleRequested;
-    public event Action? RestartAsAdminRequested;
     public event Action? CheckUpdateRequested;
     public event Action? InstallUpdateRequested;
     public event Action? OpenDataFolderRequested;
@@ -49,9 +48,6 @@ public sealed class TrayIconService : IDisposable
         _autoStartItem = new ToolStripMenuItem("开机自启动") { CheckOnClick = true };
         _autoStartItem.Click += (_, _) => AutoStartToggleRequested?.Invoke(_autoStartItem.Checked);
 
-        var adminItem = new ToolStripMenuItem("以管理员身份重启");
-        adminItem.Click += (_, _) => RestartAsAdminRequested?.Invoke();
-
         var updateItem = new ToolStripMenuItem("检查更新…");
         updateItem.Click += (_, _) => CheckUpdateRequested?.Invoke();
 
@@ -68,7 +64,6 @@ public sealed class TrayIconService : IDisposable
         menu.Items.Add(clearTodayItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_autoStartItem);
-        menu.Items.Add(adminItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(updateItem);
         menu.Items.Add(_installUpdateItem);

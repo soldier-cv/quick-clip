@@ -157,11 +157,11 @@ graph TD
 - 降级：检测命中时 `RenderOptions.ProcessRenderMode = SoftwareOnly`，背景材质改为 `WindowBackdropType.None` 并使用不透明深色背景（`#1B1B1F`），避免黑屏并保持深色主题可读。
 - 正常物理桌面环境不受影响，仍使用 Mica / Acrylic 半透明材质。
 
-### 4.6 设置持久化、自启动与管理员重启
+### 4.6 设置持久化与自启动
 - **设置持久化**：`SettingsService` 将设置写入 `%LOCALAPPDATA%\QuickClip\settings.json`（热键组合、是否启用、开机自启动、窗口置顶），JSON 读取不区分键名大小写，文件损坏时回退默认值。
 - **窗口置顶**：主窗口 `Topmost` 与失焦自动隐藏由 `WindowAlwaysOnTop` 设置控制，`Ctrl+P`、标题栏图钉、设置窗口三处入口共享同一来源，变更经 `SettingsService.Changed` 广播即时生效。
 - **开机自启动**：`AutoStartService` 读写 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`（`QuickClip` 值），无需管理员权限；启动时以注册表为准与设置文件对齐。托盘勾选与设置窗口共用同一来源。
-- **以管理员身份重启**：`AdminService` 检测当前令牌是否属于 Administrators；非管理员时以 `Verb=runas` 重新启动自身（触发 UAC）并退出当前实例，单实例互斥量带短暂重试，避免新旧实例竞争。
+- 剪贴板监听、热键、粘贴均在当前用户会话内完成，**不需要管理员权限**。
 
 ### 4.7 更新机制
 - 版本号来自程序集（`csproj <Version>`，打 tag 时由 GitHub Actions 注入）。

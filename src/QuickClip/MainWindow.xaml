@@ -342,12 +342,12 @@
                                                    Padding="5"
                                                    Margin="2,0"
                                                    CornerRadius="6"
-                                                   ToolTip="悬停预览二维码 · 点击放大"
-                                                   Visibility="{Binding IsText, Converter={StaticResource BoolToVis}}"
+                                                   ToolTip="{Binding QrActionToolTip}"
+                                                   Visibility="{Binding ShowQrAction, Converter={StaticResource BoolToVis}}"
                                                    Click="OnQrClicked"
                                                    MouseEnter="OnQrButtonMouseEnter"
                                                    MouseLeave="OnQrButtonMouseLeave">
-                                            <ui:SymbolIcon Symbol="QrCode24" FontSize="15" />
+                                            <ui:SymbolIcon Symbol="{Binding QrActionIcon}" FontSize="15" />
                                         </ui:Button>
                                         <ui:Button Appearance="Transparent"
                                                    Padding="5"

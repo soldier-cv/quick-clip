@@ -2,7 +2,6 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Windows;
-using System.Windows.Media.Imaging;
 using QuickClip.Models;
 
 namespace QuickClip.Services;
@@ -40,7 +39,9 @@ public static class ClipboardDataExtractor
                 return CaptureFiles();
             }
 
-            if (System.Windows.Clipboard.ContainsImage())
+            if (System.Windows.Clipboard.ContainsImage() ||
+                System.Windows.Clipboard.ContainsData("PNG") ||
+                System.Windows.Clipboard.ContainsData("image/png"))
             {
                 return CaptureImage(paths);
             }
@@ -136,18 +137,18 @@ public static class ClipboardDataExtractor
 
     private static CapturedClipboardData? CaptureImage(AppPaths paths)
     {
-        var image = System.Windows.Clipboard.GetImage();
+        using var image = ClipboardImageNormalizer.TryCaptureBitmap();
         if (image == null)
         {
             return null;
         }
 
         // 先看像素规模，避免超大图编码拖死进程
-        long pixels = (long)image.PixelWidth * image.PixelHeight;
+        long pixels = (long)image.Width * image.Height;
         if (pixels > SettingsService.MaxCaptureImagePixels)
         {
             DebugLog.Log(
-                $"跳过历史记录：图片像素过大 {image.PixelWidth}x{image.PixelHeight} " +
+                $"跳过历史记录：图片像素过大 {image.Width}x{image.Height} " +
                 $"({pixels} px, 上限 {SettingsService.MaxCaptureImagePixels})，系统剪贴板未改动");
             return null;
         }
@@ -157,12 +158,7 @@ public static class ClipboardDataExtractor
 
         try
         {
-            using (var stream = File.Create(fullPath))
-            {
-                var encoder = new PngBitmapEncoder();
-                encoder.Frames.Add(BitmapFrame.Create(image));
-                encoder.Save(stream);
-            }
+            image.Save(fullPath, System.Drawing.Imaging.ImageFormat.Png);
 
             long size = new FileInfo(fullPath).Length;
             if (size > SettingsService.MaxCaptureImageBytes)

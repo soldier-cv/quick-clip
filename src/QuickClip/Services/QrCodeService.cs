@@ -22,6 +22,7 @@ public sealed class QrCodeService
     {
         try
         {
+            ClipboardImageNormalizer.RepairFileIfFullyTransparent(imagePath);
             using var bitmap = new Bitmap(imagePath);
             var reader = new BarcodeReader
             {

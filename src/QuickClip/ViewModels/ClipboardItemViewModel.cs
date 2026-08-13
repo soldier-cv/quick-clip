@@ -43,6 +43,15 @@ public sealed class ClipboardItemViewModel : INotifyPropertyChanged
 
     public string QrText => Item.QrContent ?? string.Empty;
 
+    /// <summary>文本/链接可生成二维码；已识别二维码的图片可解析复制文本。</summary>
+    public bool ShowQrAction => IsText || HasQr;
+
+    public SymbolRegular QrActionIcon =>
+        IsImage && HasQr ? SymbolRegular.ScanQrCode24 : SymbolRegular.QrCode24;
+
+    public string QrActionToolTip =>
+        IsImage && HasQr ? "解析并复制文本" : "悬停预览二维码 · 点击放大";
+
     public bool IsPinned => Item.IsPinned;
 
     public bool IsImage => Item.ContentType == ClipboardContentType.Image;

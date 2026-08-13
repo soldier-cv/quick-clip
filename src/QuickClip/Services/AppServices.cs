@@ -133,6 +133,51 @@ public sealed class AppServices : IDisposable
         }
     }
 
+    /// <summary>
+    /// 修补历史预览图里「Alpha 全 0」的 PNG，并对尚未识别的图片重跑二维码。
+    /// 有改动返回 true，调用方应刷新列表。
+    /// </summary>
+    public async Task<bool> RepairImageHistoryAsync()
+    {
+        var items = await Database.GetRecentAsync(Settings.MaxHistoryItems);
+        bool changed = false;
+
+        foreach (var item in items)
+        {
+            if (item.ContentType != Models.ClipboardContentType.Image ||
+                string.IsNullOrEmpty(item.PreviewPath) ||
+                !File.Exists(item.PreviewPath))
+            {
+                continue;
+            }
+
+            string path = item.PreviewPath;
+            bool repaired = await Task.Run(() => ClipboardImageNormalizer.RepairFileIfFullyTransparent(path));
+            if (repaired)
+            {
+                ThumbnailCache.RemoveByPath(path);
+                changed = true;
+            }
+
+            if (!string.IsNullOrEmpty(item.QrContent))
+            {
+                continue;
+            }
+
+            string? qr = await Task.Run(() => Qr.Decode(path));
+            if (string.IsNullOrEmpty(qr))
+            {
+                continue;
+            }
+
+            await Database.UpdateQrContentAsync(item.Id, qr);
+            changed = true;
+            DebugLog.Log($"历史图片补识别二维码: id={item.Id}");
+        }
+
+        return changed;
+    }
+
     /// <summary>清除今日非置顶历史。</summary>
     public async Task<int> ClearTodayHistoryAsync()
     {

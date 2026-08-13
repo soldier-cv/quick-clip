@@ -28,6 +28,7 @@ public static class ThumbnailCache
             }
         }
 
+        ClipboardImageNormalizer.RepairFileIfFullyTransparent(path);
         var bitmap = Decode(path, decodePixelWidth);
 
         lock (Gate)

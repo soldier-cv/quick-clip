@@ -131,7 +131,23 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         _services = services;
         _services.Pipeline.ItemAdded += OnItemAdded;
-        _ = RefreshAsync();
+        _ = RefreshThenRepairAsync();
+    }
+
+    private async Task RefreshThenRepairAsync()
+    {
+        await RefreshAsync();
+        try
+        {
+            if (await _services.RepairImageHistoryAsync())
+            {
+                await RefreshAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            DebugLog.LogException("历史图片补修失败", ex);
+        }
     }
 
     public ClipboardItemViewModel? GetItemAt(int index) =>
@@ -361,6 +377,32 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
 
         StatusText = "已复制";
+    }
+
+    /// <summary>将已识别二维码的文本覆盖到系统剪贴板（纯文本），不新增历史。</summary>
+    public async Task CopyQrTextAsync()
+    {
+        var selected = SelectedItem;
+        if (selected == null || !selected.HasQr)
+        {
+            StatusText = "当前条目没有可解析的二维码";
+            return;
+        }
+
+        string text = selected.QrText;
+        _services.Pipeline.SuppressCapture("text:" + text);
+        try
+        {
+            await _services.Paste.CopyTextAsync(text);
+        }
+        catch (Exception ex)
+        {
+            DebugLog.LogException("复制二维码文本失败", ex);
+            StatusText = "复制失败，剪贴板可能被占用";
+            return;
+        }
+
+        StatusText = "已复制二维码文本";
     }
 
     /// <summary>与捕获侧近似的去重键提示（文本精确；文件/图片靠 Suppress 时间窗）。</summary>

@@ -112,6 +112,23 @@ public sealed class DatabaseService : IDisposable
         }
     }
 
+    public async Task UpdateQrContentAsync(long id, string qrContent)
+    {
+        await _gate.WaitAsync();
+        try
+        {
+            using var cmd = _connection.CreateCommand();
+            cmd.CommandText = "UPDATE clipboard_items SET qr_content = $qr WHERE id = $id;";
+            cmd.Parameters.AddWithValue("$qr", qrContent);
+            cmd.Parameters.AddWithValue("$id", id);
+            await cmd.ExecuteNonQueryAsync();
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
     public async Task TogglePinAsync(long id, bool pinned)
     {
         await _gate.WaitAsync();

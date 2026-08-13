@@ -856,10 +856,27 @@ public partial class MainWindow : FluentWindow
 
     // ---------- 卡片动作 ----------
 
-    /// <summary>悬停二维码按钮：预览浮层切换为该条目二维码（不打开全屏遮罩）。</summary>
+    /// <summary>悬停二维码按钮：文本预览生成码；已识别二维码图保持原图预览。</summary>
     private async void OnQrButtonMouseEnter(object sender, System.Windows.Input.MouseEventArgs e)
     {
-        if (GetCardViewModel(sender) is not { } vm || !vm.IsText)
+        if (GetCardViewModel(sender) is not { } vm)
+        {
+            return;
+        }
+
+        if (vm.IsImage && vm.HasQr)
+        {
+            _previewCloseTimer.Stop();
+            _viewModel.SelectedItem = vm;
+            if (FindItemCard(sender as DependencyObject) is { } qrCard)
+            {
+                ShowItemHoverPreview(vm, qrCard);
+            }
+
+            return;
+        }
+
+        if (!vm.IsText)
         {
             return;
         }
@@ -990,11 +1007,19 @@ public partial class MainWindow : FluentWindow
 
     private void OnQrClicked(object sender, RoutedEventArgs e)
     {
-        if (GetCardViewModel(sender) is { } vm)
+        if (GetCardViewModel(sender) is not { } vm)
         {
-            _viewModel.SelectedItem = vm;
-            _ = _viewModel.GenerateQrForSelectedAsync();
+            return;
         }
+
+        _viewModel.SelectedItem = vm;
+        if (vm.IsImage && vm.HasQr)
+        {
+            _ = _viewModel.CopyQrTextAsync();
+            return;
+        }
+
+        _ = _viewModel.GenerateQrForSelectedAsync();
     }
 
     private void OnCopyClicked(object sender, RoutedEventArgs e)

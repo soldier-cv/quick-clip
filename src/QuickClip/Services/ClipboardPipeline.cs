@@ -140,9 +140,6 @@ public sealed class ClipboardPipeline
 
             await _db.InsertAsync(item);
 
-            // 双限：先删超 24h 非置顶，再按最大条数裁最旧非置顶
-            await _db.DeleteOlderThanAsync(
-                DateTime.Now.AddHours(-SettingsService.HistoryRetentionHours));
             var trimmed = await _db.TrimToMaxItemsAsync(_settings.MaxHistoryItems);
             foreach (var (_, preview) in trimmed)
             {

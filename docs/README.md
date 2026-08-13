@@ -7,8 +7,9 @@
 | [DESIGN.md](DESIGN.md) | 架构与实现设计 |
 | [COMPATIBILITY.md](COMPATIBILITY.md) | 系统兼容性（仅 Win10/11 x64） |
 | [SECURITY.md](SECURITY.md) | 隐私、密钥与日志约定 |
-| [assets/](assets/) | README 配图、品牌图标 |
+| [assets/](assets/) | README 配图（主面板 / 图片预览 / 二维码生成与解析）、品牌图标 |
 | [scripts/capture-preview.ps1](scripts/capture-preview.ps1) | 截取主面板预览图 |
+| [scripts/capture-readme-shots.ps1](scripts/capture-readme-shots.ps1) | 灌入演示数据并截取 README 配图 |
 | [preview.html](preview.html) | 早期 Fluent 交互 HTML 原型 |
 | [themes-preview.html](themes-preview.html) | 主题色板切换原型 |
 | [icon-concepts/](icon-concepts/) | 应用图标生成脚本（可选） |

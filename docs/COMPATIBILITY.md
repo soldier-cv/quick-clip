@@ -25,7 +25,7 @@ QuickClip 基于 **.NET 8 + WPF** 开发，目标平台为：
 | 快捷键接管（`Win+V`） | 🟢 | 🟢 | `RegisterHotKey` + `WH_KEYBOARD_LL` 回退 |
 | 剪贴板监听 | 🟢 | 🟢 | `AddClipboardFormatListener` |
 | 离线二维码生成/识别 | 🟢 | 🟢 | `ZXing.Net` + `QRCoder` |
-| SQLite 历史（条数 + 24h 淘汰） | 🟢 | 🟢 | `Microsoft.Data.Sqlite` |
+| SQLite 历史（条数上限淘汰） | 🟢 | 🟢 | `Microsoft.Data.Sqlite` |
 | 键盘粘贴回填 | 🟢 | 🟢 | `SendInput` |
 | UI 材质 | Acrylic | Mica / Acrylic | WPF-UI；远程显示自动降级 |
 | 离线 OCR | 🟢（需语言包） | 🟢 | `Windows.Media.Ocr`（WinRT） |

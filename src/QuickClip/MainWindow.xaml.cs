@@ -297,7 +297,7 @@ public partial class MainWindow : FluentWindow
         }
     }
 
-    /// <summary>真正退出进程（托盘退出、绿色版更新替换）。</summary>
+    /// <summary>真正退出进程（托盘退出）。</summary>
     public void RequestExit() => ExitApp();
 
     private void ExitApp()
@@ -1274,9 +1274,10 @@ public partial class MainWindow : FluentWindow
                 break;
             case Services.UpdateCheckStatus.Ready:
             case Services.UpdateCheckStatus.UpdateAvailable:
-                _services.Tray.ShowBalloonTip(
-                    "QuickClip",
-                    result.Message + "。点击托盘气泡或「立即更新」");
+                string extra = Services.UpdateService.CurrentChannel == Services.ReleaseChannel.Setup
+                    ? "。点击托盘气泡或「立即更新」"
+                    : "。点击托盘或「打开下载目录」，退出后自行替换";
+                _services.Tray.ShowBalloonTip("QuickClip", result.Message + extra);
                 break;
         }
     }

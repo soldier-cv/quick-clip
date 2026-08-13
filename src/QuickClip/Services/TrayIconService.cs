@@ -51,7 +51,7 @@ public sealed class TrayIconService : IDisposable
         var updateItem = new ToolStripMenuItem("检查更新…");
         updateItem.Click += (_, _) => CheckUpdateRequested?.Invoke();
 
-        _installUpdateItem = new ToolStripMenuItem("立即更新…") { Visible = false };
+        _installUpdateItem = new ToolStripMenuItem(UpdateService.ApplyActionLabel + "…") { Visible = false };
         _installUpdateItem.Click += (_, _) => InstallUpdateRequested?.Invoke();
 
         _exitItem = new ToolStripMenuItem("退出");
@@ -93,13 +93,14 @@ public sealed class TrayIconService : IDisposable
         void Apply()
         {
             _installUpdateItem.Visible = visible;
+            string action = UpdateService.ApplyActionLabel;
             if (!visible || string.IsNullOrEmpty(tagName))
             {
-                _installUpdateItem.Text = "立即更新…";
+                _installUpdateItem.Text = action + "…";
                 return;
             }
 
-            _installUpdateItem.Text = $"立即更新 {tagName}";
+            _installUpdateItem.Text = $"{action} {tagName}";
         }
 
         if (_notifyIcon.ContextMenuStrip.InvokeRequired)

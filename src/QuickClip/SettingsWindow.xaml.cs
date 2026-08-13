@@ -441,10 +441,10 @@ public partial class SettingsWindow : Window
         var pending = _services.Update.Pending;
         bool ready = pending != null && File.Exists(pending.LocalPath);
         InstallUpdateButton.Visibility = ready ? Visibility.Visible : Visibility.Collapsed;
-        InstallUpdateButton.Content = "立即更新";
+        InstallUpdateButton.Content = UpdateService.ApplyActionLabel;
         if (ready && string.IsNullOrEmpty(UpdateStatusText.Text))
         {
-            UpdateStatusText.Text = $"新版本 {pending!.TagName} 已下载";
+            UpdateStatusText.Text = UpdateService.ReadyNotifyText(pending!.TagName);
         }
     }
 

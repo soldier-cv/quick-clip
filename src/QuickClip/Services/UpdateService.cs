@@ -53,6 +53,16 @@ public sealed class UpdateService : IDisposable
     public static string ChannelLabel =>
         CurrentChannel == ReleaseChannel.Setup ? "安装版" : "绿色版";
 
+    /// <summary>已下载更新后的动作文案：安装版启动 Setup，绿色版只打开目录。</summary>
+    public static string ApplyActionLabel =>
+        CurrentChannel == ReleaseChannel.Setup ? "立即更新" : "打开下载目录";
+
+    /// <summary>下载完成后的托盘/设置提示。</summary>
+    public static string ReadyNotifyText(string tagName) =>
+        CurrentChannel == ReleaseChannel.Setup
+            ? $"发现新版本 {tagName}，已下载。点击即可更新"
+            : $"发现新版本 {tagName}，已下载。点击打开下载目录，退出后自行替换";
+
     public PendingUpdate? Pending { get; private set; }
 
     /// <summary>待安装更新变化（可能来自后台线程，订阅方需切回 UI）。</summary>
@@ -271,8 +281,8 @@ public sealed class UpdateService : IDisposable
     }
 
     /// <summary>
-    /// 安装版：启动 Setup。绿色版：写临时脚本，退出后自动覆盖当前 exe 并重启。
-    /// shouldExit 为 true 时调用方必须退出进程，否则文件被占用无法替换。
+    /// 安装版：启动 Setup。绿色版：打开已下载目录，由用户退出后自行替换。
+    /// shouldExit 现已始终为 false（绿色版不再自动覆盖正在运行的 exe）。
     /// </summary>
     public bool TryApplyPending(out string message, out bool shouldExit)
     {
@@ -297,13 +307,7 @@ public sealed class UpdateService : IDisposable
                 return true;
             }
 
-            if (!TryStartPortableSwap(pending.LocalPath, out message))
-            {
-                return false;
-            }
-
-            shouldExit = true;
-            return true;
+            return TryOpenDownloadFolder(pending.LocalPath, out message);
         }
         catch (Exception ex)
         {
@@ -313,74 +317,27 @@ public sealed class UpdateService : IDisposable
         }
     }
 
-    /// <summary>启动隐藏脚本：等本进程退出后把新 exe 拷到原路径并拉起。</summary>
-    private static bool TryStartPortableSwap(string sourcePath, out string message)
+    /// <summary>用资源管理器打开更新目录并选中已下载的绿色版 exe。</summary>
+    private static bool TryOpenDownloadFolder(string filePath, out string message)
     {
-        string? target = Environment.ProcessPath;
-        if (string.IsNullOrEmpty(target) || !File.Exists(target))
+        if (!File.Exists(filePath))
         {
-            message = "找不到当前程序路径";
+            message = "找不到已下载的更新文件";
             return false;
         }
 
-        if (string.Equals(Path.GetFullPath(sourcePath), Path.GetFullPath(target), StringComparison.OrdinalIgnoreCase))
-        {
-            message = "更新文件与当前程序是同一份";
-            return false;
-        }
-
-        string script = Path.Combine(Path.GetTempPath(), $"QuickClip-update-{Guid.NewGuid():N}.cmd");
-        File.WriteAllText(script, PortableSwapScript);
         Process.Start(new ProcessStartInfo
         {
-            FileName = script,
-            Arguments = Quote(target) + " " + Quote(sourcePath) + " " + Environment.ProcessId,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            WindowStyle = ProcessWindowStyle.Hidden
+            FileName = "explorer.exe",
+            Arguments = "/select," + Quote(filePath),
+            UseShellExecute = true
         });
-        DebugLog.Log("已启动绿色版替换脚本");
-        message = "正在更新并重启…";
+        DebugLog.Log($"已打开绿色版下载目录: {filePath}");
+        message = "已打开下载目录。请先退出 QuickClip，再用新文件替换原来的 exe";
         return true;
     }
 
     private static string Quote(string path) => "\"" + path.Trim('"') + "\"";
-
-    // ASCII only：路径通过参数传入，避免脚本编码踩中文路径
-    private const string PortableSwapScript =
-        """
-        @echo off
-        setlocal EnableExtensions
-        set "TARGET=%~1"
-        set "SOURCE=%~2"
-        set "WAITPID=%~3"
-        if not exist "%SOURCE%" exit /b 1
-        timeout /t 1 /nobreak >nul
-        set /a n=0
-        :wait
-        tasklist /FI "PID eq %WAITPID%" /NH 2>nul | find /I "INFO:" >nul
-        if %errorlevel%==0 goto copy
-        set /a n+=1
-        if %n% GEQ 45 goto copy
-        timeout /t 1 /nobreak >nul
-        goto wait
-        :copy
-        set /a n=0
-        :copytry
-        copy /Y "%SOURCE%" "%TARGET%" >nul
-        if not errorlevel 1 goto launch
-        set /a n+=1
-        if %n% GEQ 20 goto launchsrc
-        timeout /t 1 /nobreak >nul
-        goto copytry
-        :launch
-        start "" "%TARGET%"
-        goto cleanup
-        :launchsrc
-        start "" "%SOURCE%"
-        :cleanup
-        del "%~f0"
-        """;
 
     private async Task RunSilentCheckAsync()
     {
@@ -401,9 +358,7 @@ public sealed class UpdateService : IDisposable
         var result = await CheckAndDownloadAsync(interactive: false);
         if (result.Status == UpdateCheckStatus.Ready && result.Pending != null)
         {
-            UserNotify?.Invoke(
-                "QuickClip",
-                $"发现新版本 {result.Pending.TagName}，已下载。点击即可更新");
+            UserNotify?.Invoke("QuickClip", ReadyNotifyText(result.Pending.TagName));
         }
     }
 

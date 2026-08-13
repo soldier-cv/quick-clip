@@ -590,7 +590,7 @@
                                        Appearance="Primary"
                                        Height="34"
                                        Padding="14,0"
-                                       Content="立即更新"
+                                       Content="打开下载目录"
                                        Visibility="Collapsed"
                                        Click="OnInstallUpdateClicked" />
                         </StackPanel>

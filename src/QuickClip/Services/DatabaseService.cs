@@ -4,7 +4,7 @@ using QuickClip.Models;
 
 namespace QuickClip.Services;
 
-/// <summary>SQLite 本地存储：剪贴板历史；淘汰由条数上限 + 24h 超龄共同约束。</summary>
+/// <summary>SQLite 本地存储：剪贴板历史；超出条数上限时淘汰最旧非置顶。</summary>
 public sealed class DatabaseService : IDisposable
 {
     private readonly SqliteConnection _connection;
@@ -139,23 +139,6 @@ public sealed class DatabaseService : IDisposable
             cmd.Parameters.AddWithValue("$pinned", pinned ? 1 : 0);
             cmd.Parameters.AddWithValue("$id", id);
             await cmd.ExecuteNonQueryAsync();
-        }
-        finally
-        {
-            _gate.Release();
-        }
-    }
-
-    /// <summary>删除指定时间之前的非置顶条目。</summary>
-    public async Task<int> DeleteOlderThanAsync(DateTime threshold)
-    {
-        await _gate.WaitAsync();
-        try
-        {
-            using var cmd = _connection.CreateCommand();
-            cmd.CommandText = "DELETE FROM clipboard_items WHERE is_pinned = 0 AND created_at < $threshold;";
-            cmd.Parameters.AddWithValue("$threshold", threshold.ToString("yyyy-MM-dd HH:mm:ss"));
-            return await cmd.ExecuteNonQueryAsync();
         }
         finally
         {

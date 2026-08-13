@@ -17,7 +17,7 @@ graph TD
         PIPE --> DEDUP[去重与防抖判断]
         DEDUP --> PARSER[数据解析器: 文本/图片/链接/文件]
         PARSER --> SMART[智能检测: 离线二维码识别 / 链接清洗]
-        SMART --> DB[(本地 SQLite<br>条数上限 + 24h 淘汰)]
+        SMART --> DB[(本地 SQLite<br>条数上限淘汰)]
     end
 
     subgraph 界面与交互层
@@ -63,7 +63,7 @@ graph TD
    - 引用 WinRT 原生库 `Windows.Media.Ocr.OcrEngine`；
    - 将剪贴板位图转换为 `SoftwareBitmap`，直接本地调用 `engine.RecognizeAsync(softwareBitmap)` 毫秒级提取文本。
 
-### 2.4 存储结构与双限淘汰（条数 + 24h）
+### 2.4 存储结构与条数淘汰
 - 本地数据库：`quickclip.db`（SQLite）
 - 数据表定义：
   ```sql
@@ -80,10 +80,7 @@ graph TD
 
   CREATE INDEX IF NOT EXISTS idx_created_at ON clipboard_items(created_at);
   ```
-- **自动淘汰**（共同作用，置顶豁免）：
-  1. **超龄**：非置顶且 `created_at` 早于 24 小时前 → 删除  
-  2. **超条数**：总数超过 `MaxHistoryItems`（默认 233，可配置 50～2000）→ 删最旧非置顶  
-  写入历史时立即裁条数；定时任务（启动约 8 分钟后，之后每 60 分钟）执行超龄 + 超条数 + 孤儿预览清理。
+- **自动淘汰**（置顶豁免）：总数超过 `MaxHistoryItems`（默认 233，可配置 50～2000）时删最旧非置顶。写入时立即裁条数；定时任务（启动约 8 分钟后，之后每 60 分钟）再裁一次并清理孤儿预览。不按时间过期。
 - **捕获体积（只影响是否记历史，绝不改写系统剪贴板）**：
   - 文本/链接 &gt; 2M 字符 → 不入库  
   - 图片像素 &gt; 40MP 或落盘 PNG &gt; 30MB → 不入库（删临时预览）  
@@ -168,4 +165,4 @@ graph TD
 - **双渠道**：绿色自包含 `QuickClip.exe`；安装包 `QuickClip-Setup-win-x64.exe`（framework-dependent，需 .NET 8 Desktop Runtime）。安装目录写入 `QuickClip.installed` 以识别渠道。
 - **静默检查**：启动约 90 秒后查询 `releases/latest`，之后每 24 小时最多一次。设置 `AutoCheckUpdates` 默认开，关闭后不访问 GitHub。失败只写日志。
 - **下载**：按渠道匹配 asset（安装包名含 `Setup`；绿色版优先 `QuickClip.exe`），校验 HTTPS 主机为 GitHub，写入 `%LOCALAPPDATA%\QuickClip\updates\`，不自动覆盖正在运行的进程。
-- **安装**：托盘气泡 /「立即更新」菜单 / 设置同一按钮。安装版启动 Setup；绿色版写临时脚本，退出当前进程后自动覆盖 exe 并重启。
+- **安装**：托盘气泡 / 设置同一按钮。安装版启动 Setup；绿色版打开 `%LOCALAPPDATA%\QuickClip\updates\` 并选中已下载的 exe，由用户退出后自行替换（不自动覆盖正在运行的单文件）。

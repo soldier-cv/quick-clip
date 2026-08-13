@@ -75,12 +75,6 @@ public sealed class SettingsService
     public const int MinMaxHistoryItems = 50;
     public const int AbsoluteMaxHistoryItems = 2000;
 
-    /// <summary>
-    /// 非置顶历史最长保留时间（小时），与 <see cref="MaxHistoryItems"/> 共同作用：
-    /// 超龄或超条数都会淘汰（置顶条目两者均豁免）。
-    /// </summary>
-    public const int HistoryRetentionHours = 24;
-
     // ---------- 捕获体积上限（仅决定是否写入历史；绝不改写系统剪贴板，粘贴到别处不受影响） ----------
 
     /// <summary>单条文本/链接最大字符数；超限不记历史。</summary>

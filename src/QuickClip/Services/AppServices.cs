@@ -114,10 +114,6 @@ public sealed class AppServices : IDisposable
     {
         try
         {
-            // 双限共同作用：超条数 或 超 24h 的非置顶都删（置顶豁免）
-            int aged = await Database.DeleteOlderThanAsync(
-                DateTime.Now.AddHours(-SettingsService.HistoryRetentionHours));
-
             var trimmed = await Database.TrimToMaxItemsAsync(Settings.MaxHistoryItems);
             foreach (var (_, preview) in trimmed)
             {
@@ -126,11 +122,9 @@ public sealed class AppServices : IDisposable
 
             await Database.CleanupOrphanPreviewsAsync(Paths);
 
-            if (aged > 0 || trimmed.Count > 0)
+            if (trimmed.Count > 0)
             {
-                DebugLog.Log(
-                    $"历史清理: 超龄({SettingsService.HistoryRetentionHours}h)删 {aged} 条, " +
-                    $"超条数({Settings.MaxHistoryItems})删 {trimmed.Count} 条");
+                DebugLog.Log($"历史清理: 超条数({Settings.MaxHistoryItems})删 {trimmed.Count} 条");
             }
 
             if (_lastVacuumDate.Date != DateTime.Now.Date)

@@ -1,3 +1,4 @@
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -36,12 +37,15 @@ public partial class SettingsWindow : Window
         FillThemeBox();
 
         RefreshUi();
+        RefreshUpdatePanel();
         _services.Settings.Changed += OnSettingsChanged;
+        _services.Update.PendingChanged += OnPendingUpdateChanged;
         ThemeService.Changed += OnThemeServiceChanged;
         Loaded += OnSettingsWindowLoaded;
         Closed += (_, _) =>
         {
             _services.Settings.Changed -= OnSettingsChanged;
+            _services.Update.PendingChanged -= OnPendingUpdateChanged;
             ThemeService.Changed -= OnThemeServiceChanged;
             Loaded -= OnSettingsWindowLoaded;
         };
@@ -151,7 +155,9 @@ public partial class SettingsWindow : Window
             SelectThemeInBox(s.Theme);
 
             AutoStartCheck.IsChecked = s.AutoStart;
+            AutoCheckUpdatesCheck.IsChecked = s.AutoCheckUpdates;
             TextOnlyCheck.IsChecked = s.TextOnlyCapture;
+            ChannelText.Text = "当前渠道：" + UpdateService.ChannelLabel;
             MaxHistoryBox.Text = s.MaxHistoryItems.ToString();
             VersionText.Text = "v" + UpdateService.CurrentVersion;
 
@@ -169,6 +175,9 @@ public partial class SettingsWindow : Window
             OpenAiApiKeyBox.Password = s.OpenAiApiKey ?? string.Empty;
             OllamaPanel.Visibility = s.OcrEngine == OcrEngineType.Ollama ? Visibility.Visible : Visibility.Collapsed;
             OpenAiPanel.Visibility = s.OcrEngine == OcrEngineType.OpenAi ? Visibility.Visible : Visibility.Collapsed;
+            OcrTestPanel.Visibility = s.OcrEngine is OcrEngineType.Ollama or OcrEngineType.OpenAi
+                ? Visibility.Visible
+                : Visibility.Collapsed;
         }
         finally
         {
@@ -402,6 +411,43 @@ public partial class SettingsWindow : Window
         _services.Settings.SetAutoStart(AutoStartCheck.IsChecked == true);
     }
 
+    private void OnAutoCheckUpdatesToggled(object sender, RoutedEventArgs e)
+    {
+        if (_suppressUiEvents)
+        {
+            return;
+        }
+
+        bool enabled = AutoCheckUpdatesCheck.IsChecked == true;
+        if (enabled == _services.Settings.AutoCheckUpdates)
+        {
+            return;
+        }
+
+        _services.Settings.SetAutoCheckUpdates(enabled);
+        if (enabled)
+        {
+            _ = CheckAndDownloadFromSettingsAsync();
+        }
+    }
+
+    private void OnPendingUpdateChanged(PendingUpdate? _)
+    {
+        Dispatcher.BeginInvoke(RefreshUpdatePanel);
+    }
+
+    private void RefreshUpdatePanel()
+    {
+        var pending = _services.Update.Pending;
+        bool ready = pending != null && File.Exists(pending.LocalPath);
+        InstallUpdateButton.Visibility = ready ? Visibility.Visible : Visibility.Collapsed;
+        InstallUpdateButton.Content = "立即更新";
+        if (ready && string.IsNullOrEmpty(UpdateStatusText.Text))
+        {
+            UpdateStatusText.Text = $"新版本 {pending!.TagName} 已下载";
+        }
+    }
+
     private void OnThemeChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_suppressUiEvents || !_themeBoxReady || !IsLoaded)
@@ -514,7 +560,10 @@ public partial class SettingsWindow : Window
         }
     }
 
-    private async void OnCheckUpdateClicked(object sender, RoutedEventArgs e)
+    private async void OnCheckUpdateClicked(object sender, RoutedEventArgs e) =>
+        await CheckAndDownloadFromSettingsAsync();
+
+    private async Task CheckAndDownloadFromSettingsAsync()
     {
         if (_busy)
         {
@@ -526,33 +575,32 @@ public partial class SettingsWindow : Window
         UpdateStatusText.Text = "正在检查更新…";
         try
         {
-            var result = await _services.Update.CheckForUpdateAsync();
+            var result = await _services.Update.CheckAndDownloadAsync(interactive: true);
             UpdateStatusText.Text = result.Message ?? string.Empty;
-
-            if (result.Status == UpdateCheckStatus.UpdateAvailable &&
-                !string.IsNullOrEmpty(result.Release?.DownloadUrl))
-            {
-                try
-                {
-                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                    {
-                        FileName = result.Release.DownloadUrl,
-                        UseShellExecute = true
-                    });
-                    UpdateStatusText.Text = $"{result.Message}，已打开下载页";
-                }
-                catch (Exception ex)
-                {
-                    DebugLog.LogException("打开更新下载页失败", ex);
-                    UpdateStatusText.Text = $"{result.Message}，但无法自动打开浏览器";
-                }
-            }
+            RefreshUpdatePanel();
         }
         finally
         {
             _busy = false;
             CheckUpdateButton.IsEnabled = true;
         }
+    }
+
+    private void OnInstallUpdateClicked(object sender, RoutedEventArgs e)
+    {
+        if (_services.Update.TryApplyPending(out string message, out bool shouldExit))
+        {
+            UpdateStatusText.Text = message;
+            if (shouldExit)
+            {
+                _services.MainWindow?.RequestExit();
+            }
+
+            return;
+        }
+
+        UpdateStatusText.Text = message;
+        RefreshUpdatePanel();
     }
 
     private void OnCloseClicked(object sender, RoutedEventArgs e) => Close();
@@ -575,6 +623,9 @@ public partial class SettingsWindow : Window
 
         OllamaPanel.Visibility = engine == OcrEngineType.Ollama ? Visibility.Visible : Visibility.Collapsed;
         OpenAiPanel.Visibility = engine == OcrEngineType.OpenAi ? Visibility.Visible : Visibility.Collapsed;
+        OcrTestPanel.Visibility = engine is OcrEngineType.Ollama or OcrEngineType.OpenAi
+            ? Visibility.Visible
+            : Visibility.Collapsed;
 
         if (_services.Settings.OcrEngine != engine)
         {
@@ -596,6 +647,45 @@ public partial class SettingsWindow : Window
             OpenAiBaseUrlBox.Text,
             OpenAiModelBox.Text,
             OpenAiApiKeyBox.Password);
+    }
+
+    private async void OnOcrTestClicked(object sender, RoutedEventArgs e)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        PersistOcrForm();
+        _busy = true;
+        OcrTestButton.IsEnabled = false;
+        OcrTestStatus.Text = "正在测试 " + _services.Ocr.ConfiguredEngineTitle + "…";
+        try
+        {
+            OcrTestStatus.Text = await _services.Ocr.ProbeConfiguredEngineAsync();
+        }
+        finally
+        {
+            _busy = false;
+            OcrTestButton.IsEnabled = true;
+        }
+    }
+
+    private void PersistOcrForm()
+    {
+        if (OcrEngineBox.SelectedIndex == 1)
+        {
+            _services.Settings.SetOllamaConfig(OllamaBaseUrlBox.Text, OllamaModelBox.Text);
+            return;
+        }
+
+        if (OcrEngineBox.SelectedIndex == 2)
+        {
+            _services.Settings.SetOpenAiConfig(
+                OpenAiBaseUrlBox.Text,
+                OpenAiModelBox.Text,
+                OpenAiApiKeyBox.Password);
+        }
     }
 
     // ---------- 文案 ----------

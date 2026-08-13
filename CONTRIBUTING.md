@@ -19,7 +19,7 @@ dotnet run --project src/QuickClip/QuickClip.csproj
 3. **日志**：使用 `DebugLog`，**禁止**把 API Key、用户剪贴板全文等敏感信息写入日志。
 4. **设置**：用户数据只落在 `%LOCALAPPDATA%\QuickClip\`，不要写进仓库。
 5. **异常**：边界处捕获并记录；不要空 `catch` 后静默吞掉关键失败（日志模块本身除外）。
-6. **平台**：不引入 Win7 依赖；不默认联网（除用户主动「检查更新」或自选云端 OCR）。
+6. **平台**：不引入 Win7 依赖；联网仅限更新检查（默认可关）与用户自选的云端 OCR。
 7. **格式**：遵循仓库根目录 `.editorconfig`。
 
 ## 提交前自检
@@ -27,7 +27,7 @@ dotnet run --project src/QuickClip/QuickClip.csproj
 ```powershell
 dotnet build QuickClip.sln -c Debug
 # 有改动时再跑：
-dotnet publish src/QuickClip/QuickClip.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o publish
+dotnet publish src/QuickClip/QuickClip.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish
 ```
 
 - 不要提交 `bin/`、`obj/`、`publish/`、本地 `settings.json` 或密钥。

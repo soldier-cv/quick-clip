@@ -451,16 +451,8 @@
                     <ui:Button x:Name="HelpTipButton"
                            Appearance="Transparent"
                            Padding="4,2"
-                           CornerRadius="6">
-                    <ui:Button.ToolTip>
-                        <ToolTip Background="{DynamicResource Theme.Card}">
-                            <TextBlock x:Name="HelpTipText"
-                                       Foreground="{DynamicResource Theme.Text}"
-                                       FontSize="12"
-                                       LineHeight="20"
-                                       Text="快捷键提示" />
-                        </ToolTip>
-                    </ui:Button.ToolTip>
+                           CornerRadius="6"
+                           ToolTip="快捷键提示">
                     <ui:SymbolIcon Symbol="QuestionCircle24" FontSize="15"
                                    Foreground="{DynamicResource Theme.TextSecondary}" />
                 </ui:Button>
@@ -600,37 +592,50 @@
             </Border>
         </Grid>
 
-        <!-- OCR 结果覆盖层 -->
+        <!-- OCR 结果覆盖层：尺寸跟主窗口走，避免比列表还宽被裁切 -->
         <Grid x:Name="OcrOverlay"
               Grid.RowSpan="4"
               Background="#D8000000"
               Visibility="Collapsed">
-            <Border Width="560"
-                    Padding="28,24"
+            <Border x:Name="OcrDialog"
+                    Margin="14"
+                    Padding="20,16"
+                    MaxWidth="432"
                     Background="{DynamicResource Theme.Card}"
                     BorderBrush="{DynamicResource Theme.Border}"
                     BorderThickness="1"
                     CornerRadius="18"
-                    HorizontalAlignment="Center"
-                    VerticalAlignment="Center">
-                <StackPanel>
-                    <TextBlock Text="离线 OCR 识别结果"
+                    HorizontalAlignment="Stretch"
+                    VerticalAlignment="Stretch">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <TextBlock x:Name="OcrTitle"
+                               Text="离线识别"
                                Foreground="{DynamicResource Theme.Text}"
                                FontSize="15"
                                FontWeight="SemiBold"
+                               TextWrapping="Wrap"
                                HorizontalAlignment="Center" />
                     <TextBox x:Name="OcrText"
-                             Height="240"
-                             Margin="0,14"
+                             Grid.Row="1"
+                             MinHeight="120"
+                             Margin="0,12"
                              Padding="10"
                              TextWrapping="Wrap"
                              AcceptsReturn="True"
                              VerticalScrollBarVisibility="Auto"
+                             HorizontalScrollBarVisibility="Disabled"
                              Foreground="{DynamicResource Theme.Text}"
                              Background="{DynamicResource Theme.Search}"
                              BorderBrush="{DynamicResource Theme.Border}"
                              IsReadOnly="True" />
-                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                    <StackPanel Grid.Row="2"
+                                Orientation="Horizontal"
+                                HorizontalAlignment="Center">
                         <ui:Button Appearance="Primary"
                                    Height="36"
                                    MinWidth="120"
@@ -644,7 +649,7 @@
                                    Content="关闭"
                                    Click="OnCloseOverlays" />
                     </StackPanel>
-                </StackPanel>
+                </Grid>
             </Border>
         </Grid>
 

@@ -59,6 +59,19 @@ public sealed class AppServices : IDisposable
 
         _appliedAutoStart = Settings.AutoStart;
 
+        Update.Attach(Paths, Settings);
+        var ui = Dispatcher.CurrentDispatcher;
+        Update.PendingChanged += pending =>
+            ui.BeginInvoke(() => Tray.SetInstallUpdateVisible(pending != null, pending?.TagName));
+        Update.UserNotify += (title, message) =>
+            ui.BeginInvoke(() => Tray.ShowBalloonTip(title, message));
+        if (Update.Pending != null)
+        {
+            Tray.SetInstallUpdateVisible(true, Update.Pending.TagName);
+        }
+
+        Update.StartSilentChecks();
+
         // 先挂监听 + 热键（核心路径），再同步托盘
         Monitor.ClipboardUpdated += Pipeline.OnClipboardUpdated;
         // 历史项复制/粘贴回写系统剪贴板时抑制捕获，避免列表顶部再插一条相同记录

@@ -45,7 +45,7 @@ jobs:
       - name: Build (Debug)
         run: dotnet build QuickClip.sln -c Debug --no-restore
 
-      - name: Publish single-file (win-x64)
+      - name: Publish portable (self-contained single-file)
         shell: pwsh
         run: |
           $ver = '${{ steps.ver.outputs.version }}'
@@ -60,24 +60,79 @@ jobs:
             "-p:FileVersion=$asm" `
             -o publish
           $exe = 'publish/QuickClip.exe'
-          if (-not (Test-Path $exe)) { throw 'QuickClip.exe not found after publish' }
+          if (-not (Test-Path $exe)) { throw 'QuickClip.exe not found after portable publish' }
           $len = (Get-Item $exe).Length
-          if ($len -lt 1MB) { throw "Artifact suspiciously small: $len bytes" }
-          Write-Host "Artifact: $len bytes"
+          if ($len -lt 1MB) { throw "Portable artifact suspiciously small: $len bytes" }
+          Write-Host "Portable: $len bytes"
 
-      - name: Upload build artifact
+      - name: Publish framework-dependent (installer payload)
+        shell: pwsh
+        run: |
+          $ver = '${{ steps.ver.outputs.version }}'
+          $asm = '${{ steps.ver.outputs.assembly }}'
+          New-Item -ItemType Directory -Force -Path publish/fdd | Out-Null
+          dotnet publish src/QuickClip/QuickClip.csproj `
+            -c Release -r win-x64 --self-contained false `
+            -p:PublishSingleFile=false `
+            "-p:Version=$ver" `
+            "-p:AssemblyVersion=$asm" `
+            "-p:FileVersion=$asm" `
+            -o publish/fdd
+          $exe = 'publish/fdd/QuickClip.exe'
+          if (-not (Test-Path $exe)) { throw 'framework-dependent QuickClip.exe missing' }
+          Write-Host "FDD exe: $((Get-Item $exe).Length) bytes"
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $env:QUICKCLIP_VERSION = '${{ steps.ver.outputs.version }}'
+          $isccDir = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6'
+          $iscc = Join-Path $isccDir 'ISCC.exe'
+          if (-not (Test-Path $iscc)) { throw "ISCC.exe not found: $iscc" }
+          $iss = 'setup\QuickClip.iss'
+          $isl = Join-Path $isccDir 'Languages\ChineseSimplified.isl'
+          if (-not (Test-Path $isl)) {
+            Write-Host 'ChineseSimplified.isl missing, compile with English only'
+            $tmp = Join-Path $env:RUNNER_TEMP 'QuickClip.iss'
+            (Get-Content $iss -Raw) -replace '(?m)^Name: "chinesesimp";.*\r?\n', '' | Set-Content -Path $tmp -Encoding utf8
+            $iss = $tmp
+          }
+          & $iscc $iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed: $LASTEXITCODE" }
+          $setup = 'publish/setup/QuickClip-Setup-win-x64.exe'
+          if (-not (Test-Path $setup)) { throw "Installer missing: $setup" }
+          Write-Host "Setup: $((Get-Item $setup).Length) bytes"
+
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: QuickClip-win-x64-v${{ steps.ver.outputs.version }}
-          path: publish/QuickClip.exe
+          path: |
+            publish/QuickClip.exe
+            publish/setup/QuickClip-Setup-win-x64.exe
           if-no-files-found: error
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: publish/QuickClip.exe
+          files: |
+            publish/QuickClip.exe
+            publish/setup/QuickClip-Setup-win-x64.exe
           generate_release_notes: true
           fail_on_unmatched_files: true
           draft: false
           prerelease: false
+          body: |
+            ## 下载
+
+            | 文件 | 说明 |
+            | --- | --- |
+            | `QuickClip-Setup-win-x64.exe` | **推荐**安装版，体积小，需 [.NET 8 桌面运行时 x64](https://aka.ms/dotnet/8.0/windowsdesktop-runtime-win-x64.exe) |
+            | `QuickClip.exe` | 绿色单文件，自带运行时 |
+
+            详细变更见 [CHANGELOG.md](https://github.com/soldier-cv/quick-clip/blob/master/CHANGELOG.md)。

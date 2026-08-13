@@ -65,6 +65,12 @@ public sealed class SettingsService
     /// <summary>仅记录文本/链接，忽略图片与文件。</summary>
     public bool TextOnlyCapture { get; private set; }
 
+    /// <summary>启动后延迟检查 GitHub 并下载对应渠道安装包。默认开启。</summary>
+    public bool AutoCheckUpdates { get; private set; } = true;
+
+    /// <summary>上次静默检查时间（UTC）。用于 24 小时节流。</summary>
+    public DateTime? LastUpdateCheckUtc { get; private set; }
+
     public const int DefaultMaxHistoryItems = 233;
     public const int MinMaxHistoryItems = 50;
     public const int AbsoluteMaxHistoryItems = 2000;
@@ -150,6 +156,8 @@ public sealed class SettingsService
             OpenAiApiKey = dto.OpenAiApiKey;
 
             TextOnlyCapture = dto.TextOnlyCapture ?? false;
+            AutoCheckUpdates = dto.AutoCheckUpdates ?? true;
+            LastUpdateCheckUtc = ParseUtc(dto.LastUpdateCheckUtc);
             MaxHistoryItems = ClampMaxHistory(dto.MaxHistoryItems ?? DefaultMaxHistoryItems);
 
             ApplyPanelHotkeys(dto.PanelHotkeys);
@@ -218,6 +226,39 @@ public sealed class SettingsService
         if (TextOnlyCapture == enabled) return;
         TextOnlyCapture = enabled;
         Save();
+    }
+
+    public void SetAutoCheckUpdates(bool enabled)
+    {
+        if (AutoCheckUpdates == enabled)
+        {
+            return;
+        }
+
+        AutoCheckUpdates = enabled;
+        Save();
+    }
+
+    public void SetLastUpdateCheckUtc(DateTime utc)
+    {
+        LastUpdateCheckUtc = DateTime.SpecifyKind(utc, DateTimeKind.Utc);
+        Save();
+    }
+
+    private static DateTime? ParseUtc(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return null;
+        }
+
+        return DateTime.TryParse(
+            text,
+            null,
+            System.Globalization.DateTimeStyles.RoundtripKind,
+            out DateTime value)
+            ? DateTime.SpecifyKind(value, DateTimeKind.Utc)
+            : null;
     }
 
     public static int ClampMaxHistory(int value) =>
@@ -471,6 +512,8 @@ public sealed class SettingsService
                 OpenAiApiKey = OpenAiApiKey,
                 MaxHistoryItems = MaxHistoryItems,
                 TextOnlyCapture = TextOnlyCapture,
+                AutoCheckUpdates = AutoCheckUpdates,
+                LastUpdateCheckUtc = LastUpdateCheckUtc?.ToUniversalTime().ToString("o"),
                 PanelHotkeys = new PanelHotkeysData
                 {
                     PasteSelected = HotkeyData.FromBinding(PasteSelectedHotkey),
@@ -512,6 +555,8 @@ public sealed class SettingsData
     public string? OpenAiApiKey { get; set; }
     public int? MaxHistoryItems { get; set; }
     public bool? TextOnlyCapture { get; set; }
+    public bool? AutoCheckUpdates { get; set; }
+    public string? LastUpdateCheckUtc { get; set; }
     public PanelHotkeysData? PanelHotkeys { get; set; }
 }
 

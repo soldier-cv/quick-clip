@@ -47,8 +47,9 @@ QuickClip 基于 **.NET 8 + WPF** 开发，目标平台为：
 
 ### 2.3 打包部署
 
-- .NET 8 自包含单文件（`PublishSingleFile` + `SelfContained`）
-- 绿色免安装，**不要求**目标机预装 .NET，但 **OS 必须是 x64 的 Windows 10/11**
+- **绿色版**：.NET 8 自包含单文件（`PublishSingleFile` + `SelfContained`），不要求预装运行时
+- **安装版**：framework-dependent，体积小，目标机需 [.NET 8 桌面运行时 x64](https://aka.ms/dotnet/8.0/windowsdesktop-runtime-win-x64.exe)
+- 两种包都只支持 **x64 的 Windows 10/11**
 
 ### 2.4 热键与安全软件
 
@@ -59,7 +60,8 @@ QuickClip 基于 **.NET 8 + WPF** 开发，目标平台为：
 
 - 开机自启：写 `HKCU\...\Run`，无需管理员
 - 以管理员重启：走 UAC；用户取消则不退出当前实例
-- 检查更新：仅用户主动点击时访问 GitHub Releases API
+- 检查更新：默认启动约 90 秒后访问 GitHub Releases API，并可下载对应渠道安装包；设置中可关闭
+- 安装版需要 64 位 .NET 8 桌面运行时；绿色版自包含，不要求预装运行时
 
 ---
 

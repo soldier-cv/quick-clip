@@ -10,7 +10,8 @@
 %LOCALAPPDATA%\QuickClip\
   quickclip.db      # 剪贴板历史
   previews\         # 图片缩略图
-  settings.json     # 热键、自启动、OCR 配置等
+  settings.json     # 热键、自启动、OCR、自动更新等
+  updates\          # 已下载的更新包
   debug.log         # 诊断日志
 ```
 
@@ -22,7 +23,7 @@
 | --- | --- |
 | 剪贴板正文 | 仅存本地 SQLite，**不**写入 `debug.log` |
 | OpenAI API Key | 仅存本地 `settings.json`；设置页用 PasswordBox；**禁止**写入日志 |
-| 网络 | 默认离线；仅「检查更新」与用户自选的 Ollama/OpenAI OCR 会联网 |
+| 网络 | 日常离线。默认会静默访问 GitHub Releases（可关）；用户自选的 Ollama/OpenAI OCR 也会联网。更新包仅从 `github.com` / `*.githubusercontent.com` 下载 |
 
 ## 贡献时注意
 

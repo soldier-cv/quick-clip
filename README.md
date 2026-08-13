@@ -21,7 +21,7 @@
 - 🧹 **条数 + 24 小时双限**：默认最多 233 条，超龄或超条数淘汰非置顶；列表可一键清空。
 - 📦 **大体积极限**：超大文本/图片不记历史；文件只记路径。不改写系统剪贴板，复制后仍可粘到别处。
 - 🎨 **多主题**：Terminal / One Dark / GitHub / Nord 等；悬停预览与主题一致。
-- 🧩 **纯离线**：日常功能本地完成；仅「检查更新」在用户主动点击时联网。
+- 🧩 **本地优先**：日常功能离线完成。更新检查默认可关；OCR 可选 Ollama / OpenAI。
 
 ---
 
@@ -37,7 +37,14 @@
 
 ## 下载
 
-从 [Releases](https://github.com/soldier-cv/quick-clip/releases) 下载最新版 `QuickClip.exe`（单文件自包含，免安装 .NET 运行时），双击即用。
+从 [Releases](https://github.com/soldier-cv/quick-clip/releases) 下载：
+
+| 包 | 说明 |
+| --- | --- |
+| `QuickClip-Setup-win-x64.exe` | **推荐**。体积小，需已安装 [.NET 8 桌面运行时 x64](https://aka.ms/dotnet/8.0/windowsdesktop-runtime-win-x64.exe) |
+| `QuickClip.exe` | 绿色单文件，自带运行时，免安装、体积较大 |
+
+启动后会延迟检查更新并下载到 `%LOCALAPPDATA%\QuickClip\updates\`，点托盘或设置里的「立即更新」即可：安装版打开 Setup，绿色版自动替换 exe 并重启。可在设置中关闭自动检查。
 
 ## 从源码构建
 
@@ -48,7 +55,10 @@
 dotnet run --project src/QuickClip/QuickClip.csproj
 
 # 发布单文件绿色版（自包含）
-dotnet publish src/QuickClip/QuickClip.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o publish
+dotnet publish src/QuickClip/QuickClip.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish
+
+# 发布安装包用的依赖运行时目录（需本机 Inno Setup 再编 setup/QuickClip.iss）
+dotnet publish src/QuickClip/QuickClip.csproj -c Release -r win-x64 --self-contained false -p:PublishSingleFile=false -o publish/fdd
 ```
 
 `publish/` 为本地输出目录，已加入 `.gitignore`，不会进版本库。
@@ -77,7 +87,8 @@ dotnet publish src/QuickClip/QuickClip.csproj -c Release -r win-x64 --self-conta
 - 数据目录：`%LOCALAPPDATA%\QuickClip\`
   - `quickclip.db`：剪贴板历史
   - `previews\`：图片缩略图
-  - `settings.json`：热键、自启动等
+  - `updates\`：已下载的更新包
+  - `settings.json`：热键、自启动、自动更新等
   - `debug.log`：诊断日志
 - 设置：面板 ⚙ 或托盘 → 设置…
 - 退出：托盘右键 → 退出；关闭窗口仅隐藏到托盘

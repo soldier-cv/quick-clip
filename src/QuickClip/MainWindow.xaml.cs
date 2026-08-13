@@ -55,6 +55,7 @@ public partial class MainWindow : FluentWindow
         _services.Tray.AutoStartToggleRequested += ToggleAutoStart;
         _services.Tray.RestartAsAdminRequested += RestartAsAdmin;
         _services.Tray.CheckUpdateRequested += CheckUpdateAsync;
+        _services.Tray.InstallUpdateRequested += ApplyPendingUpdate;
         _services.Tray.OpenDataFolderRequested += OpenDataFolderFromTray;
         _services.Tray.ClearTodayHistoryRequested += ClearTodayFromTray;
 
@@ -297,6 +298,9 @@ public partial class MainWindow : FluentWindow
         }
     }
 
+    /// <summary>真正退出进程（托盘退出、绿色版更新替换）。</summary>
+    public void RequestExit() => ExitApp();
+
     private void ExitApp()
     {
         _exiting = true;
@@ -341,13 +345,11 @@ public partial class MainWindow : FluentWindow
                         (ModifierKeys.Control | ModifierKeys.Alt | ModifierKeys.Shift | ModifierKeys.Windows);
         var settings = _services.Settings;
 
-        // 约定键（Esc / Delete / ↑↓ / Ctrl+C / 1~9）：功能保留，固定默认，不在设置页列出
-        // 产品热键（粘贴 / 纯文本粘贴 / 置顶）：可读设置
-
+        // 面板快捷键一律读设置（与帮助气泡、设置页同一套绑定）
         if (QrOverlay.Visibility == Visibility.Visible ||
             OcrOverlay.Visibility == Visibility.Visible)
         {
-            if (Models.HotkeyBinding.HidePanelDefault.Matches(key, modifiers))
+            if (settings.HidePanelHotkey.Matches(key, modifiers))
             {
                 OnCloseOverlays(sender, e);
                 e.Handled = true;
@@ -356,7 +358,7 @@ public partial class MainWindow : FluentWindow
             return;
         }
 
-        if (Models.HotkeyBinding.HidePanelDefault.Matches(key, modifiers))
+        if (settings.HidePanelHotkey.Matches(key, modifiers))
         {
             HideWindow();
             e.Handled = true;
@@ -377,7 +379,7 @@ public partial class MainWindow : FluentWindow
             return;
         }
 
-        if (Models.HotkeyBinding.DeleteSelectedDefault.Matches(key, modifiers))
+        if (settings.DeleteSelectedHotkey.Matches(key, modifiers))
         {
             _ = _viewModel.DeleteSelectedAsync();
             e.Handled = true;
@@ -391,21 +393,21 @@ public partial class MainWindow : FluentWindow
             return;
         }
 
-        if (Models.HotkeyBinding.CopySelectedDefault.Matches(key, modifiers) && !IsSearchFocused())
+        if (settings.CopySelectedHotkey.Matches(key, modifiers) && !IsSearchFocused())
         {
             _ = _viewModel.CopySelectedToClipboard();
             e.Handled = true;
             return;
         }
 
-        if (Models.HotkeyBinding.MoveDownDefault.Matches(key, modifiers))
+        if (settings.MoveDownHotkey.Matches(key, modifiers))
         {
             MoveSelection(1);
             e.Handled = true;
             return;
         }
 
-        if (Models.HotkeyBinding.MoveUpDefault.Matches(key, modifiers))
+        if (settings.MoveUpHotkey.Matches(key, modifiers))
         {
             MoveSelection(-1);
             e.Handled = true;
@@ -517,8 +519,8 @@ public partial class MainWindow : FluentWindow
         }
 
         ApplyHoverPreviewTheme();
-        SetPreviewContentMode(showQr: false);
         PreviewPopup.DataContext = vm;
+        SetPreviewContentMode(showQr: false);
         PreviewPopup.PlacementTarget = this;
         PreviewPopup.Placement = System.Windows.Controls.Primitives.PlacementMode.Relative;
 
@@ -540,7 +542,7 @@ public partial class MainWindow : FluentWindow
         }
     }
 
-    /// <summary>切换预览内容：普通（图/文）或二维码。</summary>
+    /// <summary>切换预览内容：普通（图/文）或二维码。退出二维码模式时清掉本地 Visibility，避免盖住绑定。</summary>
     private void SetPreviewContentMode(bool showQr)
     {
         if (showQr)
@@ -553,16 +555,8 @@ public partial class MainWindow : FluentWindow
 
         PreviewQrPanel.Visibility = Visibility.Collapsed;
         PreviewQrImage.Source = null;
-        if (PreviewPopup.DataContext is ClipboardItemViewModel vm)
-        {
-            PreviewHoverImage.Visibility = vm.IsImage ? Visibility.Visible : Visibility.Collapsed;
-            PreviewScroll.Visibility = vm.IsTextual ? Visibility.Visible : Visibility.Collapsed;
-        }
-        else
-        {
-            PreviewHoverImage.Visibility = Visibility.Collapsed;
-            PreviewScroll.Visibility = Visibility.Collapsed;
-        }
+        PreviewHoverImage.ClearValue(UIElement.VisibilityProperty);
+        PreviewScroll.ClearValue(UIElement.VisibilityProperty);
     }
 
     /// <summary>内容测量完成后按条目位置重定位浮层（左右自适应 + 垂直对齐 + 屏幕边界钳制）。</summary>
@@ -1080,8 +1074,9 @@ public partial class MainWindow : FluentWindow
         QrOverlay.IsHitTestVisible = true;
     }
 
-    private void ShowOcrOverlay(string text)
+    private void ShowOcrOverlay(string title, string text)
     {
+        OcrTitle.Text = string.IsNullOrWhiteSpace(title) ? "离线识别" : title;
         OcrText.Text = text;
         OcrOverlay.Visibility = Visibility.Visible;
         OcrOverlay.IsHitTestVisible = true;
@@ -1158,24 +1153,42 @@ public partial class MainWindow : FluentWindow
         RefreshHelpTip();
     }
 
-    /// <summary>根据当前可配置快捷键刷新帮助气泡（约定键写死）。</summary>
+    /// <summary>帮助气泡与设置页共用同一套绑定；Win+V / 1~9 为系统保留。</summary>
     private void RefreshHelpTip()
     {
-        if (HelpTipText is null)
+        if (HelpTipButton is null)
         {
             return;
         }
 
         var s = _services.Settings;
-        HelpTipText.Text =
-            $"单击选中 · 双击粘贴 · 卡片「复制」或 [Ctrl+C] 仅复制\n" +
+        string globalPaste = s.PlainPasteEnabled
+            ? $"[{s.PlainPasteHotkey}] 全局纯文本粘贴"
+            : $"[{s.PlainPasteHotkey}] 全局纯文本粘贴（未启用）";
+
+        string body =
+            $"单击选中 · 双击粘贴 · 卡片「复制」或 [{s.CopySelectedHotkey}] 仅复制\n" +
             $"[{s.PasteSelectedHotkey}] 粘贴选中项\n" +
             $"[{s.PasteSelectedPlainHotkey}] 纯文本粘贴选中项\n" +
-            $"[1~9] 快速粘贴第 1~9 条\n" +
-            $"[{s.PlainPasteHotkey}] 全局纯文本粘贴\n" +
+            $"[1 ~ 9] 快速粘贴第 1~9 条\n" +
+            $"{globalPaste}\n" +
             $"[{s.TogglePinHotkey}] 窗口置顶（失焦不藏 / 粘贴不关）\n" +
-            $"[Esc] 隐藏  ·  [Del] 删除\n" +
-            $"[Win + V] 唤起 QuickClip";
+            $"[{s.HidePanelHotkey}] 隐藏  ·  [{s.DeleteSelectedHotkey}] 删除\n" +
+            $"[{Models.HotkeyBinding.WinV}] 唤起 QuickClip";
+
+        var palette = ThemeService.CurrentPalette;
+        var tip = new System.Windows.Controls.ToolTip
+        {
+            Background = WindowChromeHelper.CreateSolidBrush(palette.Card),
+            Content = new System.Windows.Controls.TextBlock
+            {
+                Text = body,
+                Foreground = WindowChromeHelper.CreateSolidBrush(palette.Text),
+                FontSize = 12,
+                LineHeight = 20
+            }
+        };
+        HelpTipButton.ToolTip = tip;
     }
 
     private void OpenSettingsWindow()
@@ -1270,7 +1283,7 @@ public partial class MainWindow : FluentWindow
     private async void CheckUpdateAsync()
     {
         _services.Tray.ShowBalloonTip("QuickClip", "正在检查更新…");
-        var result = await _services.Update.CheckForUpdateAsync();
+        var result = await _services.Update.CheckAndDownloadAsync(interactive: true);
         switch (result.Status)
         {
             case Services.UpdateCheckStatus.UpToDate:
@@ -1279,32 +1292,29 @@ public partial class MainWindow : FluentWindow
             case Services.UpdateCheckStatus.Failed:
                 _services.Tray.ShowBalloonTip("QuickClip", result.Message ?? "检查更新失败");
                 break;
+            case Services.UpdateCheckStatus.Ready:
             case Services.UpdateCheckStatus.UpdateAvailable:
-                _services.Tray.ShowBalloonTip("QuickClip", $"{result.Message}，正在打开下载页…");
-                OpenUpdateUrl(result.Release?.DownloadUrl);
+                _services.Tray.ShowBalloonTip(
+                    "QuickClip",
+                    result.Message + "。点击托盘气泡或「立即更新」");
                 break;
         }
     }
 
-    private static void OpenUpdateUrl(string? url)
+    private void ApplyPendingUpdate()
     {
-        if (string.IsNullOrEmpty(url))
+        if (_services.Update.TryApplyPending(out string message, out bool shouldExit))
         {
+            _services.Tray.ShowBalloonTip("QuickClip", message);
+            if (shouldExit)
+            {
+                ExitApp();
+            }
+
             return;
         }
 
-        try
-        {
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = url,
-                UseShellExecute = true
-            });
-        }
-        catch (Exception ex)
-        {
-            DebugLog.LogException("打开更新下载页失败", ex);
-        }
+        _services.Tray.ShowBalloonTip("QuickClip", message);
     }
 }
 

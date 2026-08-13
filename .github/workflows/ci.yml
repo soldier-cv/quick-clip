@@ -29,10 +29,10 @@ jobs:
       - name: Build (Debug)
         run: dotnet build QuickClip.sln -c Debug --no-restore -warnaserror
 
-      - name: Publish smoke (Release win-x64)
+      - name: Publish smoke (portable + framework-dependent)
         shell: pwsh
         run: |
-          $out = Join-Path $env:RUNNER_TEMP 'qc-publish'
+          $portable = Join-Path $env:RUNNER_TEMP 'qc-portable'
           dotnet publish src/QuickClip/QuickClip.csproj `
             -c Release -r win-x64 --self-contained true `
             -p:PublishSingleFile=true `
@@ -40,9 +40,21 @@ jobs:
             -p:Version=1.0.0 `
             -p:AssemblyVersion=1.0.0.0 `
             -p:FileVersion=1.0.0.0 `
-            -o $out
-          $exe = Join-Path $out 'QuickClip.exe'
-          if (-not (Test-Path $exe)) { throw "Publish failed: $exe missing" }
-          $len = (Get-Item $exe).Length
-          if ($len -lt 1MB) { throw "Artifact too small: $len bytes" }
-          Write-Host "OK QuickClip.exe $len bytes"
+            -o $portable
+          $pexe = Join-Path $portable 'QuickClip.exe'
+          if (-not (Test-Path $pexe)) { throw "Portable publish failed: $pexe missing" }
+          $plen = (Get-Item $pexe).Length
+          if ($plen -lt 1MB) { throw "Portable artifact too small: $plen bytes" }
+          Write-Host "OK portable QuickClip.exe $plen bytes"
+
+          $fdd = Join-Path $env:RUNNER_TEMP 'qc-fdd'
+          dotnet publish src/QuickClip/QuickClip.csproj `
+            -c Release -r win-x64 --self-contained false `
+            -p:PublishSingleFile=false `
+            -p:Version=1.0.0 `
+            -p:AssemblyVersion=1.0.0.0 `
+            -p:FileVersion=1.0.0.0 `
+            -o $fdd
+          $fexe = Join-Path $fdd 'QuickClip.exe'
+          if (-not (Test-Path $fexe)) { throw "FDD publish failed: $fexe missing" }
+          Write-Host "OK fdd QuickClip.exe $((Get-Item $fexe).Length) bytes"

@@ -24,6 +24,7 @@ quick-clip/
 │   ├── ISSUE_TEMPLATE/
 │   └── pull_request_template.md
 ├── docs/                   # 文档与静态资源
+├── setup/                  # Inno Setup 安装脚本
 ├── src/QuickClip/          # WPF 主工程
 ├── QuickClip.sln
 ├── CHANGELOG.md
@@ -37,14 +38,25 @@ quick-clip/
 | 触发 | 工作流 | 结果 |
 | --- | --- | --- |
 | `push` / PR → `master` | `CI` | Debug 编译 + Release 发布冒烟 |
-| `git tag v1.0.0 && push --tags` | `Build and Release` | 产出 `QuickClip.exe` 并创建 Release |
+| `git tag v1.1.0 && git push origin v1.1.0` | `Build and Release` | 同时产出绿色 `QuickClip.exe` 与安装包 `QuickClip-Setup-win-x64.exe`，并创建 GitHub Release |
+
+打 `v*.*.*` tag 后，Actions 会：
+
+1. 发布自包含单文件 `publish/QuickClip.exe`
+2. 发布 framework-dependent 目录并用 Inno Setup 打出 `publish/setup/QuickClip-Setup-win-x64.exe`
+3. 两个文件都挂到该 tag 的 Release
 
 ```powershell
 # 本地调试
 dotnet run --project src/QuickClip/QuickClip.csproj
 
-# 本地发版同构
-dotnet publish src/QuickClip/QuickClip.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o publish
+# 绿色单文件
+dotnet publish src/QuickClip/QuickClip.csproj -c Release -r win-x64 --self-contained true `
+  -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish
+
+# 安装包载荷（再本机用 Inno Setup 编译 setup/QuickClip.iss）
+dotnet publish src/QuickClip/QuickClip.csproj -c Release -r win-x64 --self-contained false `
+  -p:PublishSingleFile=false -o publish/fdd
 ```
 
 构建产物（`bin/`、`obj/`、`publish/`）与运行时数据（`%LOCALAPPDATA%\QuickClip\`）不纳入版本库。

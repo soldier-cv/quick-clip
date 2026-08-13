@@ -52,15 +52,25 @@ public sealed class OcrService
     /// <summary>最近一次识别是否发生降级（AI 引擎失败回退系统 OCR），供 UI 提示。</summary>
     public string? LastWarning { get; private set; }
 
+    /// <summary>实际产出文字的引擎标题（离线识别 / ollama-模型 / OpenAI 模型名）。</summary>
+    public string LastEngineTitle { get; private set; } = "离线识别";
+
+    /// <summary>当前配置对应的标题（尚未识别时也可用于测试提示）。</summary>
+    public string ConfiguredEngineTitle => DescribeEngine(_settings.OcrEngine);
+
     /// <summary>按配置的引擎识别图片文字；AI 引擎失败时自动回退系统 OCR。</summary>
     public async Task<string?> RecognizeAsync(string imagePath)
     {
         LastWarning = null;
+        LastEngineTitle = DescribeEngine(_settings.OcrEngine);
 
         if (!File.Exists(imagePath))
         {
+            LastWarning = "图片文件不存在";
             return null;
         }
+
+        ClipboardImageNormalizer.RepairFileIfFullyTransparent(imagePath);
 
         if (_settings.OcrEngine == OcrEngineType.Ollama)
         {
@@ -75,6 +85,7 @@ public sealed class OcrService
                     string? text = await RecognizeWithOllamaAsync(imagePath);
                     if (!string.IsNullOrWhiteSpace(text))
                     {
+                        LastEngineTitle = DescribeEngine(OcrEngineType.Ollama);
                         return text;
                     }
 
@@ -83,7 +94,7 @@ public sealed class OcrService
                 catch (Exception ex)
                 {
                     DebugLog.LogException("Ollama OCR 失败，回退系统 OCR", ex);
-                    LastWarning = "Ollama 识别失败（服务未启动或模型不可用），已回退系统 OCR";
+                    LastWarning = "Ollama 识别失败：" + SummarizeError(ex) + "，已回退系统 OCR";
                 }
             }
         }
@@ -100,6 +111,7 @@ public sealed class OcrService
                     string? text = await RecognizeWithOpenAiAsync(imagePath);
                     if (!string.IsNullOrWhiteSpace(text))
                     {
+                        LastEngineTitle = DescribeEngine(OcrEngineType.OpenAi);
                         return text;
                     }
 
@@ -108,13 +120,102 @@ public sealed class OcrService
                 catch (Exception ex)
                 {
                     DebugLog.LogException("OpenAI OCR 失败，回退系统 OCR", ex);
-                    LastWarning = "OpenAI 识别失败，已回退系统 OCR";
+                    LastWarning = "OpenAI 识别失败：" + SummarizeError(ex) + "，已回退系统 OCR";
                 }
             }
         }
 
-        return await RecognizeWithSystemAsync(imagePath);
+        string? systemText = await RecognizeWithSystemAsync(imagePath);
+        if (!string.IsNullOrWhiteSpace(systemText))
+        {
+            LastEngineTitle = DescribeEngine(OcrEngineType.System);
+            return systemText;
+        }
+
+        if (string.IsNullOrEmpty(LastWarning))
+        {
+            LastWarning = "系统 OCR 未识别到文字";
+        }
+        else if (!LastWarning.Contains("系统 OCR", StringComparison.Ordinal))
+        {
+            LastWarning += "；系统 OCR 也未识别到文字";
+        }
+
+        return null;
     }
+
+    /// <summary>用当前配置探测接口（不回退系统 OCR），供设置页测试按钮。</summary>
+    public async Task<string> ProbeConfiguredEngineAsync()
+    {
+        if (_settings.OcrEngine == OcrEngineType.System)
+        {
+            return "系统离线 OCR 无需测试接口。请在列表里对图片点 OCR。";
+        }
+
+        if (_settings.OcrEngine == OcrEngineType.Ollama &&
+            string.IsNullOrWhiteSpace(_settings.OllamaModel))
+        {
+            return "失败：未填写视觉模型。";
+        }
+
+        if (_settings.OcrEngine == OcrEngineType.OpenAi &&
+            string.IsNullOrWhiteSpace(_settings.OpenAiApiKey))
+        {
+            return "失败：未填写 API Key。";
+        }
+
+        string temp = Path.Combine(Path.GetTempPath(), $"quickclip-ocr-probe-{Guid.NewGuid():N}.png");
+        try
+        {
+            WriteProbeImage(temp);
+            string? text = _settings.OcrEngine == OcrEngineType.Ollama
+                ? await RecognizeWithOllamaAsync(temp)
+                : await RecognizeWithOpenAiAsync(temp);
+
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return $"接口已连通（{ConfiguredEngineTitle}），但未返回文字。请确认模型支持看图。";
+            }
+
+            string snippet = text.Replace('\r', ' ').Replace('\n', ' ').Trim();
+            if (snippet.Length > 80)
+            {
+                snippet = snippet[..80] + "…";
+            }
+
+            return $"成功（{ConfiguredEngineTitle}）：{snippet}";
+        }
+        catch (Exception ex)
+        {
+            DebugLog.LogException("OCR 接口测试失败", ex);
+            return "失败：" + SummarizeError(ex);
+        }
+        finally
+        {
+            try
+            {
+                if (File.Exists(temp))
+                {
+                    File.Delete(temp);
+                }
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+    }
+
+    public string DescribeEngine(OcrEngineType engine) => engine switch
+    {
+        OcrEngineType.Ollama => "ollama-" + (_settings.OllamaModel.Trim().Length == 0
+            ? "未命名"
+            : _settings.OllamaModel.Trim()),
+        OcrEngineType.OpenAi => _settings.OpenAiModel.Trim().Length == 0
+            ? "OpenAI"
+            : _settings.OpenAiModel.Trim(),
+        _ => "离线识别"
+    };
 
     /// <summary>Windows 内置 OCR：识别图片文件中的文字（离线）。</summary>
     private async Task<string?> RecognizeWithSystemAsync(string imagePath)
@@ -136,7 +237,8 @@ public sealed class OcrService
                      ?? OcrEngine.TryCreateFromLanguage(new Windows.Globalization.Language("en-US"));
         if (engine == null)
         {
-            LastWarning = "系统 OCR 引擎不可用（请在系统设置中安装中文/英文 OCR 语言包）";
+            string lang = "系统 OCR 引擎不可用（请在系统设置中安装中文/英文 OCR 语言包）";
+            LastWarning = string.IsNullOrEmpty(LastWarning) ? lang : LastWarning + "；" + lang;
             DebugLog.Log("系统 OCR 引擎创建失败：无可用语言包");
             return null;
         }
@@ -188,7 +290,7 @@ public sealed class OcrService
         // 用户配置的是完整 URL，不再拼接 /api/generate
         string endpoint = NormalizeEndpoint(_settings.OllamaBaseUrl);
         var response = await Http.PostAsJsonAsync(endpoint, request);
-        response.EnsureSuccessStatusCode();
+        await EnsureSuccessWithBodyAsync(response);
 
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         string? text = doc.RootElement.TryGetProperty("response", out var el) ? el.GetString() : null;
@@ -201,6 +303,7 @@ public sealed class OcrService
         var request = new
         {
             model = _settings.OpenAiModel,
+            max_tokens = 2048,
             messages = new[]
             {
                 new
@@ -209,7 +312,7 @@ public sealed class OcrService
                     content = new object[]
                     {
                         new { type = "text", text = "请识别图片中的全部文字，仅返回识别出的文字内容。" },
-                        new { type = "image_url", image_url = new { url = $"data:image/png;base64,{ToBase64(imagePath)}" } }
+                        new { type = "image_url", image_url = new { url = $"data:image/jpeg;base64,{ToJpegBase64(imagePath)}" } }
                     }
                 }
             }
@@ -222,7 +325,7 @@ public sealed class OcrService
         httpRequest.Content = JsonContent.Create(request);
 
         var response = await Http.SendAsync(httpRequest);
-        response.EnsureSuccessStatusCode();
+        await EnsureSuccessWithBodyAsync(response);
 
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         string? text = doc.RootElement
@@ -233,30 +336,124 @@ public sealed class OcrService
         return string.IsNullOrWhiteSpace(text) ? null : text;
     }
 
-    /// <summary>图片转 base64；超大图（长边 &gt; 2048px）先等比缩小再编码，控制 API 体积与耗时。</summary>
-    private static string ToBase64(string imagePath)
+    /// <summary>图片转 JPEG base64；全透明 Alpha 先铺白底，长边超过 1280 再缩小，减轻网关 502。</summary>
+    private static string ToBase64(string imagePath) => ToJpegBase64(imagePath);
+
+    private static string ToJpegBase64(string imagePath)
     {
+        ClipboardImageNormalizer.RepairFileIfFullyTransparent(imagePath);
         using var original = new System.Drawing.Bitmap(imagePath);
         int longSide = Math.Max(original.Width, original.Height);
-        const int maxLongSide = 2048;
-        if (longSide <= maxLongSide)
-        {
-            return Convert.ToBase64String(File.ReadAllBytes(imagePath));
-        }
-
-        double scale = (double)maxLongSide / longSide;
+        const int maxLongSide = 1280;
+        double scale = longSide > maxLongSide ? (double)maxLongSide / longSide : 1.0;
         int width = Math.Max(1, (int)(original.Width * scale));
         int height = Math.Max(1, (int)(original.Height * scale));
-        using var resized = new System.Drawing.Bitmap(width, height);
-        using (var g = System.Drawing.Graphics.FromImage(resized))
+
+        using var canvas = new System.Drawing.Bitmap(width, height, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+        using (var g = System.Drawing.Graphics.FromImage(canvas))
         {
+            g.Clear(System.Drawing.Color.White);
             g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
             g.DrawImage(original, 0, 0, width, height);
         }
 
         using var stream = new MemoryStream();
-        resized.Save(stream, System.Drawing.Imaging.ImageFormat.Png);
+        canvas.Save(stream, System.Drawing.Imaging.ImageFormat.Jpeg);
         return Convert.ToBase64String(stream.ToArray());
+    }
+
+    private static async Task EnsureSuccessWithBodyAsync(HttpResponseMessage response)
+    {
+        if (response.IsSuccessStatusCode)
+        {
+            return;
+        }
+
+        string body = string.Empty;
+        try
+        {
+            body = await response.Content.ReadAsStringAsync();
+        }
+        catch
+        {
+            // ignore
+        }
+
+        body = CompactJsonError(body);
+        string suffix = string.IsNullOrEmpty(body) ? string.Empty : " " + body;
+        throw new HttpRequestException(
+            $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}.{suffix}");
+    }
+
+    private static string CompactJsonError(string body)
+    {
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.TryGetProperty("error", out JsonElement error))
+            {
+                if (error.ValueKind == JsonValueKind.String)
+                {
+                    return TrimOneLine(error.GetString());
+                }
+
+                if (error.TryGetProperty("message", out JsonElement message))
+                {
+                    return TrimOneLine(message.GetString());
+                }
+            }
+        }
+        catch
+        {
+            // 非 JSON 则截断原文
+        }
+
+        return TrimOneLine(body);
+    }
+
+    private static string TrimOneLine(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return string.Empty;
+        }
+
+        string one = text.Replace('\r', ' ').Replace('\n', ' ').Trim();
+        return one.Length <= 180 ? one : one[..180] + "…";
+    }
+
+    private static string SummarizeError(Exception ex)
+    {
+        if (ex is HttpRequestException http && !string.IsNullOrWhiteSpace(http.Message))
+        {
+            return TrimOneLine(http.Message);
+        }
+
+        if (ex is TaskCanceledException)
+        {
+            return "请求超时";
+        }
+
+        return TrimOneLine(ex.Message);
+    }
+
+    private static void WriteProbeImage(string path)
+    {
+        using var bmp = new System.Drawing.Bitmap(320, 80, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+        using (var g = System.Drawing.Graphics.FromImage(bmp))
+        {
+            g.Clear(System.Drawing.Color.White);
+            using var font = new System.Drawing.Font("Segoe UI", 22, System.Drawing.FontStyle.Bold);
+            using var brush = new System.Drawing.SolidBrush(System.Drawing.Color.Black);
+            g.DrawString("QuickClip OCR 123", font, brush, 12, 18);
+        }
+
+        bmp.Save(path, System.Drawing.Imaging.ImageFormat.Png);
     }
 
     /// <summary>去掉首尾空白与末尾 /，原样作为请求地址（不追加任何路径）。</summary>

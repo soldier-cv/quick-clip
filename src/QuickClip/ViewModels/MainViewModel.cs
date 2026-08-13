@@ -119,8 +119,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     /// <summary>二维码 PNG 就绪（窗口展示覆盖层）。</summary>
     public event Action<byte[]>? QrImageReady;
 
-    /// <summary>OCR 识别完成（窗口展示覆盖层）。</summary>
-    public event Action<string>? OcrResultReady;
+    /// <summary>OCR 识别完成（窗口展示覆盖层：标题, 正文）。</summary>
+    public event Action<string, string>? OcrResultReady;
 
     /// <summary>关闭面板前记住的选中 id，再次 Win+V 时恢复。</summary>
     public long? RememberedSelectedId { get; set; }
@@ -323,12 +323,15 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         StatusText = "正在 OCR 识别…";
         var result = await _services.Ocr.RecognizeAsync(selected.Item.PreviewPath!);
         string? warning = _services.Ocr.LastWarning;
+        string title = _services.Ocr.LastEngineTitle;
 
         if (string.IsNullOrWhiteSpace(result))
         {
             StatusText = !string.IsNullOrWhiteSpace(warning)
                 ? warning
                 : "未识别到文字";
+            // 失败也弹层，避免状态栏被截断、误以为没反应
+            OcrResultReady?.Invoke(title, warning ?? "未识别到文字");
             return;
         }
 
@@ -336,7 +339,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         StatusText = !string.IsNullOrWhiteSpace(warning)
             ? $"{warning} · 已识别"
             : "OCR 完成";
-        OcrResultReady?.Invoke(result);
+        string body = string.IsNullOrWhiteSpace(warning) ? result : warning + Environment.NewLine + Environment.NewLine + result;
+        OcrResultReady?.Invoke(title, body);
     }
 
     /// <summary>将选中条目（文本 / 链接 / 图片 / 文件）覆盖到系统剪贴板，不自动粘贴。

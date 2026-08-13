@@ -10,6 +10,7 @@ public sealed class TrayIconService : IDisposable
     private readonly NotifyIcon _notifyIcon;
     private readonly ToolStripMenuItem _toggleItem;
     private readonly ToolStripMenuItem _autoStartItem;
+    private readonly ToolStripMenuItem _installUpdateItem;
     private readonly ToolStripMenuItem _exitItem;
 
     public event Action? ToggleRequested;
@@ -18,6 +19,7 @@ public sealed class TrayIconService : IDisposable
     public event Action<bool>? AutoStartToggleRequested;
     public event Action? RestartAsAdminRequested;
     public event Action? CheckUpdateRequested;
+    public event Action? InstallUpdateRequested;
     public event Action? OpenDataFolderRequested;
     public event Action? ClearTodayHistoryRequested;
 
@@ -53,6 +55,9 @@ public sealed class TrayIconService : IDisposable
         var updateItem = new ToolStripMenuItem("检查更新…");
         updateItem.Click += (_, _) => CheckUpdateRequested?.Invoke();
 
+        _installUpdateItem = new ToolStripMenuItem("立即更新…") { Visible = false };
+        _installUpdateItem.Click += (_, _) => InstallUpdateRequested?.Invoke();
+
         _exitItem = new ToolStripMenuItem("退出");
         _exitItem.Click += (_, _) => ExitRequested?.Invoke();
 
@@ -66,13 +71,50 @@ public sealed class TrayIconService : IDisposable
         menu.Items.Add(adminItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(updateItem);
+        menu.Items.Add(_installUpdateItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_exitItem);
         _notifyIcon.ContextMenuStrip = menu;
         _notifyIcon.DoubleClick += (_, _) => ToggleRequested?.Invoke();
+        _notifyIcon.BalloonTipClicked += (_, _) =>
+        {
+            if (_installUpdateItem.Visible)
+            {
+                InstallUpdateRequested?.Invoke();
+            }
+        };
     }
 
     public void SetAutoStartChecked(bool enabled) => _autoStartItem.Checked = enabled;
+
+    /// <summary>有已下载更新时显示托盘「安装更新」项。</summary>
+    public void SetInstallUpdateVisible(bool visible, string? tagName)
+    {
+        if (_notifyIcon.ContextMenuStrip == null)
+        {
+            return;
+        }
+
+        void Apply()
+        {
+            _installUpdateItem.Visible = visible;
+            if (!visible || string.IsNullOrEmpty(tagName))
+            {
+                _installUpdateItem.Text = "立即更新…";
+                return;
+            }
+
+            _installUpdateItem.Text = $"立即更新 {tagName}";
+        }
+
+        if (_notifyIcon.ContextMenuStrip.InvokeRequired)
+        {
+            _notifyIcon.ContextMenuStrip.BeginInvoke(Apply);
+            return;
+        }
+
+        Apply();
+    }
 
     public void ShowBalloonTip(string title, string message)
     {

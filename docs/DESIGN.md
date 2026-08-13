@@ -163,6 +163,9 @@ graph TD
 - **开机自启动**：`AutoStartService` 读写 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`（`QuickClip` 值），无需管理员权限；启动时以注册表为准与设置文件对齐。托盘勾选与设置窗口共用同一来源。
 - **以管理员身份重启**：`AdminService` 检测当前令牌是否属于 Administrators；非管理员时以 `Verb=runas` 重新启动自身（触发 UAC）并退出当前实例，单实例互斥量带短暂重试，避免新旧实例竞争。
 
-### 4.7 更新机制骨架
-- `UpdateService` 已预留：读取程序集版本号（`csproj <Version>`，GitHub Actions 在打 tag 时注入 `v*.*.*` 版本），并提供 `CheckForUpdateAsync` 查询 GitHub Releases 最新版（`releases/latest` API），返回版本号与下载地址。
-- 目前仅“主动点击检查”（托盘菜单 / 设置窗口），保持纯离线承诺；后续可在此服务上扩展启动时静默检查、下载与静默安装（按 Release 资产名匹配 `QuickClip.exe`）。
+### 4.7 更新机制
+- 版本号来自程序集（`csproj <Version>`，打 tag 时由 GitHub Actions 注入）。
+- **双渠道**：绿色自包含 `QuickClip.exe`；安装包 `QuickClip-Setup-win-x64.exe`（framework-dependent，需 .NET 8 Desktop Runtime）。安装目录写入 `QuickClip.installed` 以识别渠道。
+- **静默检查**：启动约 90 秒后查询 `releases/latest`，之后每 24 小时最多一次。设置 `AutoCheckUpdates` 默认开，关闭后不访问 GitHub。失败只写日志。
+- **下载**：按渠道匹配 asset（安装包名含 `Setup`；绿色版优先 `QuickClip.exe`），校验 HTTPS 主机为 GitHub，写入 `%LOCALAPPDATA%\QuickClip\updates\`，不自动覆盖正在运行的进程。
+- **安装**：托盘气泡 /「立即更新」菜单 / 设置同一按钮。安装版启动 Setup；绿色版写临时脚本，退出当前进程后自动覆盖 exe 并重启。

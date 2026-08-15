@@ -1,8 +1,9 @@
+using System.Drawing;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
-using System.Windows;
 using QuickClip.Models;
+using QuickClip.Native;
 
 namespace QuickClip.Services;
 
@@ -18,7 +19,8 @@ public sealed class CapturedClipboardData
 }
 
 /// <summary>
-/// 从系统剪贴板提取文本/文件/图片（需在 STA 线程执行）。
+/// 从系统剪贴板提取文本/文件/图片（原生 Win32 只读，OpenClipboard 失败即跳过，
+/// 不会像 OLE 那样无限等待延迟渲染的属主进程）。
 /// 仅只读系统剪贴板：超限只表示「不写入 QuickClip 历史」，绝不 Clear/Set 剪贴板，
 /// 因此用户仍可把原内容粘贴到任意程序。
 /// </summary>
@@ -29,34 +31,34 @@ public static class ClipboardDataExtractor
         try
         {
             // 优先级：文本 > 文件 > 图片
-            if (System.Windows.Clipboard.ContainsText())
+            string? text = NativeClipboard.TryGetText();
+            if (!string.IsNullOrEmpty(text))
             {
-                return CaptureText();
+                return CaptureText(text);
             }
 
-            if (System.Windows.Clipboard.ContainsFileDropList())
+            string[]? files = NativeClipboard.TryGetFiles();
+            if (files is { Length: > 0 })
             {
-                return CaptureFiles();
+                return CaptureFiles(files);
             }
 
-            if (System.Windows.Clipboard.ContainsImage() ||
-                System.Windows.Clipboard.ContainsData("PNG") ||
-                System.Windows.Clipboard.ContainsData("image/png"))
+            using var bitmap = ClipboardImageNormalizer.TryCaptureBitmap();
+            if (bitmap != null)
             {
-                return CaptureImage(paths);
+                return CaptureImage(bitmap, paths);
             }
         }
         catch (Exception ex) when (ex is COMException or ExternalException)
         {
-            // 剪贴板被其他进程占用等瞬时错误，静默忽略
+            // 剪贴板被其他进程占用 / GDI 解码失败等瞬时错误，静默忽略
         }
 
         return null;
     }
 
-    private static CapturedClipboardData? CaptureText()
+    private static CapturedClipboardData? CaptureText(string text)
     {
-        string text = System.Windows.Clipboard.GetText() ?? string.Empty;
         if (string.IsNullOrWhiteSpace(text))
         {
             return null;
@@ -87,14 +89,8 @@ public static class ClipboardDataExtractor
     /// 文件复制：系统剪贴板只有路径列表，不拷贝文件本体。
     /// 我们同样只记路径；大文件/任意体积文件都不进 SQLite BLOB，粘贴仍走系统路径。
     /// </summary>
-    private static CapturedClipboardData? CaptureFiles()
+    private static CapturedClipboardData? CaptureFiles(string[] files)
     {
-        var files = System.Windows.Clipboard.GetFileDropList().Cast<string>().ToArray();
-        if (files.Length == 0)
-        {
-            return null;
-        }
-
         string joined = string.Join(Environment.NewLine, files);
         // 路径列表本身过大时跳过入库（极端：海量文件多选）；不影响系统粘贴
         if (joined.Length > SettingsService.MaxCaptureTextChars)
@@ -135,14 +131,8 @@ public static class ClipboardDataExtractor
         };
     }
 
-    private static CapturedClipboardData? CaptureImage(AppPaths paths)
+    private static CapturedClipboardData? CaptureImage(Bitmap image, AppPaths paths)
     {
-        using var image = ClipboardImageNormalizer.TryCaptureBitmap();
-        if (image == null)
-        {
-            return null;
-        }
-
         // 先看像素规模，避免超大图编码拖死进程
         long pixels = (long)image.Width * image.Height;
         if (pixels > SettingsService.MaxCaptureImagePixels)

@@ -221,23 +221,11 @@ public partial class MainWindow : FluentWindow
         Show();
         Activate();
 
-        // 恢复上次选中；否则默认第 1 条（最近一条），Enter 即贴
-        if (_viewModel.RememberedSelectedId is long id)
-        {
-            var match = _viewModel.Items.FirstOrDefault(x => x.Item.Id == id);
-            if (match != null)
-            {
-                _viewModel.SelectedItem = match;
-                ItemList.ScrollIntoView(match);
-            }
-            else if (_viewModel.Items.Count > 0)
-            {
-                _viewModel.SelectedItem = _viewModel.Items[0];
-            }
-        }
-        else if (_viewModel.SelectedItem == null && _viewModel.Items.Count > 0)
+        // 每次打开都默认选中第 1 条（最近一条），Enter 即贴
+        if (_viewModel.Items.Count > 0)
         {
             _viewModel.SelectedItem = _viewModel.Items[0];
+            ItemList.ScrollIntoView(_viewModel.Items[0]);
         }
 
         SearchBox.Focus();
@@ -282,8 +270,6 @@ public partial class MainWindow : FluentWindow
     private void HideWindow()
     {
         PreviewPopup.IsOpen = false;
-        // 记住选中，便于再次 Win+V 恢复位置
-        _viewModel.RememberedSelectedId = _viewModel.SelectedItem?.Item.Id;
         Hide();
         DebugLog.Log("窗口已隐藏");
     }

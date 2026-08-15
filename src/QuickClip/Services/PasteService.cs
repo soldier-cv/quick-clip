@@ -1,13 +1,14 @@
+using System.Drawing;
 using System.IO;
-using System.Collections.Specialized;
-using System.Runtime.InteropServices;
-using System.Windows;
-using System.Windows.Media.Imaging;
 using QuickClip.Native;
 
 namespace QuickClip.Services;
 
-/// <summary>粘贴服务：在后台 STA 线程回填剪贴板，并用 SendInput 模拟 Ctrl+V 粘贴到目标窗口，避免占用 UI 线程。</summary>
+/// <summary>
+/// 粘贴服务：在后台 STA 线程回填剪贴板，并用 SendInput 模拟 Ctrl+V 粘贴到目标窗口，避免占用 UI 线程。
+/// 剪贴板写入走原生 Win32 API：OpenClipboard 失败快速返回 + 短重试，
+/// 不会像 OLE 那样在属主进程卡死时无限阻塞、进而锁死全系统剪贴板。
+/// </summary>
 public sealed class PasteService
 {
     private volatile bool _isSelfPasting;
@@ -48,12 +49,7 @@ public sealed class PasteService
     {
         _ = RunPasteAsync(() =>
         {
-            if (!System.Windows.Clipboard.ContainsText())
-            {
-                return;
-            }
-
-            string? text = System.Windows.Clipboard.GetText();
+            string? text = NativeClipboard.TryGetText();
             if (!string.IsNullOrEmpty(text))
             {
                 CopyTextCore(text, plainOnly: true);
@@ -108,7 +104,7 @@ public sealed class PasteService
         }
     }
 
-    /// <summary>在独立 STA 线程上执行剪贴板写入，避免 OpenClipboard 被占用时阻塞 UI 线程。</summary>
+    /// <summary>在独立 STA 线程上执行剪贴板写入，避免剪贴板被占用时阻塞 UI 线程。</summary>
     private Task CopyCoreAsync(Action setter) => StaTask.Run(() => SetClipboard(setter));
 
     /// <summary>将文本覆盖到系统剪贴板（需在 STA 线程调用）。</summary>
@@ -121,14 +117,10 @@ public sealed class PasteService
 
         SetClipboard(() =>
         {
-            var data = new System.Windows.DataObject();
-            data.SetData(System.Windows.DataFormats.UnicodeText, text);
-            if (!plainOnly)
+            if (!NativeClipboard.TrySetText(text, plainOnly))
             {
-                data.SetData(System.Windows.DataFormats.Text, text);
+                throw ClipboardBusyException();
             }
-
-            System.Windows.Clipboard.SetDataObject(data, true);
         });
     }
 
@@ -142,13 +134,21 @@ public sealed class PasteService
 
         SetClipboard(() =>
         {
-            var bitmap = new BitmapImage();
-            bitmap.BeginInit();
-            bitmap.CacheOption = BitmapCacheOption.OnLoad;
-            bitmap.UriSource = new Uri(previewPath, UriKind.Absolute);
-            bitmap.EndInit();
-            bitmap.Freeze();
-            System.Windows.Clipboard.SetImage(bitmap);
+            byte[]? png = null;
+            try
+            {
+                png = File.ReadAllBytes(previewPath);
+            }
+            catch
+            {
+                // PNG 副本读取失败不致命，DIB 仍可粘贴
+            }
+
+            using var bitmap = new Bitmap(previewPath);
+            if (!NativeClipboard.TrySetBitmap(bitmap, png))
+            {
+                throw ClipboardBusyException();
+            }
         });
     }
 
@@ -162,11 +162,16 @@ public sealed class PasteService
 
         SetClipboard(() =>
         {
-            var collection = new StringCollection();
-            collection.AddRange(files);
-            System.Windows.Clipboard.SetFileDropList(collection);
+            if (!NativeClipboard.TrySetFiles(files))
+            {
+                throw ClipboardBusyException();
+            }
         });
     }
+
+    /// <summary>剪贴板被其他进程占用（打开重试后仍失败）。</summary>
+    private static Exception ClipboardBusyException() =>
+        new InvalidOperationException("剪贴板被其他进程占用（打开失败）");
 
     /// <summary>
     /// 自身回写系统剪贴板前通知（流水线用来忽略捕获，防止列表再插一条到顶部）。
@@ -189,30 +194,12 @@ public sealed class PasteService
                 // 监听方异常不影响写剪贴板
             }
 
-            RetrySet(() => setter());
+            setter();
         }
         finally
         {
             // 略加长：异步捕获 + 双击时复制+粘贴两次写剪贴板
             _ = Task.Delay(2500).ContinueWith(_ => _isSelfPasting = false);
-        }
-    }
-
-    /// <summary>剪贴板被占用时重试。</summary>
-    private static void RetrySet(Action setter)
-    {
-        const int maxAttempts = 8;
-        for (int i = 0; i < maxAttempts; i++)
-        {
-            try
-            {
-                setter();
-                return;
-            }
-            catch (COMException) when (i < maxAttempts - 1)
-            {
-                Thread.Sleep(40);
-            }
         }
     }
 }

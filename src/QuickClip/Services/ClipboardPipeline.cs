@@ -20,6 +20,13 @@ public sealed class ClipboardPipeline
     /// <summary>自身回写系统剪贴板后的忽略截止时间（UTC）。</summary>
     private DateTime _suppressUntilUtc = DateTime.MinValue;
 
+    /// <summary>
+    /// 捕获超时看门狗：属主进程延迟渲染卡死时原生 GetClipboardData 仍可能阻塞，
+    /// 不能无限等（挂起的线程会持有剪贴板，导致全系统复制/粘贴失效），超时即跳过本次捕获。
+    /// 取值放宽到 5s：正常大图编码 + 哈希也可能耗时约 2s，避免误判。
+    /// </summary>
+    private const int CaptureTimeoutMilliseconds = 5000;
+
     /// <summary>新条目入库后触发（UI 线程）。</summary>
     public event Action<ClipboardItem>? ItemAdded;
 
@@ -83,8 +90,18 @@ public sealed class ClipboardPipeline
 
         try
         {
-            // 剪贴板读取必须在 STA 线程（只读 Capture，不写回系统剪贴板）
-            var data = await StaTask.Run(() => ClipboardDataExtractor.Capture(_paths));
+            // 剪贴板读取（只读 Capture，不写回系统剪贴板）
+            var dataTask = StaTask.Run(() => ClipboardDataExtractor.Capture(_paths));
+
+            // 超时看门狗：属主进程卡死时读取可能阻塞，等待超限即放弃本次捕获
+            var finished = await Task.WhenAny(dataTask, Task.Delay(CaptureTimeoutMilliseconds));
+            if (finished != dataTask)
+            {
+                DebugLog.Log($"剪贴板捕获超时（{CaptureTimeoutMilliseconds}ms），可能被其他进程占用，本次跳过");
+                return;
+            }
+
+            var data = dataTask.Result;
 
             // await 之后再判一次：抑制窗口可能覆盖异步空档
             if (data == null || ShouldIgnoreCapture())

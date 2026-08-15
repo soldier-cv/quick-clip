@@ -122,9 +122,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     /// <summary>OCR 识别完成（窗口展示覆盖层：标题, 正文）。</summary>
     public event Action<string, string>? OcrResultReady;
 
-    /// <summary>关闭面板前记住的选中 id，再次 Win+V 时恢复。</summary>
-    public long? RememberedSelectedId { get; set; }
-
     private CancellationTokenSource? _itemAddedDebounce;
 
     public MainViewModel(AppServices services)
@@ -158,7 +155,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         int limit = _services.Settings.MaxHistoryItems;
         var items = await _services.Database.GetRecentAsync(limit);
         string query = _searchText;
-        long? selectedId = SelectedItem?.Item.Id ?? RememberedSelectedId;
+        long? selectedId = SelectedItem?.Item.Id;
 
         var filtered = items
             .Where(i => FilterIndex switch
@@ -204,8 +201,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public async Task ClearAllUnpinnedAndRefreshAsync()
     {
         int n = await _services.ClearAllUnpinnedHistoryAsync();
-        SelectedItem = null;
-        RememberedSelectedId = null;
         StatusText = n > 0 ? $"已清空 {n} 条（置顶已保留）" : "没有可清空的条目";
         await RefreshAsync();
     }

@@ -47,6 +47,91 @@ internal static class NativeMethods
     /// <summary>小图标推荐宽度（托盘图标槽，含 DPI）。</summary>
     public const int SM_CXSMICON = 49;
 
+    // ---------- 剪贴板格式 ----------
+
+    /// <summary>ANSI 文本格式。</summary>
+    public const uint CF_TEXT = 1;
+
+    /// <summary>设备无关位图（BITMAPINFOHEADER + 像素数据）。</summary>
+    public const uint CF_DIB = 8;
+
+    /// <summary>Unicode 文本格式。</summary>
+    public const uint CF_UNICODETEXT = 13;
+
+    /// <summary>文件拖放列表（DROPFILES 结构 + 路径）。</summary>
+    public const uint CF_HDROP = 15;
+
+    /// <summary>BITMAPV5HEADER 版设备无关位图。</summary>
+    public const uint CF_DIBV5 = 17;
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool OpenClipboard(IntPtr hWndNewOwner);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool CloseClipboard();
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool EmptyClipboard();
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern IntPtr GetClipboardData(uint uFormat);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern IntPtr SetClipboardData(uint uFormat, IntPtr hMem);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool IsClipboardFormatAvailable(uint format);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern uint RegisterClipboardFormat(string lpszFormat);
+
+    /// <summary>当前打开剪贴板的窗口句柄（无人打开时为 0）。</summary>
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetOpenClipboardWindow();
+
+    [DllImport("user32.dll")]
+    public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern IntPtr GlobalAlloc(uint uFlags, UIntPtr dwBytes);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern IntPtr GlobalFree(IntPtr hMem);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern IntPtr GlobalLock(IntPtr hMem);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool GlobalUnlock(IntPtr hMem);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern UIntPtr GlobalSize(IntPtr hMem);
+
+    /// <summary>系统 ANSI 代码页（用于 CF_TEXT 编码）。</summary>
+    [DllImport("kernel32.dll")]
+    public static extern uint GetACP();
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct BITMAPINFOHEADER
+    {
+        public uint biSize;
+        public int biWidth;
+        public int biHeight;
+        public ushort biPlanes;
+        public ushort biBitCount;
+        public uint biCompression;
+        public uint biSizeImage;
+        public int biXPelsPerMeter;
+        public int biYPelsPerMeter;
+        public uint biClrUsed;
+        public uint biClrImportant;
+    }
+
     [DllImport("user32.dll")]
     public static extern int GetSystemMetrics(int nIndex);
 

@@ -522,7 +522,7 @@ public partial class SettingsWindow : Window
             InstallUpdateButton.Visibility = Visibility.Visible;
             InstallUpdateButton.Content = UpdateService.ApplyActionLabel;
             BrowserDownloadButton.Visibility = Visibility.Collapsed;
-            UpdateStatusText.Text = $"新版本 {pending!.TagName} 已下载就绪，点击「立即更新」启动安装程序。";
+            UpdateStatusText.Text = $"新版本 {pending!.TagName} 已下载就绪。点击「立即更新」将退出并静默安装；下次手动启动也会自动安装。";
             if (FindResource("Theme.Accent") is MediaBrush accentBrush)
             {
                 UpdateStatusText.Foreground = accentBrush;

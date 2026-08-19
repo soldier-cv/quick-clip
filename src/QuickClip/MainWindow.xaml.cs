@@ -79,6 +79,7 @@ public partial class MainWindow : FluentWindow
     }
 
     private static readonly uint WmShowQuickClip = QuickClip.Native.NativeMethods.RegisterWindowMessage("QUICKCLIP_SHOW_WINDOW_MSG");
+    private static readonly uint WmExitQuickClip = QuickClip.Native.NativeMethods.RegisterWindowMessage("QUICKCLIP_EXIT_INSTANCE_MSG");
     private static readonly uint WmTaskbarCreated = QuickClip.Native.NativeMethods.RegisterWindowMessage("TaskbarCreated");
 
     protected override void OnSourceInitialized(EventArgs e)
@@ -96,6 +97,20 @@ public partial class MainWindow : FluentWindow
         {
             ShowWindow();
             handled = true;
+            return IntPtr.Zero;
+        }
+
+        if (msg == (int)WmExitQuickClip)
+        {
+            PrepareForSystemExit();
+            ExitApp();
+            handled = true;
+            return IntPtr.Zero;
+        }
+
+        if (msg is Native.NativeMethods.WM_QUERYENDSESSION or Native.NativeMethods.WM_ENDSESSION)
+        {
+            PrepareForSystemExit();
             return IntPtr.Zero;
         }
 
@@ -190,7 +205,6 @@ public partial class MainWindow : FluentWindow
         _services.Monitor.Attach(this);
     }
 
-    /// <summary>关闭按钮 / Alt+F4 视为隐藏，避免误退出。</summary>
     private void OnWindowClosing(object? sender, CancelEventArgs e)
     {
         if (_exiting)
@@ -200,6 +214,11 @@ public partial class MainWindow : FluentWindow
 
         e.Cancel = true;
         Hide();
+    }
+
+    public void PrepareForSystemExit()
+    {
+        _exiting = true;
     }
 
     private void OnWindowDeactivated(object? sender, EventArgs e)
@@ -1323,10 +1342,9 @@ public partial class MainWindow : FluentWindow
                 break;
             case Services.UpdateCheckStatus.Ready:
             case Services.UpdateCheckStatus.UpdateAvailable:
-                string extra = Services.UpdateService.CurrentChannel == Services.ReleaseChannel.Setup
-                    ? "。点击托盘气泡或「立即更新」"
-                    : "。点击托盘或「打开下载目录」，退出后自行替换";
-                _services.Tray.ShowBalloonTip("QuickClip", result.Message + extra);
+                _services.Tray.ShowBalloonTip(
+                    "QuickClip",
+                    (result.Message ?? "已下载新版本") + "。点击「立即更新」安装，或下次手动启动自动安装");
                 break;
         }
     }

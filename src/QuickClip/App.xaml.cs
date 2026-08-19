@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using System.Windows.Interop;
 using System.Windows.Media;
+using QuickClip.Native;
 using QuickClip.Services;
 using QuickClip.ViewModels;
 using Wpf.Ui.Appearance;
@@ -19,24 +21,22 @@ public partial class App : System.Windows.Application
         DispatcherUnhandledException += OnDispatcherUnhandledException;
         AppDomain.CurrentDomain.UnhandledException += OnAppDomainUnhandledException;
         TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
+        SessionEnding += OnSessionEnding;
 
-        // 单实例保护：旧实例退出未完成时短暂重试，避免误报「已在运行」
+        bool fromAutostart = HasAutostartArg(e.Args);
+
         _mutex = new Mutex(false, @"Local\QuickClip_SingleInstance");
-        bool acquired = false;
-        for (int attempt = 0; attempt < 10 && !acquired; attempt++)
+        bool acquired = TryAcquireMutex(_mutex, retries: 10, delayMs: 200);
+
+        if (!acquired && UpdateService.IsInstalledCopy() && TryReplaceForeignInstances())
         {
-            acquired = _mutex.WaitOne(0);
-            if (!acquired)
-            {
-                Thread.Sleep(200);
-            }
+            acquired = TryAcquireMutex(_mutex, retries: 15, delayMs: 300);
         }
 
         if (!acquired)
         {
-            // 二次启动唤起：向已有实例广播唤起消息，直接呼出面板
-            uint msg = QuickClip.Native.NativeMethods.RegisterWindowMessage("QUICKCLIP_SHOW_WINDOW_MSG");
-            QuickClip.Native.NativeMethods.PostMessage((IntPtr)QuickClip.Native.NativeMethods.HWND_BROADCAST, msg, IntPtr.Zero, IntPtr.Zero);
+            uint msg = NativeMethods.RegisterWindowMessage("QUICKCLIP_SHOW_WINDOW_MSG");
+            NativeMethods.PostMessage((IntPtr)NativeMethods.HWND_BROADCAST, msg, IntPtr.Zero, IntPtr.Zero);
             Shutdown();
             return;
         }
@@ -51,7 +51,11 @@ public partial class App : System.Windows.Application
         }
 
         _services = new AppServices();
-        _services.Initialize();
+        if (!_services.Initialize(fromAutostart))
+        {
+            Shutdown();
+            return;
+        }
 
         // 按用户设置应用主题（写入 DynamicResource + 关闭 DWM 材质）
         ThemeService.Apply(_services.Settings.Theme);
@@ -70,6 +74,110 @@ public partial class App : System.Windows.Application
         _services?.Dispose();
         _mutex?.Dispose();
         base.OnExit(e);
+    }
+
+    private void OnSessionEnding(object sender, System.Windows.SessionEndingCancelEventArgs e)
+    {
+        DebugLog.Log($"系统会话结束 ({e.ReasonSessionEnding})，退出进程");
+        _services?.MainWindow?.PrepareForSystemExit();
+        Shutdown();
+    }
+
+    private static bool HasAutostartArg(string[] args)
+    {
+        foreach (string arg in args)
+        {
+            if (string.Equals(arg, AutoStartService.AutostartArgument, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryAcquireMutex(Mutex mutex, int retries, int delayMs)
+    {
+        for (int attempt = 0; attempt < retries; attempt++)
+        {
+            try
+            {
+                if (mutex.WaitOne(0))
+                {
+                    return true;
+                }
+            }
+            catch (AbandonedMutexException)
+            {
+                return true;
+            }
+
+            Thread.Sleep(delayMs);
+        }
+
+        return false;
+    }
+
+    /// <summary>安装版：结束占用互斥锁且路径不同的旧进程。读不到路径或同路径则不杀。</summary>
+    private static bool TryReplaceForeignInstances()
+    {
+        string? myPath = Environment.ProcessPath;
+        if (string.IsNullOrEmpty(myPath))
+        {
+            return false;
+        }
+
+        bool killedForeign = false;
+        bool sawSamePath = false;
+        foreach (Process process in Process.GetProcessesByName("QuickClip"))
+        {
+            try
+            {
+                if (process.Id == Environment.ProcessId)
+                {
+                    continue;
+                }
+
+                string? other = TryGetProcessPath(process);
+                if (string.IsNullOrEmpty(other))
+                {
+                    continue;
+                }
+
+                if (string.Equals(other, myPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    sawSamePath = true;
+                    continue;
+                }
+
+                DebugLog.Log($"结束路径不同的旧实例: pid={process.Id} path={other}");
+                process.Kill();
+                process.WaitForExit(3000);
+                killedForeign = true;
+            }
+            catch (Exception ex)
+            {
+                DebugLog.LogException("结束旧实例失败", ex);
+            }
+            finally
+            {
+                process.Dispose();
+            }
+        }
+
+        return killedForeign && !sawSamePath;
+    }
+
+    private static string? TryGetProcessPath(Process process)
+    {
+        try
+        {
+            return process.MainModule?.FileName;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     /// <summary>UI 线程异常：记录日志并标记已处理，避免程序直接崩溃。</summary>

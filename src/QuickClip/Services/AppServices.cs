@@ -48,9 +48,14 @@ public sealed class AppServices : IDisposable
 
     private bool _appliedAutoStart;
 
-    public void Initialize()
+    /// <summary>
+    /// 装配运行时服务。返回 false 表示已拉起静默安装，调用方应立即退出。
+    /// fromAutostart 为 true 时不自动弹 UAC，只提示已下载的更新。
+    /// </summary>
+    public bool Initialize(bool fromAutostart = false)
     {
-        // 自启动以注册表为准，与设置文件对齐（托盘勾选与设置窗口共用同一来源）
+        AutoStartService.MigrateInstalledAutostart();
+
         bool registryAutoStart = AutoStartService.IsEnabled();
         if (registryAutoStart != Settings.AutoStart)
         {
@@ -60,6 +65,15 @@ public sealed class AppServices : IDisposable
         _appliedAutoStart = Settings.AutoStart;
 
         Update.Attach(Paths, Settings);
+        if (!fromAutostart
+            && Update.ShouldAutoApplyOnStartup()
+            && Update.TryApplyPending(out string applyMessage, out bool shouldExit)
+            && shouldExit)
+        {
+            DebugLog.Log($"启动时自动安装已下载更新: {applyMessage}");
+            return false;
+        }
+
         var ui = Dispatcher.CurrentDispatcher;
         Update.PendingChanged += pending =>
             ui.BeginInvoke(() => Tray.SetInstallUpdateVisible(pending != null, pending?.TagName));
@@ -68,6 +82,10 @@ public sealed class AppServices : IDisposable
         if (Update.Pending != null)
         {
             Tray.SetInstallUpdateVisible(true, Update.Pending.TagName);
+            if (fromAutostart)
+            {
+                Tray.ShowBalloonTip("QuickClip", UpdateService.ReadyNotifyText(Update.Pending.TagName));
+            }
         }
 
         Update.StartSilentChecks();
@@ -81,6 +99,7 @@ public sealed class AppServices : IDisposable
         Hotkey.Start(Dispatcher.CurrentDispatcher, Settings);
 
         Tray.SetAutoStartChecked(Settings.AutoStart);
+        return true;
     }
 
     /// <summary>设置变更联动：热键重新注册；自启动仅在状态变化时写注册表并同步托盘勾选。</summary>

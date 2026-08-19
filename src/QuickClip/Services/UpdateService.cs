@@ -47,7 +47,9 @@ public sealed class UpdateService : IDisposable
     private const string LatestReleaseApi = $"https://api.github.com/repos/{RepoOwner}/{RepoName}/releases/latest";
     private const string ReleasesPageUrl = $"https://github.com/{RepoOwner}/{RepoName}/releases";
     private const string LatestReleasePageUrl = $"{ReleasesPageUrl}/latest";
-    private const string InstalledMarkerFileName = "QuickClip.installed";
+    internal const string InstalledMarkerFileName = "QuickClip.installed";
+    private const string AutoApplyStampFileName = "auto-apply.stamp";
+    private static readonly TimeSpan AutoApplyDeferral = TimeSpan.FromHours(24);
     private const long MaxDownloadBytes = 400L * 1024 * 1024;
 
     private static readonly TimeSpan InitialDelay = TimeSpan.FromSeconds(8);
@@ -69,6 +71,30 @@ public sealed class UpdateService : IDisposable
     public static string CurrentVersion =>
         typeof(UpdateService).Assembly.GetName().Version?.ToString(3) ?? "1.0.0";
 
+    /// <summary>安装目录旁有 QuickClip.installed 才视为安装版（绿色版不得改写自启动）。</summary>
+    public static bool IsInstalledCopy()
+    {
+        string? exe = Environment.ProcessPath;
+        if (string.IsNullOrEmpty(exe))
+        {
+            return false;
+        }
+
+        string? dir = Path.GetDirectoryName(exe);
+        return !string.IsNullOrEmpty(dir) && File.Exists(Path.Combine(dir, InstalledMarkerFileName));
+    }
+
+    /// <summary>启动时是否应自动安装已下载包（开机自启、24h 内已尝试过则否）。</summary>
+    public bool ShouldAutoApplyOnStartup()
+    {
+        if (Pending == null || !File.Exists(Pending.LocalPath))
+        {
+            return false;
+        }
+
+        return !IsAutoApplyDeferred(Pending.Version);
+    }
+
     /// <summary>当前发布渠道：固定为安装版。</summary>
     public static ReleaseChannel CurrentChannel => ReleaseChannel.Setup;
 
@@ -79,7 +105,7 @@ public sealed class UpdateService : IDisposable
 
     /// <summary>下载完成后的托盘/设置提示。</summary>
     public static string ReadyNotifyText(string tagName) =>
-        $"发现新版本 {tagName}，已下载。点击即可更新";
+        $"发现新版本 {tagName}，已下载。点击即可安装，或下次手动启动自动安装";
 
     public PendingUpdate? Pending { get; private set; }
 
@@ -365,9 +391,10 @@ public sealed class UpdateService : IDisposable
         }
     }
 
-    /// <summary>
-    /// 启动已下载的 Setup 安装程序开始升级。
-    /// </summary>
+    internal const string SilentSetupArgs =
+        "/SILENT /NORESTART /CLOSEAPPLICATIONS /FORCECLOSEAPPLICATIONS /SUPPRESSMSGBOXES";
+
+    /// <summary>启动已下载的 Setup 静默安装。成功时 shouldExit 为 true，调用方必须退出。</summary>
     public bool TryApplyPending(out string message, out bool shouldExit)
     {
         shouldExit = false;
@@ -380,23 +407,87 @@ public sealed class UpdateService : IDisposable
 
         try
         {
-            Process.Start(new ProcessStartInfo
+            var started = Process.Start(new ProcessStartInfo
             {
                 FileName = pending.LocalPath,
+                Arguments = SilentSetupArgs,
                 UseShellExecute = true
             });
-            message = "已启动安装程序";
+            if (started == null)
+            {
+                message = "无法启动安装程序";
+                return false;
+            }
+
+            RememberAutoApplyAttempt(pending.Version);
+            shouldExit = true;
+            message = "正在安装更新，程序将退出";
+            DebugLog.Log($"已启动静默安装: {pending.LocalPath} ({pending.TagName})");
             return true;
         }
         catch (Exception ex)
         {
             DebugLog.LogException("应用更新失败", ex);
-            message = "无法启动安装程序";
+            RememberAutoApplyAttempt(pending.Version);
+            message = ex is System.ComponentModel.Win32Exception
+                ? "无法启动安装程序（可能已取消 UAC）"
+                : "无法启动安装程序";
             return false;
         }
     }
 
-    private static string Quote(string path) => "\"" + path.Trim('"') + "\"";
+    private bool IsAutoApplyDeferred(string version)
+    {
+        if (_paths == null)
+        {
+            return false;
+        }
+
+        string stamp = Path.Combine(_paths.UpdatesDir, AutoApplyStampFileName);
+        if (!File.Exists(stamp))
+        {
+            return false;
+        }
+
+        try
+        {
+            string text = File.ReadAllText(stamp).Trim();
+            string[] parts = text.Split('|');
+            if (parts.Length < 2
+                || !string.Equals(parts[0].Trim(), version, StringComparison.OrdinalIgnoreCase)
+                || !long.TryParse(parts[1].Trim(), out long ticks))
+            {
+                return false;
+            }
+
+            var when = new DateTime(ticks, DateTimeKind.Utc);
+            return DateTime.UtcNow - when < AutoApplyDeferral;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private void RememberAutoApplyAttempt(string version)
+    {
+        if (_paths == null)
+        {
+            return;
+        }
+
+        try
+        {
+            Directory.CreateDirectory(_paths.UpdatesDir);
+            File.WriteAllText(
+                Path.Combine(_paths.UpdatesDir, AutoApplyStampFileName),
+                version + "|" + DateTime.UtcNow.Ticks);
+        }
+        catch (Exception ex)
+        {
+            DebugLog.LogException("写入自动安装标记失败", ex);
+        }
+    }
 
     private void SetDownloadFailed(DownloadFailedInfo? failed)
     {

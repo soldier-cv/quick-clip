@@ -259,7 +259,9 @@ internal static class NativeMethods
         public int pt_y;
     }
 
+    public const int WM_QUERYENDSESSION = 0x0011;
     public const uint WM_QUIT = 0x0012;
+    public const int WM_ENDSESSION = 0x0016;
 
     [DllImport("user32.dll")]
     public static extern int GetMessage(out MSG lpMsg, IntPtr hWnd, uint wMsgFilterMin, uint wMsgFilterMax);

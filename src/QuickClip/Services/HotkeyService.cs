@@ -15,6 +15,9 @@ namespace QuickClip.Services;
 ///    改由钩子拦截：吞掉 Win 键按下抑制开始菜单误弹，V 进入和弦判定后触发面板切换；
 ///    若用户实际按下的是其它 Win 快捷键（Win+E 等），则重放注入完整和弦保留系统行为。
 ///    RegisterHotKey 注册失败的组合同样回退到钩子。
+/// 
+/// @author xudong.hua,gemini
+/// @since 2026-08-19 16:00 星期三
 /// </summary>
 public sealed class HotkeyService : IDisposable
 {
@@ -35,6 +38,11 @@ public sealed class HotkeyService : IDisposable
     // 各热键是否已由 RegisterHotKey 接管（否则钩子回退）
     private volatile bool _winVRegistered;
     private volatile bool _plainPasteRegistered;
+
+    /// <summary>
+    /// Win+V 是否已成功由系统级 RegisterHotKey 独占接管（若为 false 则当前由低级键盘钩子接管）。
+    /// </summary>
+    public bool IsWinVRegistered => _winVRegistered;
 
     // Win 键状态机（钩子线程）：吞掉 Win 按下抑制开始菜单，必要时重放保留系统快捷键
     private volatile bool _winKeyDown;
@@ -118,6 +126,15 @@ public sealed class HotkeyService : IDisposable
         {
             _plainPasteBinding = settings.PlainPasteHotkey;
             _plainPasteEnabled = settings.PlainPasteEnabled;
+            ApplyHotkeysCore();
+        }
+    }
+
+    /// <summary>重新尝试应用热键注册（供系统剪贴板冲突配置变更后即时刷新）。</summary>
+    public void RefreshHotkeys()
+    {
+        lock (_lock)
+        {
             ApplyHotkeysCore();
         }
     }
@@ -340,6 +357,27 @@ public sealed class HotkeyService : IDisposable
                 bool altDown = NativeMethods.IsKeyDown(NativeMethods.VK_MENU);
 
                 DebugLog.LogDetail($"HookCallback: vk={hook.vkCode} msg={msg} injected={isInjected} win={winHeld} ctrl={ctrlDown} shift={shiftDown}");
+
+                // ---------- Win+V 兜底拦截（在 RegisterHotKey 失败且处于和弦重放/多键并发状态时） ----------
+                if (!_winVRegistered && hook.vkCode == NativeMethods.VK_V && winHeld)
+                {
+                    if (isKeyDown)
+                    {
+                        if (!_winVKeyDown)
+                        {
+                            _winVKeyDown = true;
+                            _winChordHandled = true;
+                            DebugLog.Log("捕获 Win+V（钩子兜底接管，已拦截系统调用）");
+                            _uiDispatcher?.BeginInvoke(() => ToggleRequested?.Invoke());
+                        }
+                    }
+                    else
+                    {
+                        _winVKeyDown = false;
+                    }
+
+                    return new IntPtr(1);
+                }
 
                 // V 键但 Win 已松开（普通输入或 Win 先松开）：复位按下标记，允许下一次 Win+V 触发
                 if (hook.vkCode == NativeMethods.VK_V && !isKeyDown)

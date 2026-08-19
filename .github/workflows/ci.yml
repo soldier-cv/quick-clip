@@ -29,24 +29,9 @@ jobs:
       - name: Build (Debug)
         run: dotnet build QuickClip.sln -c Debug --no-restore -warnaserror
 
-      - name: Publish smoke (portable + framework-dependent)
+      - name: Publish smoke (framework-dependent installer payload)
         shell: pwsh
         run: |
-          $portable = Join-Path $env:RUNNER_TEMP 'qc-portable'
-          dotnet publish src/QuickClip/QuickClip.csproj `
-            -c Release -r win-x64 --self-contained true `
-            -p:PublishSingleFile=true `
-            -p:IncludeNativeLibrariesForSelfExtract=true `
-            -p:Version=1.0.0 `
-            -p:AssemblyVersion=1.0.0.0 `
-            -p:FileVersion=1.0.0.0 `
-            -o $portable
-          $pexe = Join-Path $portable 'QuickClip.exe'
-          if (-not (Test-Path $pexe)) { throw "Portable publish failed: $pexe missing" }
-          $plen = (Get-Item $pexe).Length
-          if ($plen -lt 1MB) { throw "Portable artifact too small: $plen bytes" }
-          Write-Host "OK portable QuickClip.exe $plen bytes"
-
           $fdd = Join-Path $env:RUNNER_TEMP 'qc-fdd'
           dotnet publish src/QuickClip/QuickClip.csproj `
             -c Release -r win-x64 --self-contained false `

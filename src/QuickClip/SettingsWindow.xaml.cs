@@ -6,12 +6,16 @@ using System.Windows.Media;
 using System.Windows.Threading;
 using QuickClip.Models;
 using QuickClip.Services;
+using MediaBrush = System.Windows.Media.Brush;
 
 namespace QuickClip;
 
 /// <summary>
-/// 设置窗口：主题、快捷键、开机自启动、OCR、高级、关于。
+/// 设置窗口：主题、快捷键、系统剪贴板冲突管理、开机自启动、OCR、高级、关于。
 /// 使用自绘铬普通 Window，避免 FluentWindow 客户区白边。
+/// 
+/// @author xudong.hua,gemini
+/// @since 2026-08-19 16:00 星期三
 /// </summary>
 public partial class SettingsWindow : Window
 {
@@ -40,12 +44,14 @@ public partial class SettingsWindow : Window
         RefreshUpdatePanel();
         _services.Settings.Changed += OnSettingsChanged;
         _services.Update.PendingChanged += OnPendingUpdateChanged;
+        _services.Update.DownloadFailedChanged += OnDownloadFailedChanged;
         ThemeService.Changed += OnThemeServiceChanged;
         Loaded += OnSettingsWindowLoaded;
         Closed += (_, _) =>
         {
             _services.Settings.Changed -= OnSettingsChanged;
             _services.Update.PendingChanged -= OnPendingUpdateChanged;
+            _services.Update.DownloadFailedChanged -= OnDownloadFailedChanged;
             ThemeService.Changed -= OnThemeServiceChanged;
             Loaded -= OnSettingsWindowLoaded;
         };
@@ -131,8 +137,9 @@ public partial class SettingsWindow : Window
             return;
         }
 
-        // 主题已通过 DynamicResource 刷新；补刷窗口底色
+        // 主题已通过 DynamicResource 刷新；补刷窗口底色与状态徽章
         WindowChromeHelper.Apply(this, RootGrid);
+        RefreshSysClipboardStatus();
     }
 
     private void RefreshUi()
@@ -178,10 +185,73 @@ public partial class SettingsWindow : Window
             OcrTestPanel.Visibility = s.OcrEngine is OcrEngineType.Ollama or OcrEngineType.OpenAi
                 ? Visibility.Visible
                 : Visibility.Collapsed;
+
+            RefreshSysClipboardStatus();
         }
         finally
         {
             _suppressUiEvents = false;
+        }
+    }
+
+    /// <summary>
+    /// 刷新 Windows 剪贴板历史接管状态与 UI 指示徽章。
+    /// </summary>
+    private void RefreshSysClipboardStatus()
+    {
+        bool sysEnabled = SystemClipboardService.IsClipboardHistoryEnabled();
+        bool nativeRegistered = _services.Hotkey.IsWinVRegistered;
+
+        if (sysEnabled)
+        {
+            SysClipboardStatusText.Text = "系统已开启 (可能冲突)";
+            if (FindResource("Theme.Pin") is MediaBrush pinBrush)
+            {
+                SysClipboardStatusText.Foreground = pinBrush;
+            }
+            if (FindResource("Theme.Card") is MediaBrush cardBrush)
+            {
+                SysClipboardStatusBadge.Background = cardBrush;
+            }
+            ToggleSysClipboardButton.Content = "一键禁用";
+            ToggleSysClipboardButton.ToolTip = "一键禁用 Windows 自带剪贴板历史，释放 Win+V 独占原生接管";
+            SysClipboardHintText.Text = "Windows 自带剪贴板历史正在占用 Win+V。点击「一键禁用」即可彻底释放快捷键，实现 0 延迟原生接管。";
+        }
+        else
+        {
+            SysClipboardStatusText.Text = nativeRegistered ? "原生独占接管 (推荐)" : "系统历史已关闭";
+            if (FindResource("Theme.Accent") is MediaBrush accentBrush)
+            {
+                SysClipboardStatusText.Foreground = accentBrush;
+            }
+            if (FindResource("Theme.AccentMuted") is MediaBrush accentMutedBrush)
+            {
+                SysClipboardStatusBadge.Background = accentMutedBrush;
+            }
+            ToggleSysClipboardButton.Content = "恢复系统";
+            ToggleSysClipboardButton.ToolTip = "恢复开启 Windows 自带剪贴板历史记录";
+            SysClipboardHintText.Text = "Windows 自带剪贴板历史已关闭，Win+V 已由 QuickClip 独占原生接管，无冲突风险。";
+        }
+    }
+
+    /// <summary>
+    /// 一键切换 Windows 剪贴板历史开启/禁用状态并重新应用热键。
+    /// </summary>
+    private void OnToggleSysClipboardClicked(object sender, RoutedEventArgs e)
+    {
+        bool current = SystemClipboardService.IsClipboardHistoryEnabled();
+        bool target = !current;
+        bool success = SystemClipboardService.SetClipboardHistoryEnabled(target);
+        if (success)
+        {
+            // 重新尝试原生注册 Win+V
+            _services.Hotkey.RefreshHotkeys();
+            RefreshSysClipboardStatus();
+            SetHotkeyHint(target ? "已恢复 Windows 自带剪贴板历史" : "已禁用 Windows 自带剪贴板历史，Win+V 已独占释放");
+        }
+        else
+        {
+            SetHotkeyHint("修改 Windows 剪贴板配置失败，请检查注册表写入权限");
         }
     }
 
@@ -436,15 +506,47 @@ public partial class SettingsWindow : Window
         Dispatcher.BeginInvoke(RefreshUpdatePanel);
     }
 
+    private void OnDownloadFailedChanged(DownloadFailedInfo? _)
+    {
+        Dispatcher.BeginInvoke(RefreshUpdatePanel);
+    }
+
     private void RefreshUpdatePanel()
     {
         var pending = _services.Update.Pending;
+        var failed = _services.Update.DownloadFailed;
+
         bool ready = pending != null && File.Exists(pending.LocalPath);
-        InstallUpdateButton.Visibility = ready ? Visibility.Visible : Visibility.Collapsed;
-        InstallUpdateButton.Content = UpdateService.ApplyActionLabel;
-        if (ready && string.IsNullOrEmpty(UpdateStatusText.Text))
+        if (ready)
         {
-            UpdateStatusText.Text = UpdateService.ReadyNotifyText(pending!.TagName);
+            InstallUpdateButton.Visibility = Visibility.Visible;
+            InstallUpdateButton.Content = UpdateService.ApplyActionLabel;
+            BrowserDownloadButton.Visibility = Visibility.Collapsed;
+            UpdateStatusText.Text = $"新版本 {pending!.TagName} 已下载就绪，点击「立即更新」启动安装程序。";
+            if (FindResource("Theme.Accent") is MediaBrush accentBrush)
+            {
+                UpdateStatusText.Foreground = accentBrush;
+            }
+            return;
+        }
+
+        InstallUpdateButton.Visibility = Visibility.Collapsed;
+
+        if (failed != null)
+        {
+            BrowserDownloadButton.Visibility = Visibility.Visible;
+            UpdateStatusText.Text = $"⚠️ 发现新版本 {failed.TagName}，自动下载失败。可点击右侧按钮直接在浏览器中下载安装包。";
+            if (FindResource("Theme.Pin") is MediaBrush pinBrush)
+            {
+                UpdateStatusText.Foreground = pinBrush;
+            }
+            return;
+        }
+
+        BrowserDownloadButton.Visibility = Visibility.Collapsed;
+        if (FindResource("Theme.TextSecondary") is MediaBrush textSecondaryBrush)
+        {
+            UpdateStatusText.Foreground = textSecondaryBrush;
         }
     }
 
@@ -581,6 +683,11 @@ public partial class SettingsWindow : Window
 
         UpdateStatusText.Text = message;
         RefreshUpdatePanel();
+    }
+
+    private void OnBrowserDownloadClicked(object sender, RoutedEventArgs e)
+    {
+        UpdateService.OpenUrlInBrowser(_services.Update.DownloadFailed?.DownloadUrl);
     }
 
     private void OnCloseClicked(object sender, RoutedEventArgs e) => Close();

@@ -47,26 +47,19 @@
 
 | 包 | 说明 |
 | --- | --- |
-| `QuickClip-Setup-win-x64.exe` | **推荐**。体积小，需已安装 [.NET 8 桌面运行时 x64](https://aka.ms/dotnet/8.0/windowsdesktop-runtime-win-x64.exe) |
-| `QuickClip.exe` | 绿色单文件，自带运行时，免安装、体积较大 |
+| `QuickClip-Setup-win-x64.exe` | 安装版（体积小，需已安装 [.NET 8 桌面运行时 x64](https://aka.ms/dotnet/8.0/windowsdesktop-runtime-win-x64.exe)） |
 
-启动后会延迟检查更新并下载到 `%LOCALAPPDATA%\QuickClip\updates\`，可在设置中关闭自动检查。
-
-- **安装版**：点「立即更新」打开 Setup
-- **绿色版**：点「打开下载目录」，退出 QuickClip 后用新 exe 替换原来的文件（不自动覆盖正在运行的程序）
+启动后会延迟检查更新并下载到 `%LOCALAPPDATA%\QuickClip\updates\`，可在设置中关闭自动检查。下载完成后点击「立即更新」即可启动安装程序升级。
 
 ## 从源码构建
 
 环境：Windows 10 1809+ / Windows 11、[.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)。
 
 ```powershell
+# 本地运行与调试
 dotnet run --project src/QuickClip/QuickClip.csproj
 
-# 绿色单文件
-dotnet publish src/QuickClip/QuickClip.csproj -c Release -r win-x64 --self-contained true `
-  -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish
-
-# 安装包载荷（再本机用 Inno Setup 编译 setup/QuickClip.iss）
+# 构建安装包载荷（配合 Inno Setup 编译 setup/QuickClip.iss 生成安装包）
 dotnet publish src/QuickClip/QuickClip.csproj -c Release -r win-x64 --self-contained false `
   -p:PublishSingleFile=false -o publish/fdd
 ```

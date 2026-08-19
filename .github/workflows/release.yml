@@ -45,26 +45,6 @@ jobs:
       - name: Build (Debug)
         run: dotnet build QuickClip.sln -c Debug --no-restore
 
-      - name: Publish portable (self-contained single-file)
-        shell: pwsh
-        run: |
-          $ver = '${{ steps.ver.outputs.version }}'
-          $asm = '${{ steps.ver.outputs.assembly }}'
-          New-Item -ItemType Directory -Force -Path publish | Out-Null
-          dotnet publish src/QuickClip/QuickClip.csproj `
-            -c Release -r win-x64 --self-contained true `
-            -p:PublishSingleFile=true `
-            -p:IncludeNativeLibrariesForSelfExtract=true `
-            "-p:Version=$ver" `
-            "-p:AssemblyVersion=$asm" `
-            "-p:FileVersion=$asm" `
-            -o publish
-          $exe = 'publish/QuickClip.exe'
-          if (-not (Test-Path $exe)) { throw 'QuickClip.exe not found after portable publish' }
-          $len = (Get-Item $exe).Length
-          if ($len -lt 1MB) { throw "Portable artifact suspiciously small: $len bytes" }
-          Write-Host "Portable: $len bytes"
-
       - name: Publish framework-dependent (installer payload)
         shell: pwsh
         run: |
@@ -106,7 +86,6 @@ jobs:
         with:
           name: QuickClip-win-x64-v${{ steps.ver.outputs.version }}
           path: |
-            publish/QuickClip.exe
             publish/setup/QuickClip-Setup-win-x64.exe
           if-no-files-found: error
 
@@ -115,7 +94,6 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: |
-            publish/QuickClip.exe
             publish/setup/QuickClip-Setup-win-x64.exe
           generate_release_notes: true
           fail_on_unmatched_files: true
@@ -126,7 +104,6 @@ jobs:
 
             | 文件 | 说明 |
             | --- | --- |
-            | `QuickClip-Setup-win-x64.exe` | **推荐**安装版，体积小，需 [.NET 8 桌面运行时 x64](https://aka.ms/dotnet/8.0/windowsdesktop-runtime-win-x64.exe) |
-            | `QuickClip.exe` | 绿色单文件，自带运行时 |
+            | `QuickClip-Setup-win-x64.exe` | 安装版（体积小，需 [.NET 8 桌面运行时 x64](https://aka.ms/dotnet/8.0/windowsdesktop-runtime-win-x64.exe)） |
 
             详细变更见 [CHANGELOG.md](https://github.com/soldier-cv/quick-clip/blob/master/CHANGELOG.md)。

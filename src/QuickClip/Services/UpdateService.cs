@@ -7,14 +7,15 @@ using System.Text.Json.Serialization;
 
 namespace QuickClip.Services;
 
-/// <summary>发布渠道：绿色单文件或依赖运行时的安装包。</summary>
+/// <summary>
+/// 发布渠道：统一采用依赖运行时的轻量安装包。
+/// </summary>
 public enum ReleaseChannel
 {
-    Portable,
     Setup
 }
 
-/// <summary>已下载、等待用户动手安装/替换的更新。</summary>
+/// <summary>已下载、等待用户安装的更新。</summary>
 public sealed class PendingUpdate
 {
     public required string Version { get; init; }
@@ -23,7 +24,22 @@ public sealed class PendingUpdate
     public required ReleaseChannel Channel { get; init; }
 }
 
-/// <summary>版本检查、按渠道下载、静默节流。不自动覆盖正在运行的进程。</summary>
+/// <summary>自动下载更新失败的信息。</summary>
+public sealed class DownloadFailedInfo
+{
+    public required string Version { get; init; }
+    public required string TagName { get; init; }
+    public required string DownloadUrl { get; init; }
+    public required string ErrorMessage { get; init; }
+    public required DateTime FailedTimeUtc { get; init; }
+}
+
+/// <summary>
+/// 版本检查、安装包下载、12小时调度与7次重试。
+/// 
+/// @author xudong.hua,gemini
+/// @since 2026-08-19 16:18 星期三
+/// </summary>
 public sealed class UpdateService : IDisposable
 {
     private const string RepoOwner = "soldier-cv";
@@ -33,40 +49,48 @@ public sealed class UpdateService : IDisposable
     private const string LatestReleasePageUrl = $"{ReleasesPageUrl}/latest";
     private const string InstalledMarkerFileName = "QuickClip.installed";
     private const long MaxDownloadBytes = 400L * 1024 * 1024;
-    private static readonly TimeSpan SilentDelay = TimeSpan.FromSeconds(90);
-    private static readonly TimeSpan SilentInterval = TimeSpan.FromHours(24);
-    private static readonly TimeSpan ApiTimeout = TimeSpan.FromSeconds(25);
+
+    private static readonly TimeSpan InitialDelay = TimeSpan.FromSeconds(8);
+    private static readonly TimeSpan NormalInterval = TimeSpan.FromHours(12);
+    private static readonly TimeSpan RetryInterval = TimeSpan.FromMinutes(3);
+    private const int MaxRetryAttempts = 7;
+
+    private static readonly TimeSpan ApiTimeout = TimeSpan.FromSeconds(6);
+    private static readonly TimeSpan PageFallbackTimeout = TimeSpan.FromSeconds(8);
 
     private readonly HttpClient _http = CreateHttpClient();
     private readonly SemaphoreSlim _gate = new(1, 1);
     private AppPaths? _paths;
     private SettingsService? _settings;
-    private System.Threading.Timer? _silentTimer;
+    private System.Threading.Timer? _scheduleTimer;
+    private int _consecutiveFailures;
 
     /// <summary>当前程序版本（来自程序集版本号）。</summary>
     public static string CurrentVersion =>
         typeof(UpdateService).Assembly.GetName().Version?.ToString(3) ?? "1.0.0";
 
-    /// <summary>根据安装目录标记判断渠道：有 QuickClip.installed 为安装版。</summary>
-    public static ReleaseChannel CurrentChannel { get; } = DetectChannel();
+    /// <summary>当前发布渠道：固定为安装版。</summary>
+    public static ReleaseChannel CurrentChannel => ReleaseChannel.Setup;
 
-    public static string ChannelLabel =>
-        CurrentChannel == ReleaseChannel.Setup ? "安装版" : "绿色版";
+    public static string ChannelLabel => "安装版";
 
-    /// <summary>已下载更新后的动作文案：安装版启动 Setup，绿色版只打开目录。</summary>
-    public static string ApplyActionLabel =>
-        CurrentChannel == ReleaseChannel.Setup ? "立即更新" : "打开下载目录";
+    /// <summary>已下载更新后的动作文案：启动 Setup 安装程序。</summary>
+    public static string ApplyActionLabel => "立即更新";
 
     /// <summary>下载完成后的托盘/设置提示。</summary>
     public static string ReadyNotifyText(string tagName) =>
-        CurrentChannel == ReleaseChannel.Setup
-            ? $"发现新版本 {tagName}，已下载。点击即可更新"
-            : $"发现新版本 {tagName}，已下载。点击打开下载目录，退出后自行替换";
+        $"发现新版本 {tagName}，已下载。点击即可更新";
 
     public PendingUpdate? Pending { get; private set; }
 
+    /// <summary>自动下载失败时的标记信息（为 null 表示无失败）。</summary>
+    public DownloadFailedInfo? DownloadFailed { get; private set; }
+
     /// <summary>待安装更新变化（可能来自后台线程，订阅方需切回 UI）。</summary>
     public event Action<PendingUpdate?>? PendingChanged;
+
+    /// <summary>下载失败状态变化。</summary>
+    public event Action<DownloadFailedInfo?>? DownloadFailedChanged;
 
     /// <summary>需要提示用户时触发（title, message）。静默失败不触发。</summary>
     public event Action<string, string>? UserNotify;
@@ -79,15 +103,62 @@ public sealed class UpdateService : IDisposable
         TryRestorePending();
     }
 
-    /// <summary>启动约 90 秒后做一次静默检查；之后靠 24h 时间戳节流。</summary>
+    /// <summary>启动后台自动更新调度任务（启动 8 秒后首次执行，通过后每 12 小时一次，失败最多重试 7 次）。</summary>
     public void StartSilentChecks()
     {
-        _silentTimer?.Dispose();
-        _silentTimer = new System.Threading.Timer(
-            _ => _ = RunSilentCheckAsync(),
+        _scheduleTimer?.Dispose();
+        _consecutiveFailures = 0;
+        _scheduleTimer = new System.Threading.Timer(
+            _ => _ = ExecuteScheduledCheckAsync(),
             null,
-            SilentDelay,
-            SilentInterval);
+            InitialDelay,
+            Timeout.InfiniteTimeSpan);
+        DebugLog.Log($"已启动自动更新调度器：将在 {InitialDelay.TotalSeconds} 秒后执行首次检查");
+    }
+
+    /// <summary>
+    /// 执行定时检查任务：成功则 12 小时后再次检查；失败重试，7 次失败后暂停重试等待下一次 12 小时常规任务。
+    /// </summary>
+    private async Task ExecuteScheduledCheckAsync()
+    {
+        var settings = _settings;
+        if (settings == null || !settings.AutoCheckUpdates)
+        {
+            _scheduleTimer?.Change(NormalInterval, Timeout.InfiniteTimeSpan);
+            return;
+        }
+
+        DebugLog.Log($"开始执行自动更新检查 (连续失败重试计数: {_consecutiveFailures}/{MaxRetryAttempts})");
+        var result = await CheckAndDownloadAsync(interactive: false);
+
+        if (result.Status is UpdateCheckStatus.UpToDate or UpdateCheckStatus.Ready)
+        {
+            _consecutiveFailures = 0;
+            settings.SetLastUpdateCheckUtc(DateTime.UtcNow);
+            _scheduleTimer?.Change(NormalInterval, Timeout.InfiniteTimeSpan);
+            DebugLog.Log($"自动更新检查通过（状态: {result.Status}），安排下一次检查在 {NormalInterval.TotalHours} 小时后");
+
+            if (result.Status == UpdateCheckStatus.Ready && result.Pending != null)
+            {
+                UserNotify?.Invoke("QuickClip", ReadyNotifyText(result.Pending.TagName));
+            }
+            return;
+        }
+
+        // 失败分支（接口失败或下载失败）
+        _consecutiveFailures++;
+        if (_consecutiveFailures <= MaxRetryAttempts)
+        {
+            DebugLog.Log($"自动检查更新失败 ({_consecutiveFailures}/{MaxRetryAttempts})：{result.Message}，将在 {RetryInterval.TotalMinutes} 分钟后重试");
+            _scheduleTimer?.Change(RetryInterval, Timeout.InfiniteTimeSpan);
+        }
+        else
+        {
+            DebugLog.Log($"自动检查更新已连续失败 {MaxRetryAttempts} 次，暂停重试，等待下个 12 小时常规调度周期");
+            _consecutiveFailures = 0;
+            settings.SetLastUpdateCheckUtc(DateTime.UtcNow);
+            _scheduleTimer?.Change(NormalInterval, Timeout.InfiniteTimeSpan);
+        }
     }
 
     /// <summary>
@@ -166,7 +237,7 @@ public sealed class UpdateService : IDisposable
             using var request = new HttpRequestMessage(HttpMethod.Get, LatestReleasePageUrl);
             ApplyGitHubHeaders(request, api: false);
 
-            using var cts = new CancellationTokenSource(ApiTimeout);
+            using var cts = new CancellationTokenSource(PageFallbackTimeout);
             using var response = await _http.SendAsync(
                 request, HttpCompletionOption.ResponseHeadersRead, cts.Token);
             if (!response.IsSuccessStatusCode)
@@ -233,6 +304,7 @@ public sealed class UpdateService : IDisposable
                 File.Exists(existing.LocalPath) &&
                 IsNewer(existing.Version, CurrentVersion))
             {
+                SetDownloadFailed(null);
                 return UpdateCheckResult.Ready(existing);
             }
 
@@ -255,7 +327,17 @@ public sealed class UpdateService : IDisposable
             string? local = await DownloadReleaseAsync(check.Release, _paths);
             if (string.IsNullOrEmpty(local))
             {
-                var fail = UpdateCheckResult.Fail($"发现新版本 {check.Release.TagName}，但下载失败");
+                var failedInfo = new DownloadFailedInfo
+                {
+                    Version = check.Release.Version,
+                    TagName = check.Release.TagName,
+                    DownloadUrl = check.Release.DownloadUrl ?? BuildDirectDownloadUrl(check.Release.TagName),
+                    ErrorMessage = $"发现新版本 {check.Release.TagName}，但自动下载失败（网络异常或超时）",
+                    FailedTimeUtc = DateTime.UtcNow
+                };
+                SetDownloadFailed(failedInfo);
+
+                var fail = UpdateCheckResult.Fail(failedInfo.ErrorMessage);
                 if (interactive)
                 {
                     UserNotify?.Invoke("QuickClip", fail.Message ?? "下载失败");
@@ -263,6 +345,9 @@ public sealed class UpdateService : IDisposable
 
                 return fail;
             }
+
+            // 下载成功，清空失败记录
+            SetDownloadFailed(null);
 
             SetPending(new PendingUpdate
             {
@@ -281,8 +366,7 @@ public sealed class UpdateService : IDisposable
     }
 
     /// <summary>
-    /// 安装版：启动 Setup。绿色版：打开已下载目录，由用户退出后自行替换。
-    /// shouldExit 现已始终为 false（绿色版不再自动覆盖正在运行的 exe）。
+    /// 启动已下载的 Setup 安装程序开始升级。
     /// </summary>
     public bool TryApplyPending(out string message, out bool shouldExit)
     {
@@ -296,69 +380,46 @@ public sealed class UpdateService : IDisposable
 
         try
         {
-            if (pending.Channel == ReleaseChannel.Setup)
+            Process.Start(new ProcessStartInfo
             {
-                Process.Start(new ProcessStartInfo
-                {
-                    FileName = pending.LocalPath,
-                    UseShellExecute = true
-                });
-                message = "已启动安装程序";
-                return true;
-            }
-
-            return TryOpenDownloadFolder(pending.LocalPath, out message);
+                FileName = pending.LocalPath,
+                UseShellExecute = true
+            });
+            message = "已启动安装程序";
+            return true;
         }
         catch (Exception ex)
         {
             DebugLog.LogException("应用更新失败", ex);
-            message = "无法开始更新";
+            message = "无法启动安装程序";
             return false;
         }
-    }
-
-    /// <summary>用资源管理器打开更新目录并选中已下载的绿色版 exe。</summary>
-    private static bool TryOpenDownloadFolder(string filePath, out string message)
-    {
-        if (!File.Exists(filePath))
-        {
-            message = "找不到已下载的更新文件";
-            return false;
-        }
-
-        Process.Start(new ProcessStartInfo
-        {
-            FileName = "explorer.exe",
-            Arguments = "/select," + Quote(filePath),
-            UseShellExecute = true
-        });
-        DebugLog.Log($"已打开绿色版下载目录: {filePath}");
-        message = "已打开下载目录。请先退出 QuickClip，再用新文件替换原来的 exe";
-        return true;
     }
 
     private static string Quote(string path) => "\"" + path.Trim('"') + "\"";
 
-    private async Task RunSilentCheckAsync()
+    private void SetDownloadFailed(DownloadFailedInfo? failed)
     {
-        var settings = _settings;
-        if (settings == null || !settings.AutoCheckUpdates)
-        {
-            return;
-        }
+        DownloadFailed = failed;
+        DownloadFailedChanged?.Invoke(failed);
+    }
 
-        if (settings.LastUpdateCheckUtc is DateTime last &&
-            DateTime.UtcNow - last < SilentInterval)
+    /// <summary>在系统默认浏览器中打开指定下载链接或 Releases 页面。</summary>
+    public static void OpenUrlInBrowser(string? url)
+    {
+        string target = string.IsNullOrWhiteSpace(url) ? ReleasesPageUrl : url;
+        try
         {
-            DebugLog.Log($"跳过静默检查：距上次 {(DateTime.UtcNow - last).TotalHours:0.0}h");
-            return;
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = target,
+                UseShellExecute = true
+            });
+            DebugLog.Log($"已在浏览器中打开链接: {target}");
         }
-
-        settings.SetLastUpdateCheckUtc(DateTime.UtcNow);
-        var result = await CheckAndDownloadAsync(interactive: false);
-        if (result.Status == UpdateCheckStatus.Ready && result.Pending != null)
+        catch (Exception ex)
         {
-            UserNotify?.Invoke("QuickClip", ReadyNotifyText(result.Pending.TagName));
+            DebugLog.LogException($"打开浏览器链接失败: {target}", ex);
         }
     }
 
@@ -371,21 +432,13 @@ public sealed class UpdateService : IDisposable
 
         try
         {
-            string prefix = CurrentChannel == ReleaseChannel.Setup
-                ? "QuickClip-Setup-"
-                : "QuickClip-";
+            const string prefix = "QuickClip-Setup-";
             PendingUpdate? best = null;
-            foreach (string file in Directory.GetFiles(_paths.UpdatesDir, "*.exe"))
+            foreach (string file in Directory.GetFiles(_paths.UpdatesDir, "QuickClip-Setup-*.exe"))
             {
                 string name = Path.GetFileName(file);
                 if (!name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ||
                     !name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                if (CurrentChannel == ReleaseChannel.Portable &&
-                    name.StartsWith("QuickClip-Setup-", StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
@@ -403,7 +456,7 @@ public sealed class UpdateService : IDisposable
                         Version = versionPart,
                         TagName = "v" + versionPart,
                         LocalPath = file,
-                        Channel = CurrentChannel
+                        Channel = ReleaseChannel.Setup
                     };
                 }
             }
@@ -435,9 +488,7 @@ public sealed class UpdateService : IDisposable
         }
 
         Directory.CreateDirectory(paths.UpdatesDir);
-        string destName = CurrentChannel == ReleaseChannel.Setup
-            ? $"QuickClip-Setup-{release.Version}.exe"
-            : $"QuickClip-{release.Version}.exe";
+        string destName = $"QuickClip-Setup-{release.Version}.exe";
         string dest = Path.Combine(paths.UpdatesDir, destName);
         if (File.Exists(dest))
         {
@@ -567,17 +618,7 @@ public sealed class UpdateService : IDisposable
         static bool IsSetup(GitHubAssetDto a) =>
             a.Name != null && a.Name.Contains("Setup", StringComparison.OrdinalIgnoreCase);
 
-        var exes = assets.Where(IsExe).ToList();
-        if (channel == ReleaseChannel.Setup)
-        {
-            return exes.FirstOrDefault(IsSetup);
-        }
-
-        return exes.FirstOrDefault(a =>
-                   a.Name!.Equals("QuickClip.exe", StringComparison.OrdinalIgnoreCase))
-               ?? exes.FirstOrDefault(a =>
-                   a.Name!.Contains("portable", StringComparison.OrdinalIgnoreCase) && !IsSetup(a))
-               ?? exes.FirstOrDefault(a => !IsSetup(a));
+        return assets.Where(IsExe).FirstOrDefault(IsSetup);
     }
 
     internal static bool IsTrustedDownloadUrl(string url)
@@ -625,9 +666,7 @@ public sealed class UpdateService : IDisposable
     }
 
     private static string BuildDirectDownloadUrl(string tag) =>
-        CurrentChannel == ReleaseChannel.Setup
-            ? $"https://github.com/{RepoOwner}/{RepoName}/releases/download/{tag}/QuickClip-Setup-win-x64.exe"
-            : $"https://github.com/{RepoOwner}/{RepoName}/releases/download/{tag}/QuickClip.exe";
+        $"https://github.com/{RepoOwner}/{RepoName}/releases/download/{tag}/QuickClip-Setup-win-x64.exe";
 
     private static bool TryParseTagFromLatestUrl(string? pathOrUrl, out string tag, out string version)
     {
@@ -680,25 +719,6 @@ public sealed class UpdateService : IDisposable
         }
     }
 
-    private static ReleaseChannel DetectChannel()
-    {
-        try
-        {
-            string? dir = Path.GetDirectoryName(Environment.ProcessPath);
-            if (!string.IsNullOrEmpty(dir) &&
-                File.Exists(Path.Combine(dir, InstalledMarkerFileName)))
-            {
-                return ReleaseChannel.Setup;
-            }
-        }
-        catch
-        {
-            // ignore
-        }
-
-        return ReleaseChannel.Portable;
-    }
-
     /// <summary>比较两个版本号（x.y.z），candidate 大于 current 时为 true。</summary>
     private static bool IsNewer(string candidate, string current)
     {
@@ -742,7 +762,7 @@ public sealed class UpdateService : IDisposable
 
     public void Dispose()
     {
-        _silentTimer?.Dispose();
+        _scheduleTimer?.Dispose();
         _http.Dispose();
         _gate.Dispose();
     }

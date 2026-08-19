@@ -22,5 +22,8 @@ public enum AppTheme
     Nord = 5,
 
     /// <summary>Catppuccin Mocha。</summary>
-    Catppuccin = 6
+    Catppuccin = 6,
+
+    /// <summary>Windows 11 官方暗黑（Zinc 深黑底 + Win11 天空蓝）。</summary>
+    FluentDark = 7
 }

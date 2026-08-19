@@ -78,6 +78,38 @@ public partial class MainWindow : FluentWindow
         OnSettingsChanged();
     }
 
+    private static readonly uint WmShowQuickClip = QuickClip.Native.NativeMethods.RegisterWindowMessage("QUICKCLIP_SHOW_WINDOW_MSG");
+    private static readonly uint WmTaskbarCreated = QuickClip.Native.NativeMethods.RegisterWindowMessage("TaskbarCreated");
+
+    protected override void OnSourceInitialized(EventArgs e)
+    {
+        base.OnSourceInitialized(e);
+        if (System.Windows.Interop.HwndSource.FromHwnd(new System.Windows.Interop.WindowInteropHelper(this).Handle) is { } source)
+        {
+            source.AddHook(WndProc);
+        }
+    }
+
+    private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        if (msg == (int)WmShowQuickClip)
+        {
+            ShowWindow();
+            handled = true;
+            return IntPtr.Zero;
+        }
+
+        if (msg == (int)WmTaskbarCreated)
+        {
+            DebugLog.Log("检测到 Explorer 重建 (TaskbarCreated)，自愈刷新托盘与热键");
+            _services.Hotkey.RefreshHotkeys();
+            handled = true;
+            return IntPtr.Zero;
+        }
+
+        return IntPtr.Zero;
+    }
+
     private void OnThemeChanged()
     {
         WindowChromeHelper.Apply(this, RootGrid);

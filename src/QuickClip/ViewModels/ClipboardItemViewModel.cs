@@ -131,8 +131,32 @@ public sealed class ClipboardItemViewModel : INotifyPropertyChanged
         string text = item.TextContent ?? string.Empty;
         if (item.ContentType == ClipboardContentType.Image)
         {
-            // 列表只标识别状态，解码正文放到悬停预览，避免卡片标题被 URL 撑满
             return !string.IsNullOrEmpty(item.QrContent) ? "已识别二维码" : "图片预览";
+        }
+
+        if (item.ContentType == ClipboardContentType.File)
+        {
+            var paths = text.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries);
+            if (paths.Length == 0)
+            {
+                return "空文件列表";
+            }
+
+            if (paths.Length == 1)
+            {
+                string name = Path.GetFileName(paths[0].TrimEnd('\\', '/'));
+                return string.IsNullOrEmpty(name) ? paths[0] : name;
+            }
+
+            var names = paths.Take(3).Select(p =>
+            {
+                string n = Path.GetFileName(p.TrimEnd('\\', '/'));
+                return string.IsNullOrEmpty(n) ? p : n;
+            });
+            string joinedNames = string.Join(", ", names);
+            return paths.Length > 3
+                ? $"{paths.Length} 个文件: {joinedNames} …"
+                : $"{paths.Length} 个文件: {joinedNames}";
         }
 
         string oneLine = text.Replace("\r\n", " / ").Replace('\n', ' ').Trim();
@@ -155,38 +179,43 @@ public sealed class ClipboardItemViewModel : INotifyPropertyChanged
         return time.ToString("M月d日 HH:mm");
     }
 
+    public bool HasSizeText => !string.IsNullOrEmpty(SizeText);
+
     private static string BuildSize(ClipboardItem item)
     {
         return item.ContentType switch
         {
             ClipboardContentType.Image => FormatBytes(item.CharCount),
             ClipboardContentType.File => BuildFileMeta(item),
-            ClipboardContentType.Link => "链接",
+            ClipboardContentType.Link => string.Empty,
             _ => $"{item.CharCount:N0} 字符"
         };
     }
 
     /// <summary>
-    /// 文件元数据：个数来自路径行；CharCount 新数据为总字节，旧数据可能为个数。
-    /// 展示如「2 个文件 · 12.3 MB」，避免「文件 · 1234567 个文件」。
+    /// 文件元数据：单文件返回如「1.3 KB」，多文件返回如「3 项 · 12.3 MB」，避免与 TypeLabel(文件) 重复。
     /// </summary>
     private static string BuildFileMeta(ClipboardItem item)
     {
-        int count = CountPaths(item.TextContent);
-        if (count < 1)
+        var paths = (item.TextContent ?? string.Empty)
+            .Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries);
+        int count = paths.Length;
+        if (count <= 0)
         {
-            count = 1;
+            return string.Empty;
         }
 
-        string countLabel = $"{count} 个文件";
-        long n = item.CharCount;
-        // 旧记录：CharCount == 文件个数；新记录：总字节（通常远大于个数）
-        if (n <= 0 || n == count)
+        long bytes = item.CharCount;
+        string sizeLabel = bytes > 0 && bytes != count ? FormatBytes(bytes) : string.Empty;
+
+        if (count == 1)
         {
-            return countLabel;
+            return sizeLabel;
         }
 
-        return $"{countLabel} · {FormatBytes(n)}";
+        return !string.IsNullOrEmpty(sizeLabel)
+            ? $"{count} 项 · {sizeLabel}"
+            : $"{count} 项";
     }
 
     private static int CountPaths(string? text)

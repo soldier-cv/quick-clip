@@ -302,10 +302,14 @@
                                             <TextBlock Text="{Binding TypeLabel}"
                                                        Foreground="{DynamicResource Theme.TextSecondary}"
                                                        FontSize="11" />
-                                            <TextBlock Text=" · " Foreground="{DynamicResource Theme.TextMuted}" FontSize="11" />
+                                            <TextBlock Text=" · "
+                                                       Foreground="{DynamicResource Theme.TextMuted}"
+                                                       FontSize="11"
+                                                       Visibility="{Binding HasSizeText, Converter={StaticResource BoolToVis}}" />
                                             <TextBlock Text="{Binding SizeText}"
                                                        Foreground="{DynamicResource Theme.TextSecondary}"
-                                                       FontSize="11" />
+                                                       FontSize="11"
+                                                       Visibility="{Binding HasSizeText, Converter={StaticResource BoolToVis}}" />
                                             <TextBlock Text=" · " Foreground="{DynamicResource Theme.TextMuted}" FontSize="11" />
                                             <TextBlock Text="{Binding TimeText}"
                                                        Foreground="{DynamicResource Theme.TextSecondary}"

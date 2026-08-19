@@ -82,7 +82,7 @@ public sealed class PasteService
     /// <summary>模拟 Ctrl+V 粘贴到之前记录的目标窗口。</summary>
     private void SimulatePaste()
     {
-        if (_lastTargetWindow != IntPtr.Zero)
+        if (_lastTargetWindow != IntPtr.Zero && NativeMethods.IsWindow(_lastTargetWindow))
         {
             NativeMethods.SetForegroundWindow(_lastTargetWindow);
         }
@@ -96,6 +96,10 @@ public sealed class PasteService
         try
         {
             await CopyCoreAsync(setter);
+
+            // 关键：剪贴板回填完成后，留出微小的系统前台焦点稳定缓冲（约 35ms），
+            // 确保 QuickClip 隐藏后目标第三方窗口已完成 WM_ACTIVATE 获得键盘焦点，再执行 SendInput
+            await Task.Delay(35);
             SimulatePaste();
         }
         catch (Exception ex)

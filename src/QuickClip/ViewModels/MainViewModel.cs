@@ -221,9 +221,16 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 _services.Paste.PasteImage(item.PreviewPath);
                 break;
             case ClipboardContentType.File:
-                var files = item.TextContent?.Split(
-                    new[] { Environment.NewLine }, StringSplitOptions.RemoveEmptyEntries);
-                _services.Paste.PasteFiles(files);
+                if (plainOnly)
+                {
+                    _services.Paste.PasteText(item.TextContent, plainOnly: true);
+                }
+                else
+                {
+                    var files = item.TextContent?.Split(
+                        new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries);
+                    _services.Paste.PasteFiles(files);
+                }
                 break;
             default:
                 _services.Paste.PasteText(item.TextContent, plainOnly);

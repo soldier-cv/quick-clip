@@ -535,7 +535,7 @@ public partial class SettingsWindow : Window
         if (failed != null)
         {
             BrowserDownloadButton.Visibility = Visibility.Visible;
-            UpdateStatusText.Text = $"⚠️ 发现新版本 {failed.TagName}，自动下载失败。可点击右侧按钮直接在浏览器中下载安装包。";
+            UpdateStatusText.Text = $"发现新版本 {failed.TagName}，自动下载失败。可点击右侧按钮直接在浏览器中下载安装包。";
             if (FindResource("Theme.Pin") is MediaBrush pinBrush)
             {
                 UpdateStatusText.Foreground = pinBrush;

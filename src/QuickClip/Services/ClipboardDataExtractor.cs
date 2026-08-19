@@ -30,17 +30,19 @@ public static class ClipboardDataExtractor
     {
         try
         {
-            // 优先级：文本 > 文件 > 图片
-            string? text = NativeClipboard.TryGetText();
-            if (!string.IsNullOrEmpty(text))
-            {
-                return CaptureText(text);
-            }
-
+            // 优先级：文件 > 文本 > 图片
+            // 注意：Windows 资源管理器复制文件时会同时放入 CF_HDROP 与 CF_UNICODETEXT（文件路径文本），
+            // 必须优先检测 CF_HDROP 文件列表，否则文件会被错误识别为普通文本。
             string[]? files = NativeClipboard.TryGetFiles();
             if (files is { Length: > 0 })
             {
                 return CaptureFiles(files);
+            }
+
+            string? text = NativeClipboard.TryGetText();
+            if (!string.IsNullOrEmpty(text))
+            {
+                return CaptureText(text);
             }
 
             using var bitmap = ClipboardImageNormalizer.TryCaptureBitmap();

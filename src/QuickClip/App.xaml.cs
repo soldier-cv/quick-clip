@@ -34,8 +34,9 @@ public partial class App : System.Windows.Application
 
         if (!acquired)
         {
-            System.Windows.MessageBox.Show("QuickClip 已在运行中，请检查托盘图标。", "QuickClip",
-                System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Information);
+            // 二次启动唤起：向已有实例广播唤起消息，直接呼出面板
+            uint msg = QuickClip.Native.NativeMethods.RegisterWindowMessage("QUICKCLIP_SHOW_WINDOW_MSG");
+            QuickClip.Native.NativeMethods.PostMessage((IntPtr)QuickClip.Native.NativeMethods.HWND_BROADCAST, msg, IntPtr.Zero, IntPtr.Zero);
             Shutdown();
             return;
         }

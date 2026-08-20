@@ -30,6 +30,9 @@ internal static class NativeMethods
     /// <summary>低级钩子事件中的 LLKHF_INJECTED 标志（SendInput 注入的按键）。</summary>
     public const uint LLKHF_INJECTED = 0x00000010;
 
+    /// <summary>自身 SendInput 打在 dwExtraInfo 上的标记，用来和 RustDesk 等远程注入区分。</summary>
+    public static readonly IntPtr InjectExtraInfo = new(0x51434C50);
+
     public const uint KEYEVENTF_KEYUP = 0x0002;
 
     public const uint INPUT_KEYBOARD = 1;
@@ -354,6 +357,9 @@ internal static class NativeMethods
         }
     }
 
+    public static bool IsSelfInjected(in KBDLLHOOKSTRUCT hook) =>
+        (hook.flags & LLKHF_INJECTED) != 0 && hook.dwExtraInfo == InjectExtraInfo;
+
     private static INPUT KeyInput(int vk, uint flags)
     {
         return new INPUT
@@ -361,7 +367,12 @@ internal static class NativeMethods
             type = INPUT_KEYBOARD,
             U = new InputUnion
             {
-                ki = new KEYBDINPUT { wVk = (ushort)vk, dwFlags = flags }
+                ki = new KEYBDINPUT
+                {
+                    wVk = (ushort)vk,
+                    dwFlags = flags,
+                    dwExtraInfo = InjectExtraInfo
+                }
             }
         };
     }

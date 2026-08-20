@@ -2,6 +2,12 @@
 
 本项目版本记录遵循 [Keep a Changelog](https://keepachangelog.com/) 风格。
 
+## [1.2.2] — 2026-08-19
+
+### 修复
+
+- RustDesk 等远程桌面用 `SendInput` 注入的 Win+V 被钩子当成自身重放按键直接放行，从而弹出系统剪贴板。现只忽略带 QuickClip 标记的注入，远程注入按真实 Win+V 接管
+
 ## [1.2.1] — 2026-08-19
 
 ### 修复

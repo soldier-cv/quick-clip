@@ -264,8 +264,8 @@ public sealed class HotkeyService : IDisposable
                 bool isKeyDown = msg is NativeMethods.WM_KEYDOWN or NativeMethods.WM_SYSKEYDOWN;
                 bool isWinKey = hook.vkCode is NativeMethods.VK_LWIN or NativeMethods.VK_RWIN;
 
-                // 自身注入的事件（重放 Win 和弦）直接放行，避免递归处理
-                if (isInjected)
+                // 只放行我们自己重放的 Win 和弦 / Ctrl+V。RustDesk 等远程注入同样带 INJECTED，必须当真实按键处理，否则 Win+V 会漏给系统剪贴板。
+                if (NativeMethods.IsSelfInjected(in hook))
                 {
                     return NativeMethods.CallNextHookEx(_hookId, nCode, wParam, lParam);
                 }
@@ -327,7 +327,7 @@ public sealed class HotkeyService : IDisposable
                             {
                                 _winVKeyDown = true;
                                 _winChordHandled = true;
-                                DebugLog.Log("捕获 Win+V（钩子接管，已抑制开始菜单）");
+                                DebugLog.Log($"捕获 Win+V（钩子接管，injected={isInjected}）");
                                 _uiDispatcher?.BeginInvoke(() => ToggleRequested?.Invoke());
                             }
 
@@ -367,7 +367,7 @@ public sealed class HotkeyService : IDisposable
                         {
                             _winVKeyDown = true;
                             _winChordHandled = true;
-                            DebugLog.Log("捕获 Win+V（钩子兜底接管，已拦截系统调用）");
+                            DebugLog.Log($"捕获 Win+V（钩子兜底接管，injected={isInjected}）");
                             _uiDispatcher?.BeginInvoke(() => ToggleRequested?.Invoke());
                         }
                     }

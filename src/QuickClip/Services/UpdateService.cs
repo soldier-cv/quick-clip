@@ -34,6 +34,27 @@ public sealed class DownloadFailedInfo
     public required DateTime FailedTimeUtc { get; init; }
 }
 
+/// <summary>更新流程当前阶段（检查与下载拆开，避免界面长时间停在「正在检查」）。</summary>
+public enum UpdatePhase
+{
+    Idle,
+    Checking,
+    Downloading,
+    Ready,
+    Failed,
+    UpToDate
+}
+
+/// <summary>更新流程快照，供设置页/托盘即时刷新。</summary>
+public sealed class UpdateActivity
+{
+    public UpdatePhase Phase { get; init; } = UpdatePhase.Idle;
+    public string Message { get; init; } = string.Empty;
+    public string? TagName { get; init; }
+    public long BytesReceived { get; init; }
+    public long BytesTotal { get; init; }
+}
+
 /// <summary>
 /// 版本检查、安装包下载、12小时调度与7次重试。
 /// 
@@ -59,6 +80,8 @@ public sealed class UpdateService : IDisposable
 
     private static readonly TimeSpan ApiTimeout = TimeSpan.FromSeconds(6);
     private static readonly TimeSpan PageFallbackTimeout = TimeSpan.FromSeconds(8);
+    private static readonly TimeSpan DownloadStallTimeout = TimeSpan.FromSeconds(45);
+    private static readonly TimeSpan ProgressUiInterval = TimeSpan.FromMilliseconds(200);
 
     private readonly HttpClient _http = CreateHttpClient();
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -66,6 +89,9 @@ public sealed class UpdateService : IDisposable
     private SettingsService? _settings;
     private System.Threading.Timer? _scheduleTimer;
     private int _consecutiveFailures;
+    private string? _notifiedFoundTag;
+    private string? _notifiedFailTag;
+    private DateTime _lastProgressUiUtc = DateTime.MinValue;
 
     /// <summary>当前程序版本（来自程序集版本号）。</summary>
     public static string CurrentVersion =>
@@ -107,10 +133,15 @@ public sealed class UpdateService : IDisposable
     public static string ReadyNotifyText(string tagName) =>
         $"发现新版本 {tagName}，已下载。点击即可安装，或下次手动启动自动安装";
 
+    public static string FoundNotifyText(string tagName) =>
+        $"发现新版本 {tagName}，正在下载";
+
     public PendingUpdate? Pending { get; private set; }
 
     /// <summary>自动下载失败时的标记信息（为 null 表示无失败）。</summary>
     public DownloadFailedInfo? DownloadFailed { get; private set; }
+
+    public UpdateActivity Activity { get; private set; } = new() { Phase = UpdatePhase.Idle };
 
     /// <summary>待安装更新变化（可能来自后台线程，订阅方需切回 UI）。</summary>
     public event Action<PendingUpdate?>? PendingChanged;
@@ -118,7 +149,10 @@ public sealed class UpdateService : IDisposable
     /// <summary>下载失败状态变化。</summary>
     public event Action<DownloadFailedInfo?>? DownloadFailedChanged;
 
-    /// <summary>需要提示用户时触发（title, message）。静默失败不触发。</summary>
+    /// <summary>检查/下载阶段变化（可能来自后台线程）。</summary>
+    public event Action<UpdateActivity>? ActivityChanged;
+
+    /// <summary>需要提示用户时触发（title, message）。</summary>
     public event Action<string, string>? UserNotify;
 
     public void Attach(AppPaths paths, SettingsService settings)
@@ -319,10 +353,20 @@ public sealed class UpdateService : IDisposable
         return UpdateCheckResult.UpdateAvailable(release);
     }
 
-    /// <summary>检查并按当前渠道下载。interactive 为 false 时失败只写日志。</summary>
+    /// <summary>检查并按当前渠道下载。查到新版本会立刻推状态，再后台拉安装包。</summary>
     public async Task<UpdateCheckResult> CheckAndDownloadAsync(bool interactive)
     {
-        await _gate.WaitAsync();
+        if (!await _gate.WaitAsync(TimeSpan.Zero))
+        {
+            return new UpdateCheckResult
+            {
+                Status = Activity.Phase == UpdatePhase.Downloading
+                    ? UpdateCheckStatus.UpdateAvailable
+                    : UpdateCheckStatus.Failed,
+                Message = string.IsNullOrEmpty(Activity.Message) ? "正在处理更新…" : Activity.Message
+            };
+        }
+
         try
         {
             if (_paths != null &&
@@ -331,15 +375,43 @@ public sealed class UpdateService : IDisposable
                 IsNewer(existing.Version, CurrentVersion))
             {
                 SetDownloadFailed(null);
+                PublishActivity(new UpdateActivity
+                {
+                    Phase = UpdatePhase.Ready,
+                    Message = $"新版本 {existing.TagName} 已下载",
+                    TagName = existing.TagName
+                });
                 return UpdateCheckResult.Ready(existing);
             }
+
+            PublishActivity(new UpdateActivity
+            {
+                Phase = UpdatePhase.Checking,
+                Message = "正在检查更新…"
+            });
 
             var check = await CheckForUpdateAsync();
             if (check.Status != UpdateCheckStatus.UpdateAvailable || check.Release == null)
             {
-                if (interactive && check.Status == UpdateCheckStatus.Failed)
+                if (check.Status == UpdateCheckStatus.UpToDate)
                 {
-                    UserNotify?.Invoke("QuickClip", check.Message ?? "检查更新失败");
+                    PublishActivity(new UpdateActivity
+                    {
+                        Phase = UpdatePhase.UpToDate,
+                        Message = check.Message ?? $"当前已是最新版本 v{CurrentVersion}"
+                    });
+                }
+                else if (check.Status == UpdateCheckStatus.Failed)
+                {
+                    PublishActivity(new UpdateActivity
+                    {
+                        Phase = UpdatePhase.Failed,
+                        Message = check.Message ?? "检查更新失败"
+                    });
+                    if (interactive)
+                    {
+                        UserNotify?.Invoke("QuickClip", check.Message ?? "检查更新失败");
+                    }
                 }
 
                 return check;
@@ -349,6 +421,16 @@ public sealed class UpdateService : IDisposable
             {
                 return UpdateCheckResult.Fail("内部错误：更新目录未初始化");
             }
+
+            SetDownloadFailed(null);
+            PublishActivity(new UpdateActivity
+            {
+                Phase = UpdatePhase.Downloading,
+                Message = FoundNotifyText(check.Release.TagName),
+                TagName = check.Release.TagName
+            });
+            DebugLog.Log($"发现新版本 {check.Release.TagName}，开始下载 {check.Release.DownloadUrl}");
+            NotifyFoundOnce(check.Release.TagName);
 
             string? local = await DownloadReleaseAsync(check.Release, _paths);
             if (string.IsNullOrEmpty(local))
@@ -362,25 +444,31 @@ public sealed class UpdateService : IDisposable
                     FailedTimeUtc = DateTime.UtcNow
                 };
                 SetDownloadFailed(failedInfo);
+                PublishActivity(new UpdateActivity
+                {
+                    Phase = UpdatePhase.Failed,
+                    Message = failedInfo.ErrorMessage,
+                    TagName = check.Release.TagName
+                });
 
                 var fail = UpdateCheckResult.Fail(failedInfo.ErrorMessage);
-                if (interactive)
-                {
-                    UserNotify?.Invoke("QuickClip", fail.Message ?? "下载失败");
-                }
-
+                NotifyFailOnce(check.Release.TagName, fail.Message ?? "下载失败");
                 return fail;
             }
 
-            // 下载成功，清空失败记录
             SetDownloadFailed(null);
-
             SetPending(new PendingUpdate
             {
                 Version = check.Release.Version,
                 TagName = check.Release.TagName,
                 LocalPath = local,
                 Channel = CurrentChannel
+            });
+            PublishActivity(new UpdateActivity
+            {
+                Phase = UpdatePhase.Ready,
+                Message = $"新版本 {check.Release.TagName} 已下载",
+                TagName = check.Release.TagName
             });
 
             return UpdateCheckResult.Ready(Pending!);
@@ -389,6 +477,79 @@ public sealed class UpdateService : IDisposable
         {
             _gate.Release();
         }
+    }
+
+    private void NotifyFoundOnce(string tagName)
+    {
+        if (string.Equals(_notifiedFoundTag, tagName, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        _notifiedFoundTag = tagName;
+        UserNotify?.Invoke("QuickClip", FoundNotifyText(tagName));
+    }
+
+    private void NotifyFailOnce(string tagName, string message)
+    {
+        if (string.Equals(_notifiedFailTag, tagName, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        _notifiedFailTag = tagName;
+        UserNotify?.Invoke("QuickClip", message);
+    }
+
+    private void PublishActivity(UpdateActivity activity)
+    {
+        Activity = activity;
+        ActivityChanged?.Invoke(activity);
+    }
+
+    private void PublishDownloadProgress(string tagName, long received, long total)
+    {
+        var now = DateTime.UtcNow;
+        if (now - _lastProgressUiUtc < ProgressUiInterval && received != total)
+        {
+            return;
+        }
+
+        _lastProgressUiUtc = now;
+        PublishActivity(new UpdateActivity
+        {
+            Phase = UpdatePhase.Downloading,
+            Message = FormatDownloadMessage(tagName, received, total),
+            TagName = tagName,
+            BytesReceived = received,
+            BytesTotal = total
+        });
+    }
+
+    internal static string FormatDownloadMessage(string tagName, long received, long total)
+    {
+        if (total > 0)
+        {
+            int pct = (int)Math.Clamp(received * 100 / total, 0, 100);
+            return $"发现新版本 {tagName}，正在下载 {pct}%（{FormatBytes(received)}/{FormatBytes(total)}）";
+        }
+
+        return $"发现新版本 {tagName}，正在下载 {FormatBytes(received)}";
+    }
+
+    internal static string FormatBytes(long bytes)
+    {
+        if (bytes < 1024)
+        {
+            return $"{bytes} B";
+        }
+
+        if (bytes < 1024 * 1024)
+        {
+            return $"{bytes / 1024.0:0.#} KB";
+        }
+
+        return $"{bytes / (1024.0 * 1024):0.0} MB";
     }
 
     internal const string SilentSetupArgs =
@@ -615,14 +776,38 @@ public sealed class UpdateService : IDisposable
                 return null;
             }
 
+            long expected = length ?? (release.AssetSize > 0 ? release.AssetSize : 0);
+            DebugLog.Log($"下载响应已到达: HTTP {(int)response.StatusCode} ContentLength={length} asset={release.AssetSize}");
+            PublishDownloadProgress(release.TagName, 0, expected);
+
             await using (var input = await response.Content.ReadAsStreamAsync())
             await using (var output = File.Create(part))
             {
                 var buffer = new byte[81920];
                 long total = 0;
-                int read;
-                while ((read = await input.ReadAsync(buffer)) > 0)
+                int lastLoggedPct = -1;
+                var lastLogUtc = DateTime.UtcNow;
+                while (true)
                 {
+                    int read;
+                    using (var stallCts = new CancellationTokenSource(DownloadStallTimeout))
+                    {
+                        try
+                        {
+                            read = await input.ReadAsync(buffer.AsMemory(0, buffer.Length), stallCts.Token);
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            DebugLog.Log($"下载停滞：{DownloadStallTimeout.TotalSeconds:0} 秒未收到数据（已收 {FormatBytes(total)}）");
+                            return null;
+                        }
+                    }
+
+                    if (read <= 0)
+                    {
+                        break;
+                    }
+
                     total += read;
                     if (total > MaxDownloadBytes)
                     {
@@ -631,6 +816,18 @@ public sealed class UpdateService : IDisposable
                     }
 
                     await output.WriteAsync(buffer.AsMemory(0, read));
+                    PublishDownloadProgress(release.TagName, total, expected);
+
+                    int pct = expected > 0 ? (int)(total * 100 / expected) : -1;
+                    var now = DateTime.UtcNow;
+                    if ((pct >= 0 && pct / 10 > lastLoggedPct / 10) || now - lastLogUtc >= TimeSpan.FromSeconds(5))
+                    {
+                        lastLoggedPct = pct;
+                        lastLogUtc = now;
+                        DebugLog.Log(pct >= 0
+                            ? $"下载进度 {pct}%（{FormatBytes(total)}/{FormatBytes(expected)}）"
+                            : $"下载进度 {FormatBytes(total)}");
+                    }
                 }
             }
 

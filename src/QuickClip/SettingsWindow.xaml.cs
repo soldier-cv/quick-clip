@@ -45,6 +45,7 @@ public partial class SettingsWindow : Window
         _services.Settings.Changed += OnSettingsChanged;
         _services.Update.PendingChanged += OnPendingUpdateChanged;
         _services.Update.DownloadFailedChanged += OnDownloadFailedChanged;
+        _services.Update.ActivityChanged += OnUpdateActivityChanged;
         ThemeService.Changed += OnThemeServiceChanged;
         Loaded += OnSettingsWindowLoaded;
         Closed += (_, _) =>
@@ -52,6 +53,7 @@ public partial class SettingsWindow : Window
             _services.Settings.Changed -= OnSettingsChanged;
             _services.Update.PendingChanged -= OnPendingUpdateChanged;
             _services.Update.DownloadFailedChanged -= OnDownloadFailedChanged;
+            _services.Update.ActivityChanged -= OnUpdateActivityChanged;
             ThemeService.Changed -= OnThemeServiceChanged;
             Loaded -= OnSettingsWindowLoaded;
         };
@@ -511,10 +513,24 @@ public partial class SettingsWindow : Window
         Dispatcher.BeginInvoke(RefreshUpdatePanel);
     }
 
+    private void OnUpdateActivityChanged(UpdateActivity activity)
+    {
+        Dispatcher.BeginInvoke(() =>
+        {
+            RefreshUpdatePanel();
+            if (activity.Phase != UpdatePhase.Checking)
+            {
+                _busy = false;
+                CheckUpdateButton.IsEnabled = true;
+            }
+        });
+    }
+
     private void RefreshUpdatePanel()
     {
         var pending = _services.Update.Pending;
         var failed = _services.Update.DownloadFailed;
+        var activity = _services.Update.Activity;
 
         bool ready = pending != null && File.Exists(pending.LocalPath);
         if (ready)
@@ -532,10 +548,30 @@ public partial class SettingsWindow : Window
 
         InstallUpdateButton.Visibility = Visibility.Collapsed;
 
-        if (failed != null)
+        if (activity.Phase == UpdatePhase.Checking)
+        {
+            BrowserDownloadButton.Visibility = Visibility.Collapsed;
+            UpdateStatusText.Text = "正在检查更新…";
+            return;
+        }
+
+        if (activity.Phase == UpdatePhase.Downloading)
+        {
+            BrowserDownloadButton.Visibility = Visibility.Collapsed;
+            UpdateStatusText.Text = activity.Message;
+            if (FindResource("Theme.Accent") is MediaBrush accentBrush)
+            {
+                UpdateStatusText.Foreground = accentBrush;
+            }
+            return;
+        }
+
+        if (failed != null || activity.Phase == UpdatePhase.Failed)
         {
             BrowserDownloadButton.Visibility = Visibility.Visible;
-            UpdateStatusText.Text = $"发现新版本 {failed.TagName}，自动下载失败。可点击右侧按钮直接在浏览器中下载安装包。";
+            UpdateStatusText.Text = failed != null
+                ? $"发现新版本 {failed.TagName}，自动下载失败。可点击右侧按钮直接在浏览器中下载安装包。"
+                : activity.Message;
             if (FindResource("Theme.Pin") is MediaBrush pinBrush)
             {
                 UpdateStatusText.Foreground = pinBrush;
@@ -544,6 +580,11 @@ public partial class SettingsWindow : Window
         }
 
         BrowserDownloadButton.Visibility = Visibility.Collapsed;
+        if (!string.IsNullOrEmpty(activity.Message) && activity.Phase is UpdatePhase.UpToDate or UpdatePhase.Idle)
+        {
+            UpdateStatusText.Text = activity.Message;
+        }
+
         if (FindResource("Theme.TextSecondary") is MediaBrush textSecondaryBrush)
         {
             UpdateStatusText.Foreground = textSecondaryBrush;
@@ -649,6 +690,7 @@ public partial class SettingsWindow : Window
     {
         if (_busy)
         {
+            RefreshUpdatePanel();
             return;
         }
 
@@ -657,8 +699,7 @@ public partial class SettingsWindow : Window
         UpdateStatusText.Text = "正在检查更新…";
         try
         {
-            var result = await _services.Update.CheckAndDownloadAsync(interactive: true);
-            UpdateStatusText.Text = result.Message ?? string.Empty;
+            await _services.Update.CheckAndDownloadAsync(interactive: true);
             RefreshUpdatePanel();
         }
         finally

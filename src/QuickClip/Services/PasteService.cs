@@ -79,12 +79,28 @@ public sealed class PasteService
     public void CopyFiles(string[]? files) =>
         _ = CopyFilesAsync(files);
 
-    /// <summary>模拟 Ctrl+V 粘贴到之前记录的目标窗口。</summary>
+    /// <summary>等待目标窗口成为前台后再发送 Ctrl+V；固定 35ms 缓冲在重型聊天软件下偶发不足，轮询兜底。</summary>
     private void SimulatePaste()
     {
         if (_lastTargetWindow != IntPtr.Zero && NativeMethods.IsWindow(_lastTargetWindow))
         {
             NativeMethods.SetForegroundWindow(_lastTargetWindow);
+        }
+
+        // 前台切换通常瞬时完成（QuickClip 已隐藏），首次检查即命中、无额外延迟；
+        // 仅当 SetForegroundWindow 被前台锁延迟生效时轮询等待，避免 Ctrl+V 落到错误窗口。
+        if (_lastTargetWindow != IntPtr.Zero)
+        {
+            var deadline = DateTime.UtcNow + TimeSpan.FromMilliseconds(600);
+            while (DateTime.UtcNow < deadline)
+            {
+                if (NativeMethods.GetForegroundWindow() == _lastTargetWindow)
+                {
+                    break;
+                }
+
+                System.Threading.Thread.Sleep(20);
+            }
         }
 
         NativeMethods.SendCtrlV();

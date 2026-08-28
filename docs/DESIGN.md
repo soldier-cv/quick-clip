@@ -35,7 +35,7 @@ graph TD
 ### 2.1 全局热键拦截（替换系统 Win+V）
 `HotkeyService` 采用“`RegisterHotKey` 优先、低级钩子回退”的双层策略：
 
-- **可配置热键（默认 `Ctrl+Shift+V` 纯文本粘贴）**：优先调用 `RegisterHotKey` + 隐藏消息窗口（`HwndSource`），由系统可靠投递 `WM_HOTKEY`；组合被其他程序占用导致注册失败时，自动回退到低级钩子检测。
+- **全局纯文本粘贴（固定 `Ctrl+Shift+V`，可启用/禁用）**：优先调用 `RegisterHotKey` + 隐藏消息窗口（`HwndSource`），由系统可靠投递 `WM_HOTKEY`；组合被其他程序占用导致注册失败时，自动回退到低级钩子检测。
 - **`Win + V`（固定，不可修改）**：系统开启剪贴板历史时该组合已被 Shell 注册（`RegisterHotKey` 返回 1409），因此统一由 `WH_KEYBOARD_LL` 钩子接管，采用「Win 键状态机」：
   - **吞掉 Win 键按下**（返回 1），开始菜单根本不会弹出，从根源消除“全屏闪一下”；
   - V 键进入和弦判定：按下/弹起均拦截（返回 1），系统原生剪贴板历史不会弹出，并触发面板切换；
@@ -44,6 +44,8 @@ graph TD
 - 钩子运行在独立后台线程（`GetMessage` 消息泵），回调通过 `Dispatcher.BeginInvoke` 切回 UI 线程；自身 `SendInput` 注入的按键带 `LLKHF_INJECTED` 标志，钩子据此跳过，防止与合成 `Ctrl+V` 互相回环。
 - **按键自动重复过滤**：按住 `Win+V` 或纯文本组合时系统会产生连续重复的 `WM_KEYDOWN`，钩子用按下标记（`_winVKeyDown` / `_plainPasteKeyDown`）只响应首次按下，弹起时复位，避免长按导致面板反复切换或连续粘贴。
 - **前台置前兜底（解决“呼不出”）**：热键唤起时 Windows 前台锁可能拒绝 `SetForegroundWindow`（面板显示在其他窗口后面或未获得焦点）。`ShowWindow` 采用「临时 `HWND_TOPMOST` 置顶 → `SetForegroundWindow` → 恢复 `HWND_NOTOPMOST`」序列，强制把面板带到最前并激活，规避前台锁限制。
+- **管理员窗口兜底（UIPI）**：`WH_KEYBOARD_LL` 钩子无法收到「以管理员权限运行」窗口的键盘输入（Windows UIPI 权限隔离），此时 `Win+V` 会漏给系统弹出原生剪贴板历史。`SystemClipboardGuard` 以 120ms 低频轮询前台窗口，命中「系统剪贴板历史」（类名 `Windows.UI.Core.CoreWindow` + 标题含「剪贴板历史 / Clipboard history」）后注入 ESC（`SendInput` 不受 UIPI 影响）并发送 `WM_CLOSE` 关闭它，再唤起 QuickClip 面板；同一窗口句柄 5 秒冷却防抖。钩子正常接管时该窗口不会出现，守卫零干扰。
+
 ### 2.2 剪贴板监听与防抖
 - 使用 `AddClipboardFormatListener(IntPtr hWnd)`。
 - 窗口消息循环处理 `WM_CLIPBOARDUPDATE (0x031D)`。

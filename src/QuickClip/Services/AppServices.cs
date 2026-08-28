@@ -21,6 +21,9 @@ public sealed class AppServices : IDisposable
     public TrayIconService Tray { get; }
     public UpdateService Update { get; }
 
+    /// <summary>系统剪贴板历史窗口兜底守卫（钩子失效时接管管理员窗口下漏出的系统 Win+V）。</summary>
+    public SystemClipboardGuard ClipboardGuard { get; }
+
     /// <summary>主窗口引用（由 App 在创建后注入）。</summary>
     public MainWindow? MainWindow { get; set; }
 
@@ -40,6 +43,7 @@ public sealed class AppServices : IDisposable
         Hotkey = new HotkeyService();
         Monitor = new ClipboardMonitor();
         Tray = new TrayIconService();
+        ClipboardGuard = new SystemClipboardGuard(Dispatcher.CurrentDispatcher);
         Update = new UpdateService();
 
         // 冷启动优先热键/监听；清理延后到 8 分钟，避免与首屏争抢
@@ -89,6 +93,9 @@ public sealed class AppServices : IDisposable
         }
 
         Update.StartSilentChecks();
+
+        // 启动时全自动彻底接管系统剪贴板（关闭系统记录并禁用 Explorer Win+V 热键）
+        SystemClipboardService.EnsureSystemClipboardDisabled();
 
         // 先挂监听 + 热键（核心路径），再同步托盘
         Monitor.ClipboardUpdated += Pipeline.OnClipboardUpdated;
@@ -242,6 +249,7 @@ public sealed class AppServices : IDisposable
         Settings.Changed -= OnSettingsChanged;
         Monitor.Detach();
         Hotkey.Dispose();
+        ClipboardGuard.Dispose();
         Tray.Dispose();
         Update.Dispose();
         Database.Dispose();

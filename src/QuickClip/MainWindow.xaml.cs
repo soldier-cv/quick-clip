@@ -48,6 +48,7 @@ public partial class MainWindow : FluentWindow
         _viewModel.QrImageReady += ShowQrOverlay;
         _viewModel.OcrResultReady += ShowOcrOverlay;
         _services.Hotkey.ToggleRequested += ToggleWindow;
+        _services.ClipboardGuard.ToggleRequested += ToggleWindow;
         _services.Hotkey.PastePlainRequested += OnPastePlainRequested;
         _services.Tray.ToggleRequested += ToggleWindow;
         _services.Tray.ExitRequested += ExitApp;
@@ -1098,6 +1099,48 @@ public partial class MainWindow : FluentWindow
         {
             _viewModel.SelectedItem = vm;
             _ = _viewModel.OcrSelectedAsync();
+        }
+    }
+
+    /// <summary>保存选中图片到本地（另存为对话框 + 复制预览 PNG）。</summary>
+    private void OnSaveImageClicked(object sender, RoutedEventArgs e)
+    {
+        if (GetCardViewModel(sender) is not { } vm)
+        {
+            return;
+        }
+
+        _viewModel.SelectedItem = vm;
+        string? previewPath = vm.Item.PreviewPath;
+        if (!vm.IsImage || string.IsNullOrEmpty(previewPath) || !File.Exists(previewPath))
+        {
+            _viewModel.StatusText = "图片文件已不存在，无法保存";
+            return;
+        }
+
+        var dialog = new Microsoft.Win32.SaveFileDialog
+        {
+            Title = "保存图片",
+            Filter = "PNG 图片 (*.png)|*.png|JPEG 图片 (*.jpg)|*.jpg|所有文件 (*.*)|*.*",
+            FileName = $"QuickClip_{DateTime.Now:yyyyMMdd_HHmmss}.png",
+            DefaultExt = ".png"
+        };
+
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        try
+        {
+            File.Copy(previewPath, dialog.FileName, true);
+            _viewModel.StatusText = $"已保存: {dialog.FileName}";
+            DebugLog.Log($"图片已保存到本地: {dialog.FileName}");
+        }
+        catch (Exception ex)
+        {
+            DebugLog.LogException("保存图片失败", ex);
+            _viewModel.StatusText = "保存失败，请检查目标路径权限";
         }
     }
 

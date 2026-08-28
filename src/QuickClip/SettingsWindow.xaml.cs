@@ -151,9 +151,6 @@ public partial class SettingsWindow : Window
         {
             var s = _services.Settings;
 
-            PlainPasteBox.Text = s.PlainPasteEnabled && s.PlainPasteHotkey.HasKey
-                ? s.PlainPasteHotkey.ToString()
-                : "（未启用）";
             PlainPasteEnabledCheck.IsChecked = s.PlainPasteEnabled;
 
             // 仅展示可配置的产品热键；Esc/Delete/方向/数字/Ctrl+C 为约定键，不在设置中列出
@@ -215,9 +212,7 @@ public partial class SettingsWindow : Window
             {
                 SysClipboardStatusBadge.Background = cardBrush;
             }
-            ToggleSysClipboardButton.Content = "一键禁用";
-            ToggleSysClipboardButton.ToolTip = "一键禁用 Windows 自带剪贴板历史，释放 Win+V 独占原生接管";
-            SysClipboardHintText.Text = "Windows 自带剪贴板历史正在占用 Win+V。点击「一键禁用」即可彻底释放快捷键，实现 0 延迟原生接管。";
+            SysClipboardHintText.Text = "Windows 剪贴板历史正在占用 Win+V，QuickClip 已通过键盘钩子与窗口守卫兜底接管。";
         }
         else
         {
@@ -230,9 +225,7 @@ public partial class SettingsWindow : Window
             {
                 SysClipboardStatusBadge.Background = accentMutedBrush;
             }
-            ToggleSysClipboardButton.Content = "恢复系统";
-            ToggleSysClipboardButton.ToolTip = "恢复开启 Windows 自带剪贴板历史记录";
-            SysClipboardHintText.Text = "Windows 自带剪贴板历史已关闭，Win+V 已由 QuickClip 独占原生接管，无冲突风险。";
+            SysClipboardHintText.Text = "系统剪贴板历史已关闭，Win+V 已由 QuickClip 独占接管，无冲突风险。";
         }
     }
 
@@ -314,12 +307,6 @@ public partial class SettingsWindow : Window
                         (ModifierKeys.Control | ModifierKeys.Alt | ModifierKeys.Shift | ModifierKeys.Windows);
         var binding = new HotkeyBinding(modifiers, key);
 
-        if (tag == "PlainPaste")
-        {
-            ApplyPlainPaste(binding);
-            return;
-        }
-
         if (!Enum.TryParse<PanelHotkeyAction>(tag, out var action))
         {
             return;
@@ -335,50 +322,6 @@ public partial class SettingsWindow : Window
         _services.Settings.SetPanelHotkey(action, binding);
         SetHotkeyHint($"已应用「{DescribeTag(tag)}」：{binding}");
         RefreshUi();
-    }
-
-    private void ApplyPlainPaste(HotkeyBinding binding)
-    {
-        // Esc / Delete / Backspace（无修饰键）：禁用全局热键
-        if (binding.Modifiers == ModifierKeys.None &&
-            binding.Key is Key.Escape or Key.Delete or Key.Back)
-        {
-            _services.Settings.SetPlainPaste(HotkeyBinding.PlainPasteDefault, enabled: false);
-            SetHotkeyHint("已禁用（Esc / Delete / Backspace）；也可取消上方勾选");
-            RefreshUi();
-            return;
-        }
-
-        string? error = ValidatePlainPaste(binding);
-        if (error != null)
-        {
-            SetHotkeyHint(error);
-            return;
-        }
-
-        _services.Settings.SetPlainPaste(binding, enabled: true);
-        SetHotkeyHint($"已应用：{binding}");
-        RefreshUi();
-    }
-
-    private static string? ValidatePlainPaste(HotkeyBinding binding)
-    {
-        if (binding.Modifiers == ModifierKeys.None)
-        {
-            return "全局热键请至少搭配一个修饰键（Ctrl / Alt / Shift / Win）";
-        }
-
-        if (binding == HotkeyBinding.WinV)
-        {
-            return "Win + V 为系统保留（唤起面板），不可占用";
-        }
-
-        if (binding.Modifiers == ModifierKeys.Control && binding.Key is Key.C or Key.X or Key.V)
-        {
-            return "Ctrl + C / X / V 是系统常用编辑键，请更换组合";
-        }
-
-        return null;
     }
 
     private string? ValidatePanelHotkey(PanelHotkeyAction action, HotkeyBinding binding)
@@ -414,9 +357,9 @@ public partial class SettingsWindow : Window
             }
         }
 
-        // 与已启用的全局纯文本粘贴冲突
+        // 与已启用的全局纯文本粘贴（固定 Ctrl+Shift+V）冲突
         if (_services.Settings.PlainPasteEnabled &&
-            _services.Settings.PlainPasteHotkey == binding)
+            HotkeyBinding.PlainPasteDefault == binding)
         {
             return $"与全局纯文本粘贴冲突（{binding}），请更换";
         }
@@ -428,14 +371,6 @@ public partial class SettingsWindow : Window
     {
         if (sender is not FrameworkElement { Tag: string tag })
         {
-            return;
-        }
-
-        if (tag == "PlainPaste")
-        {
-            _services.Settings.SetPlainPaste(HotkeyBinding.PlainPasteDefault, enabled: true);
-            SetHotkeyHint("已恢复默认：Ctrl + Shift + V");
-            RefreshUi();
             return;
         }
 
@@ -461,10 +396,8 @@ public partial class SettingsWindow : Window
             return;
         }
 
-        // 启用状态只以勾选框为准，不再刷「已启用/已禁用」提示文案
-        _services.Settings.SetPlainPaste(
-            _services.Settings.PlainPasteHotkey,
-            PlainPasteEnabledCheck.IsChecked == true);
+        // 启用状态只以勾选框为准；组合固定为 Ctrl+Shift+V
+        _services.Settings.SetPlainPasteEnabled(PlainPasteEnabledCheck.IsChecked == true);
         SetHotkeyHint(null);
     }
 
@@ -820,7 +753,6 @@ public partial class SettingsWindow : Window
 
     private static string DescribeTag(object? tag) => tag switch
     {
-        "PlainPaste" => "全局纯文本粘贴",
         "PasteSelected" => "粘贴选中项",
         "PasteSelectedPlain" => "纯文本粘贴选中项",
         "CopySelected" => "复制选中项",

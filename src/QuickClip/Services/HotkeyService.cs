@@ -10,7 +10,7 @@ namespace QuickClip.Services;
 
 /// <summary>
 /// 全局热键服务，两层接管策略：
-/// 1. RegisterHotKey + 隐藏消息窗口（WM_HOTKEY）：接管可配置的“纯文本粘贴”热键（默认 Ctrl+Shift+V）；
+/// 1. RegisterHotKey + 隐藏消息窗口（WM_HOTKEY）：接管固定的“纯文本粘贴”热键（Ctrl+Shift+V，可启用/禁用）；
 /// 2. WH_KEYBOARD_LL 低级钩子：Win+V 因系统剪贴板历史已占用无法用 RegisterHotKey 抢占，
 ///    改由钩子拦截：吞掉 Win 键按下抑制开始菜单误弹，V 进入和弦判定后触发面板切换；
 ///    若用户实际按下的是其它 Win 快捷键（Win+E 等），则重放注入完整和弦保留系统行为。
@@ -166,7 +166,7 @@ public sealed class HotkeyService : IDisposable
             DebugLog.Log("Win+V 已被系统占用，改用低级钩子接管");
         }
 
-        // 可配置纯文本粘贴热键：注册失败（组合被占用）时回退钩子
+        // 固定纯文本粘贴热键：注册失败（组合被占用）时回退钩子
         _plainPasteRegistered = false;
         if (_plainPasteEnabled && _plainPasteBinding.IsValid)
         {
@@ -327,8 +327,13 @@ public sealed class HotkeyService : IDisposable
                             {
                                 _winVKeyDown = true;
                                 _winChordHandled = true;
-                                DebugLog.Log($"捕获 Win+V（钩子接管，injected={isInjected}）");
-                                _uiDispatcher?.BeginInvoke(() => ToggleRequested?.Invoke());
+
+                                // RegisterHotKey 成功时由 WM_HOTKEY 统一触发，钩子只吞键防泄漏，避免双触发
+                                if (!_winVRegistered)
+                                {
+                                    DebugLog.Log($"捕获 Win+V（钩子接管，injected={isInjected}）");
+                                    _uiDispatcher?.BeginInvoke(() => ToggleRequested?.Invoke());
+                                }
                             }
 
                             return new IntPtr(1);
@@ -385,7 +390,7 @@ public sealed class HotkeyService : IDisposable
                     _winVKeyDown = false;
                 }
 
-                // 可配置纯文本粘贴组合（RegisterHotKey 注册失败时回退）。
+                // 固定纯文本粘贴组合（RegisterHotKey 注册失败时回退）。
                 // 注入事件已在前面放行，此处只处理物理按键，避免把自身合成 Ctrl+V 再次当成组合触发形成回环；
                 // _plainPasteKeyDown 过滤自动重复，防止长按连续粘贴。
                 if (!_plainPasteRegistered && _plainPasteEnabled &&

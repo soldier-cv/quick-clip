@@ -20,7 +20,7 @@ public sealed class SettingsService
     /// <summary>设置发生变更（已保存到磁盘）时触发，供热键注册、自启动等联动。</summary>
     public event Action? Changed;
 
-    /// <summary>全局“纯文本粘贴”热键组合。</summary>
+    /// <summary>全局“纯文本粘贴”热键组合（固定 Ctrl+Shift+V，不可改键）。</summary>
     public HotkeyBinding PlainPasteHotkey { get; private set; } = HotkeyBinding.PlainPasteDefault;
 
     /// <summary>是否启用全局纯文本粘贴热键。</summary>
@@ -118,11 +118,8 @@ public sealed class SettingsService
                 return;
             }
 
-            if (dto.PlainPaste?.ToBinding() is { HasKey: true } binding)
-            {
-                PlainPasteHotkey = binding;
-            }
-
+            // 全局纯文本粘贴固定 Ctrl+Shift+V；旧版自定义组合忽略
+            PlainPasteHotkey = HotkeyBinding.PlainPasteDefault;
             PlainPasteEnabled = dto.PlainPasteEnabled ?? true;
             AutoStart = dto.AutoStart ?? false;
             WindowAlwaysOnTop = dto.WindowAlwaysOnTop ?? false;
@@ -283,15 +280,15 @@ public sealed class SettingsService
             MoveDownHotkey = down;
     }
 
-    /// <summary>更新纯文本粘贴热键并持久化（值未变则跳过，避免无意义的 Changed 风暴）。</summary>
-    public void SetPlainPaste(HotkeyBinding binding, bool enabled)
+    /// <summary>启用/禁用全局纯文本粘贴（组合固定 Ctrl+Shift+V）。</summary>
+    public void SetPlainPasteEnabled(bool enabled)
     {
-        if (PlainPasteHotkey == binding && PlainPasteEnabled == enabled)
+        if (PlainPasteHotkey == HotkeyBinding.PlainPasteDefault && PlainPasteEnabled == enabled)
         {
             return;
         }
 
-        PlainPasteHotkey = binding;
+        PlainPasteHotkey = HotkeyBinding.PlainPasteDefault;
         PlainPasteEnabled = enabled;
         Save();
     }

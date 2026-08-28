@@ -281,6 +281,14 @@ public static class NativeClipboard
                 return false;
             }
 
+            // 优先写 CF_DIBV5：多数聊天软件（微信/QQ/钉钉）粘贴图片时优先读取 DIBV5，
+            // 缺失时部分应用不识别 CF_DIB，导致粘贴失败（表现为“截图无法直接粘贴”）。
+            IntPtr hDibV5 = BitmapToDibV5HGlobal(bitmap);
+            if (hDibV5 != IntPtr.Zero && NativeMethods.SetClipboardData(NativeMethods.CF_DIBV5, hDibV5) == IntPtr.Zero)
+            {
+                FreeHandle(hDibV5);
+            }
+
             IntPtr hDib = BitmapToDibHGlobal(bitmap);
             if (hDib == IntPtr.Zero || NativeMethods.SetClipboardData(NativeMethods.CF_DIB, hDib) == IntPtr.Zero)
             {
@@ -526,6 +534,68 @@ public static class NativeClipboard
         finally
         {
             NativeMethods.GlobalUnlock(h);
+        }
+    }
+
+    /// <summary>生成 CF_DIBV5（BITMAPV5HEADER 124 字节 + 32bpp BGRA 像素），与 CF_DIB 像素一致。</summary>
+    private static IntPtr BitmapToDibV5HGlobal(Bitmap bitmap)
+    {
+        var rect = new Rectangle(0, 0, bitmap.Width, bitmap.Height);
+        var data = bitmap.LockBits(rect, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+        try
+        {
+            int width = bitmap.Width;
+            int height = bitmap.Height;
+            int rowBytes = width * 4;
+            const int headerSize = 124;
+            int sizeImage = rowBytes * height;
+
+            IntPtr h = NativeMethods.GlobalAlloc(GMEM_MOVEABLE, (UIntPtr)(headerSize + sizeImage));
+            if (h == IntPtr.Zero)
+            {
+                return IntPtr.Zero;
+            }
+
+            IntPtr p = NativeMethods.GlobalLock(h);
+            if (p == IntPtr.Zero)
+            {
+                NativeMethods.GlobalFree(h);
+                return IntPtr.Zero;
+            }
+
+            try
+            {
+                var header = new NativeMethods.BITMAPV5HEADER
+                {
+                    bV5Size = headerSize,
+                    bV5Width = width,
+                    bV5Height = height, // 正高度 = 自底向上
+                    bV5Planes = 1,
+                    bV5BitCount = 32,
+                    bV5Compression = 0, // BI_RGB
+                    bV5SizeImage = (uint)sizeImage,
+                    bV5CSType = 0
+                };
+                Marshal.StructureToPtr(header, p, false);
+
+                // 与 CF_DIB 相同的 32bpp BGRA 像素，按行拷贝
+                var row = new byte[rowBytes];
+                for (int y = 0; y < height; y++)
+                {
+                    Marshal.Copy(data.Scan0 + y * data.Stride, row, 0, rowBytes);
+                    Marshal.Copy(row, 0, p + headerSize + (height - 1 - y) * rowBytes, rowBytes);
+                }
+
+                return h;
+            }
+            finally
+            {
+                NativeMethods.GlobalUnlock(h);
+            }
+        }
+        finally
+        {
+            bitmap.UnlockBits(data);
         }
     }
 

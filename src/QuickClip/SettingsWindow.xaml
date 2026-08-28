@@ -158,44 +158,13 @@
                                    FontWeight="SemiBold"
                                    Margin="16,14,16,6" />
 
-                        <!-- Win+V 锁定 -->
-                        <Grid Margin="16,4,16,4">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="168" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="唤起 / 隐藏面板"
-                                       Foreground="{DynamicResource Theme.Text}"
-                                       FontSize="13"
-                                       VerticalAlignment="Center" />
-                            <TextBox Grid.Column="1"
-                                     Height="34"
-                                     Padding="10,0"
-                                     IsReadOnly="True"
-                                     IsEnabled="False"
-                                     VerticalContentAlignment="Center"
-                                     Text="Win + V" />
-                            <Border Grid.Column="2"
-                                    Margin="8,0,0,0"
-                                    Padding="8,4"
-                                    CornerRadius="6"
-                                    Background="{DynamicResource Theme.AccentMuted}"
-                                    VerticalAlignment="Center">
-                                <TextBlock Text="锁定"
-                                           Foreground="{DynamicResource Theme.Accent}"
-                                           FontSize="11" />
-                            </Border>
-                        </Grid>
-
-                        <!-- 系统剪贴板冲突与接管管理（标准三列对齐） -->
+                        <!-- 系统剪贴板接管（含固定 Win+V 唤起面板；不可改键） -->
                         <Grid Margin="16,4,16,2">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="168" />
                                 <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
-                            <TextBlock Text="系统剪贴板冲突"
+                            <TextBlock Text="系统剪贴板接管"
                                        Foreground="{DynamicResource Theme.Text}"
                                        FontSize="13"
                                        VerticalAlignment="Center" />
@@ -216,18 +185,10 @@
                                                    FontSize="11.5"
                                                    FontWeight="SemiBold"
                                                    Foreground="{DynamicResource Theme.Accent}"
-                                                   Text="原生独占接管中" />
+                                                   Text="已自动彻底接管" />
                                     </Border>
                                 </StackPanel>
                             </Border>
-                            <ui:Button x:Name="ToggleSysClipboardButton"
-                                       Grid.Column="2"
-                                       Margin="8,0,0,0"
-                                       Appearance="Secondary"
-                                       Height="34"
-                                       Padding="12,0"
-                                       Content="一键禁用"
-                                       Click="OnToggleSysClipboardClicked" />
                         </Grid>
                         <TextBlock x:Name="SysClipboardHintText"
                                    Margin="184,2,16,6"
@@ -235,11 +196,11 @@
                                    FontSize="11.5"
                                    LineHeight="16"
                                    TextWrapping="Wrap"
-                                   Text="Windows 剪贴板历史正在占用 Win+V。点击「一键禁用」可彻底释放快捷键。" />
+                                   Text="Win+V 固定唤起面板；系统剪贴板历史已释放，由 QuickClip 独占接管。" />
 
                         <Rectangle Height="1" Fill="#12FFFFFF" Margin="16,8,16,8" />
 
-                        <!-- 全局纯文本粘贴 -->
+                        <!-- 全局纯文本粘贴：固定 Ctrl+Shift+V，仅启用/禁用 -->
                         <Grid Margin="16,4,16,4">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="168" />
@@ -249,16 +210,19 @@
                                        Foreground="{DynamicResource Theme.Text}"
                                        FontSize="13"
                                        VerticalAlignment="Center" />
-                            <TextBox x:Name="PlainPasteBox"
-                                     Grid.Column="1"
-                                     Height="34"
-                                     Padding="10,0"
-                                     IsReadOnly="True"
-                                     VerticalContentAlignment="Center"
-                                     CaretBrush="Transparent"
-                                     Tag="PlainPaste"
-                                     PreviewKeyDown="HotkeyBox_PreviewKeyDown"
-                                     GotFocus="HotkeyBox_GotFocus" />
+                            <Border Grid.Column="1"
+                                    Height="34"
+                                    Padding="10,0"
+                                    CornerRadius="4"
+                                    Background="{DynamicResource Theme.Search}"
+                                    BorderBrush="{DynamicResource Theme.Border}"
+                                    BorderThickness="1"
+                                    VerticalAlignment="Center">
+                                <TextBlock Text="Ctrl + Shift + V"
+                                           Foreground="{DynamicResource Theme.TextSecondary}"
+                                           FontSize="12.5"
+                                           VerticalAlignment="Center" />
+                            </Border>
                         </Grid>
                         <CheckBox x:Name="PlainPasteEnabledCheck"
                                   Margin="184,2,16,4"

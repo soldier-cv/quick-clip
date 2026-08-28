@@ -19,6 +19,7 @@ internal static class NativeMethods
     public const int VK_RWIN = 0x5C;
     public const int VK_CONTROL = 0x11;
     public const int VK_MENU = 0x12;
+    public const int VK_ESCAPE = 0x1B;
 
     /// <summary>RegisterHotKey 修饰键标志。</summary>
     public const uint MOD_ALT = 0x0001;
@@ -133,6 +134,44 @@ internal static class NativeMethods
         public int biYPelsPerMeter;
         public uint biClrUsed;
         public uint biClrImportant;
+    }
+
+    /// <summary>BITMAPV5HEADER（124 字节）：写剪贴板 CF_DIBV5 用，兼容聊天软件优先读取 DIBV5 的场景。</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct BITMAPV5HEADER
+    {
+        public uint bV5Size;
+        public int bV5Width;
+        public int bV5Height;
+        public ushort bV5Planes;
+        public ushort bV5BitCount;
+        public uint bV5Compression;
+        public uint bV5SizeImage;
+        public int bV5XPelsPerMeter;
+        public int bV5YPelsPerMeter;
+        public uint bV5ClrUsed;
+        public uint bV5ClrImportant;
+        public uint bV5RedMask;
+        public uint bV5GreenMask;
+        public uint bV5BlueMask;
+        public uint bV5AlphaMask;
+        public uint bV5CSType;
+        public int bV5Endpoints0;
+        public int bV5Endpoints1;
+        public int bV5Endpoints2;
+        public int bV5Endpoints3;
+        public int bV5Endpoints4;
+        public int bV5Endpoints5;
+        public int bV5Endpoints6;
+        public int bV5Endpoints7;
+        public int bV5Endpoints8;
+        public uint bV5GammaRed;
+        public uint bV5GammaGreen;
+        public uint bV5GammaBlue;
+        public uint bV5Intent;
+        public uint bV5ProfileData;
+        public uint bV5ProfileSize;
+        public uint bV5Reserved;
     }
 
     [DllImport("user32.dll")]
@@ -347,6 +386,16 @@ internal static class NativeMethods
         });
     }
 
+    /// <summary>注入一次 ESC 按下/弹起：用于关闭系统剪贴板历史窗口（SendInput 不受 UIPI 权限隔离影响）。</summary>
+    public static void SendEscape()
+    {
+        SendInputs(new[]
+        {
+            KeyInput(VK_ESCAPE, 0),
+            KeyInput(VK_ESCAPE, KEYEVENTF_KEYUP)
+        });
+    }
+
     /// <summary>批量注入输入事件并记录失败信息。</summary>
     private static void SendInputs(INPUT[] inputs)
     {
@@ -389,5 +438,18 @@ internal static class NativeMethods
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern int GetClassName(IntPtr hWnd, System.Text.StringBuilder lpClassName, int nMaxCount);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern int GetWindowTextLength(IntPtr hWnd);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder lpString, int nMaxCount);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool IsWindowVisible(IntPtr hWnd);
 }
 

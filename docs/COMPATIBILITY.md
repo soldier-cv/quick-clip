@@ -55,6 +55,7 @@ QuickClip 基于 **.NET 8 + WPF** 开发，目标平台为：
 
 - 可配置热键优先 `RegisterHotKey`；`Win+V` 通常由低级键盘钩子接管
 - 个别杀软可能拦截全局钩子，需放行
+- `WH_KEYBOARD_LL` 钩子受 UIPI 权限隔离限制，收不到「管理员权限窗口」（如管理员终端）的按键；此时由 `SystemClipboardGuard` 检测到系统剪贴板历史窗口弹出后自动关闭并唤起 QuickClip，保证任意窗口下 `Win+V` 均生效
 
 ### 2.5 自启动与更新
 

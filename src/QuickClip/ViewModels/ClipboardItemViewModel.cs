@@ -56,6 +56,30 @@ public sealed class ClipboardItemViewModel : INotifyPropertyChanged
 
     public bool IsImage => Item.ContentType == ClipboardContentType.Image;
 
+    private bool _isOcrBusy;
+
+    /// <summary>该条目正在 OCR，按钮禁用并显示环状等待，识别结束才恢复。</summary>
+    public bool IsOcrBusy
+    {
+        get => _isOcrBusy;
+        set
+        {
+            if (_isOcrBusy == value)
+            {
+                return;
+            }
+
+            _isOcrBusy = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(IsOcrEnabled));
+            OnPropertyChanged(nameof(OcrToolTip));
+        }
+    }
+
+    public bool IsOcrEnabled => !_isOcrBusy;
+
+    public string OcrToolTip => _isOcrBusy ? "正在识别…" : "OCR";
+
     /// <summary>文本/链接/文件条目（有全文可预览）。</summary>
     public bool IsTextual => Item.ContentType != ClipboardContentType.Image;
 

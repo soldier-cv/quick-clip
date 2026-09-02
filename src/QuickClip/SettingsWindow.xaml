@@ -397,48 +397,243 @@
                                       Height="34"
                                       SelectionChanged="OnOcrEngineChanged"
                                       PreviewMouseWheel="OnComboBoxPreviewMouseWheel">
-                                <ComboBoxItem Content="系统自带（离线）" />
-                                <ComboBoxItem Content="Ollama" />
-                                <ComboBoxItem Content="OpenAI" />
+                                <ComboBoxItem Content="系统自带" />
+                                <ComboBoxItem Content="离线模型（PP-OCRv6）" />
+                                <ComboBoxItem Content="OpenAI 兼容" />
                             </ComboBox>
                         </Grid>
+                        <TextBlock x:Name="OcrEngineHint"
+                                   Margin="0,8,0,0"
+                                   Foreground="{DynamicResource Theme.TextMuted}"
+                                   FontSize="11.5"
+                                   TextWrapping="Wrap" />
 
-                        <StackPanel x:Name="OllamaPanel" Margin="0,14,0,0" Visibility="Collapsed">
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="100" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Text="接口地址"
-                                           Foreground="{DynamicResource Theme.TextSecondary}"
-                                           FontSize="13"
-                                           VerticalAlignment="Center" />
-                                <TextBox x:Name="OllamaBaseUrlBox"
-                                         Grid.Column="1"
-                                         Height="34"
-                                         Padding="10,0"
-                                         VerticalContentAlignment="Center"
-                                         LostFocus="OnOllamaConfigLostFocus" />
-                            </Grid>
-                            <Grid Margin="0,10,0,0">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="100" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Text="视觉模型"
-                                           Foreground="{DynamicResource Theme.TextSecondary}"
-                                           FontSize="13"
-                                           VerticalAlignment="Center" />
-                                <TextBox x:Name="OllamaModelBox"
-                                         Grid.Column="1"
-                                         Height="34"
-                                         Padding="10,0"
-                                         VerticalContentAlignment="Center"
-                                         LostFocus="OnOllamaConfigLostFocus" />
-                            </Grid>
+                        <StackPanel x:Name="LocalOcrPanel" Margin="0,14,0,0" Visibility="Collapsed">
+                            <StackPanel.Resources>
+                                <Style x:Key="OcrDownloadProgressBar" TargetType="ProgressBar">
+                                    <Setter Property="Height" Value="6" />
+                                    <Setter Property="Minimum" Value="0" />
+                                    <Setter Property="Maximum" Value="100" />
+                                    <Setter Property="BorderThickness" Value="0" />
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Setter Property="Template">
+                                        <Setter.Value>
+                                            <ControlTemplate TargetType="ProgressBar">
+                                                <!-- PART_Track 必须存在，否则 Value 不会驱动指示条宽度 -->
+                                                <Border x:Name="PART_Track"
+                                                        Background="{DynamicResource Theme.Border}"
+                                                        CornerRadius="3"
+                                                        Height="6">
+                                                    <Border x:Name="PART_Indicator"
+                                                            HorizontalAlignment="Left"
+                                                            Background="{DynamicResource Theme.Accent}"
+                                                            CornerRadius="3" />
+                                                </Border>
+                                            </ControlTemplate>
+                                        </Setter.Value>
+                                    </Setter>
+                                </Style>
+                            </StackPanel.Resources>
+                            <TextBlock Text="选择模型包"
+                                       Foreground="{DynamicResource Theme.TextSecondary}"
+                                       FontSize="12"
+                                       Margin="0,0,0,8" />
+
+                            <Border x:Name="OcrPackSmallCard"
+                                    Padding="12,10"
+                                    CornerRadius="8"
+                                    Cursor="Hand"
+                                    BorderThickness="1"
+                                    Background="{DynamicResource Theme.Search}"
+                                    BorderBrush="{DynamicResource Theme.Border}"
+                                    MouseLeftButtonUp="OnOcrPackCardClicked"
+                                    Tag="Small">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="均衡"
+                                                       Foreground="{DynamicResource Theme.Text}"
+                                                       FontSize="13"
+                                                       FontWeight="SemiBold" />
+                                            <TextBlock Text="PP-OCRv6 Small"
+                                                       Margin="8,0,0,0"
+                                                       Foreground="{DynamicResource Theme.TextSecondary}"
+                                                       FontSize="12.5"
+                                                       VerticalAlignment="Center" />
+                                        </StackPanel>
+                                        <TextBlock Text="约 30 MB · 识别 81.3% · 检测 84.1%"
+                                                   Margin="0,4,0,0"
+                                                   Foreground="{DynamicResource Theme.TextMuted}"
+                                                   FontSize="11.5" />
+                                        <TextBlock Text="日常截图够用"
+                                                   Margin="0,2,0,0"
+                                                   Foreground="{DynamicResource Theme.TextSecondary}"
+                                                   FontSize="11.5" />
+                                        <TextBlock x:Name="OcrPackSmallStatus"
+                                                   Margin="0,4,0,0"
+                                                   Foreground="{DynamicResource Theme.TextMuted}"
+                                                   FontSize="11"
+                                                   TextWrapping="Wrap" />
+                                    </StackPanel>
+                                    <ui:Button x:Name="OcrPackSmallButton"
+                                               Grid.Column="1"
+                                               Appearance="Secondary"
+                                               Height="32"
+                                               Padding="12,0"
+                                               VerticalAlignment="Center"
+                                               Margin="12,0,0,0"
+                                               Content="下载"
+                                               Tag="Small"
+                                               Click="OnOcrPackActionClicked" />
+                                    <ProgressBar x:Name="OcrPackSmallProgress"
+                                                 Grid.Row="1"
+                                                 Grid.ColumnSpan="2"
+                                                 Margin="0,8,0,0"
+                                                 Style="{StaticResource OcrDownloadProgressBar}" />
+                                </Grid>
+                            </Border>
+
+                            <Border x:Name="OcrPackMediumCard"
+                                    Margin="0,8,0,0"
+                                    Padding="12,10"
+                                    CornerRadius="8"
+                                    Cursor="Hand"
+                                    BorderThickness="1"
+                                    Background="{DynamicResource Theme.Search}"
+                                    BorderBrush="{DynamicResource Theme.Border}"
+                                    MouseLeftButtonUp="OnOcrPackCardClicked"
+                                    Tag="Medium">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="高精度"
+                                                       Foreground="{DynamicResource Theme.Text}"
+                                                       FontSize="13"
+                                                       FontWeight="SemiBold" />
+                                            <Border Margin="8,0,0,0"
+                                                    Padding="6,1"
+                                                    CornerRadius="4"
+                                                    Background="{DynamicResource Theme.AccentMuted}"
+                                                    VerticalAlignment="Center">
+                                                <TextBlock Text="推荐"
+                                                           FontSize="11"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="{DynamicResource Theme.Accent}" />
+                                            </Border>
+                                            <TextBlock Text="PP-OCRv6 Medium"
+                                                       Margin="8,0,0,0"
+                                                       Foreground="{DynamicResource Theme.TextSecondary}"
+                                                       FontSize="12.5"
+                                                       VerticalAlignment="Center" />
+                                        </StackPanel>
+                                        <TextBlock Text="约 132 MB · 识别 83.2% · 检测 86.2%"
+                                                   Margin="0,4,0,0"
+                                                   Foreground="{DynamicResource Theme.TextMuted}"
+                                                   FontSize="11.5" />
+                                        <TextBlock Text="屏幕、混排更稳"
+                                                   Margin="0,2,0,0"
+                                                   Foreground="{DynamicResource Theme.TextSecondary}"
+                                                   FontSize="11.5" />
+                                        <TextBlock x:Name="OcrPackMediumStatus"
+                                                   Margin="0,4,0,0"
+                                                   Foreground="{DynamicResource Theme.TextMuted}"
+                                                   FontSize="11"
+                                                   TextWrapping="Wrap" />
+                                    </StackPanel>
+                                    <ui:Button x:Name="OcrPackMediumButton"
+                                               Grid.Column="1"
+                                               Appearance="Secondary"
+                                               Height="32"
+                                               Padding="12,0"
+                                               VerticalAlignment="Center"
+                                               Margin="12,0,0,0"
+                                               Content="下载"
+                                               Tag="Medium"
+                                               Click="OnOcrPackActionClicked" />
+                                    <ProgressBar x:Name="OcrPackMediumProgress"
+                                                 Grid.Row="1"
+                                                 Grid.ColumnSpan="2"
+                                                 Margin="0,8,0,0"
+                                                 Style="{StaticResource OcrDownloadProgressBar}" />
+                                </Grid>
+                            </Border>
+
+                            <Border x:Name="OcrPackCustomCard"
+                                    Margin="0,8,0,0"
+                                    Padding="12,10"
+                                    CornerRadius="8"
+                                    Cursor="Hand"
+                                    BorderThickness="1"
+                                    Background="{DynamicResource Theme.Search}"
+                                    BorderBrush="{DynamicResource Theme.Border}"
+                                    MouseLeftButtonUp="OnOcrPackCardClicked"
+                                    Tag="Custom">
+                                <StackPanel>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="自定义"
+                                                   Foreground="{DynamicResource Theme.Text}"
+                                                   FontSize="13"
+                                                   FontWeight="SemiBold" />
+                                        <TextBlock Text="自备 det + rec + 字典"
+                                                   Margin="8,0,0,0"
+                                                   Foreground="{DynamicResource Theme.TextSecondary}"
+                                                   FontSize="12.5"
+                                                   VerticalAlignment="Center" />
+                                    </StackPanel>
+                                    <TextBlock Text="大小按目录实际占用 · 精度自备"
+                                               Margin="0,4,0,0"
+                                               Foreground="{DynamicResource Theme.TextMuted}"
+                                               FontSize="11.5" />
+                                    <Grid Margin="0,8,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox x:Name="OcrCustomDirBox"
+                                                 Height="34"
+                                                 Padding="10,0"
+                                                 VerticalContentAlignment="Center"
+                                                 LostFocus="OnOcrCustomDirLostFocus" />
+                                        <ui:Button Grid.Column="1"
+                                                   Appearance="Secondary"
+                                                   Height="34"
+                                                   Padding="12,0"
+                                                   Margin="8,0,0,0"
+                                                   Content="浏览"
+                                                   Click="OnOcrCustomBrowseClicked" />
+                                    </Grid>
+                                    <TextBlock x:Name="OcrPackCustomStatus"
+                                               Margin="0,6,0,0"
+                                               Foreground="{DynamicResource Theme.TextMuted}"
+                                               FontSize="11"
+                                               TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
+
+                            <TextBlock x:Name="OcrLocalActiveHint"
+                                       Margin="0,12,0,0"
+                                       Foreground="{DynamicResource Theme.Text}"
+                                       FontSize="12"
+                                       TextWrapping="Wrap" />
                         </StackPanel>
 
-                        <StackPanel x:Name="OpenAiPanel" Margin="0,14,0,0" Visibility="Collapsed">
+                        <StackPanel x:Name="VisionApiPanel" Margin="0,14,0,0" Visibility="Collapsed">
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="100" />
@@ -448,12 +643,12 @@
                                            Foreground="{DynamicResource Theme.TextSecondary}"
                                            FontSize="13"
                                            VerticalAlignment="Center" />
-                                <TextBox x:Name="OpenAiBaseUrlBox"
+                                <TextBox x:Name="VisionApiUrlBox"
                                          Grid.Column="1"
                                          Height="34"
                                          Padding="10,0"
                                          VerticalContentAlignment="Center"
-                                         LostFocus="OnOpenAiConfigLostFocus" />
+                                         LostFocus="OnVisionApiConfigLostFocus" />
                             </Grid>
                             <Grid Margin="0,10,0,0">
                                 <Grid.ColumnDefinitions>
@@ -464,12 +659,12 @@
                                            Foreground="{DynamicResource Theme.TextSecondary}"
                                            FontSize="13"
                                            VerticalAlignment="Center" />
-                                <TextBox x:Name="OpenAiModelBox"
+                                <TextBox x:Name="VisionApiModelBox"
                                          Grid.Column="1"
                                          Height="34"
                                          Padding="10,0"
                                          VerticalContentAlignment="Center"
-                                         LostFocus="OnOpenAiConfigLostFocus" />
+                                         LostFocus="OnVisionApiConfigLostFocus" />
                             </Grid>
                             <Grid Margin="0,10,0,0">
                                 <Grid.ColumnDefinitions>
@@ -480,12 +675,12 @@
                                            Foreground="{DynamicResource Theme.TextSecondary}"
                                            FontSize="13"
                                            VerticalAlignment="Center" />
-                                <PasswordBox x:Name="OpenAiApiKeyBox"
+                                <PasswordBox x:Name="VisionApiKeyBox"
                                              Grid.Column="1"
                                              Height="34"
                                              Padding="10,0"
                                              VerticalContentAlignment="Center"
-                                             LostFocus="OnOpenAiConfigLostFocus" />
+                                             LostFocus="OnVisionApiConfigLostFocus" />
                             </Grid>
                         </StackPanel>
 

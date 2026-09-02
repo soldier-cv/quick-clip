@@ -34,7 +34,7 @@
 
 - ⚡ **`Win + V` 静默接管**：钩子吞掉 Win 键，不误弹开始菜单；其它热键优先 `RegisterHotKey`
 - 🔍 **拼音首字母**：`设计架构` 搜 `sjjg`
-- 🔤 **Windows 原生 OCR**：系统引擎；也可配 Ollama / OpenAI
+- 🔤 **OCR**：默认 Windows 原生离线；可下载 PP-OCRv6 模型包，或配 OpenAI 兼容视觉接口
 - 📌 **窗口置顶**：`Ctrl+P` / 图钉，失焦不藏
 - 🧹 **条数上限**：默认最多 233 条，超限淘汰最旧非置顶；超大文本/图片不入库，文件只记路径
 - 🎨 **多主题**：Terminal / One Dark / GitHub / Nord …
@@ -96,7 +96,7 @@ dotnet publish src/QuickClip/QuickClip.csproj -c Release -r win-x64 --self-conta
 
 ## 技术栈
 
-C# / .NET 8 + WPF（WPF-UI）· Win32 钩子与剪贴板 · ZXing + QRCoder · Windows.Media.Ocr · SQLite · PinYinConverterCore
+C# / .NET 8 + WPF（WPF-UI）· Win32 钩子与剪贴板 · ZXing + QRCoder · Windows.Media.Ocr / RapidOcrNet · SQLite · PinYinConverterCore
 
 ## 许可证
 

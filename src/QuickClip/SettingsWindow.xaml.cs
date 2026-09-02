@@ -4,6 +4,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
+using Microsoft.Win32;
 using QuickClip.Models;
 using QuickClip.Services;
 using MediaBrush = System.Windows.Media.Brush;
@@ -46,6 +47,8 @@ public partial class SettingsWindow : Window
         _services.Update.PendingChanged += OnPendingUpdateChanged;
         _services.Update.DownloadFailedChanged += OnDownloadFailedChanged;
         _services.Update.ActivityChanged += OnUpdateActivityChanged;
+        _services.OcrPacks.DownloadProgress += OnOcrDownloadProgress;
+        _services.OcrPacks.PacksChanged += OnOcrPacksChanged;
         ThemeService.Changed += OnThemeServiceChanged;
         Loaded += OnSettingsWindowLoaded;
         Closed += (_, _) =>
@@ -54,6 +57,8 @@ public partial class SettingsWindow : Window
             _services.Update.PendingChanged -= OnPendingUpdateChanged;
             _services.Update.DownloadFailedChanged -= OnDownloadFailedChanged;
             _services.Update.ActivityChanged -= OnUpdateActivityChanged;
+            _services.OcrPacks.DownloadProgress -= OnOcrDownloadProgress;
+            _services.OcrPacks.PacksChanged -= OnOcrPacksChanged;
             ThemeService.Changed -= OnThemeServiceChanged;
             Loaded -= OnSettingsWindowLoaded;
         };
@@ -142,6 +147,7 @@ public partial class SettingsWindow : Window
         // 主题已通过 DynamicResource 刷新；补刷窗口底色与状态徽章
         WindowChromeHelper.Apply(this, RootGrid);
         RefreshSysClipboardStatus();
+        RefreshLocalOcrPanel();
     }
 
     private void RefreshUi()
@@ -169,21 +175,17 @@ public partial class SettingsWindow : Window
 
             OcrEngineBox.SelectedIndex = s.OcrEngine switch
             {
-                OcrEngineType.Ollama => 1,
-                OcrEngineType.OpenAi => 2,
+                OcrEngineType.Local => 1,
+                OcrEngineType.VisionApi => 2,
                 _ => 0
             };
 
-            OllamaBaseUrlBox.Text = s.OllamaBaseUrl;
-            OllamaModelBox.Text = s.OllamaModel;
-            OpenAiBaseUrlBox.Text = s.OpenAiBaseUrl;
-            OpenAiModelBox.Text = s.OpenAiModel;
-            OpenAiApiKeyBox.Password = s.OpenAiApiKey ?? string.Empty;
-            OllamaPanel.Visibility = s.OcrEngine == OcrEngineType.Ollama ? Visibility.Visible : Visibility.Collapsed;
-            OpenAiPanel.Visibility = s.OcrEngine == OcrEngineType.OpenAi ? Visibility.Visible : Visibility.Collapsed;
-            OcrTestPanel.Visibility = s.OcrEngine is OcrEngineType.Ollama or OcrEngineType.OpenAi
-                ? Visibility.Visible
-                : Visibility.Collapsed;
+            VisionApiUrlBox.Text = s.VisionApiUrl;
+            VisionApiModelBox.Text = s.VisionApiModel;
+            VisionApiKeyBox.Password = s.VisionApiKey ?? string.Empty;
+            OcrCustomDirBox.Text = s.OcrCustomDir;
+            ApplyOcrEnginePanels(s.OcrEngine);
+            RefreshLocalOcrPanel();
 
             RefreshSysClipboardStatus();
         }
@@ -677,37 +679,33 @@ public partial class SettingsWindow : Window
 
         var engine = OcrEngineBox.SelectedIndex switch
         {
-            1 => OcrEngineType.Ollama,
-            2 => OcrEngineType.OpenAi,
+            1 => OcrEngineType.Local,
+            2 => OcrEngineType.VisionApi,
             _ => OcrEngineType.System
         };
 
-        OllamaPanel.Visibility = engine == OcrEngineType.Ollama ? Visibility.Visible : Visibility.Collapsed;
-        OpenAiPanel.Visibility = engine == OcrEngineType.OpenAi ? Visibility.Visible : Visibility.Collapsed;
-        OcrTestPanel.Visibility = engine is OcrEngineType.Ollama or OcrEngineType.OpenAi
-            ? Visibility.Visible
-            : Visibility.Collapsed;
+        ApplyOcrEnginePanels(engine);
 
         if (_services.Settings.OcrEngine != engine)
         {
             _services.Settings.SetOcrEngine(engine);
         }
 
+        if (engine == OcrEngineType.Local)
+        {
+            RefreshLocalOcrPanel();
+        }
+
         // 引擎面板显隐会改变内容高度，布局后再按有限视口重算滚动
         Dispatcher.BeginInvoke(RefreshScrollExtent, DispatcherPriority.Loaded);
     }
 
-    private void OnOllamaConfigLostFocus(object sender, RoutedEventArgs e)
+    private void OnVisionApiConfigLostFocus(object sender, RoutedEventArgs e)
     {
-        _services.Settings.SetOllamaConfig(OllamaBaseUrlBox.Text, OllamaModelBox.Text);
-    }
-
-    private void OnOpenAiConfigLostFocus(object sender, RoutedEventArgs e)
-    {
-        _services.Settings.SetOpenAiConfig(
-            OpenAiBaseUrlBox.Text,
-            OpenAiModelBox.Text,
-            OpenAiApiKeyBox.Password);
+        _services.Settings.SetVisionApiConfig(
+            VisionApiUrlBox.Text,
+            VisionApiModelBox.Text,
+            VisionApiKeyBox.Password);
     }
 
     private async void OnOcrTestClicked(object sender, RoutedEventArgs e)
@@ -736,18 +734,328 @@ public partial class SettingsWindow : Window
     {
         if (OcrEngineBox.SelectedIndex == 1)
         {
-            _services.Settings.SetOllamaConfig(OllamaBaseUrlBox.Text, OllamaModelBox.Text);
+            _services.Settings.SetOcrCustomDir(OcrCustomDirBox.Text);
             return;
         }
 
         if (OcrEngineBox.SelectedIndex == 2)
         {
-            _services.Settings.SetOpenAiConfig(
-                OpenAiBaseUrlBox.Text,
-                OpenAiModelBox.Text,
-                OpenAiApiKeyBox.Password);
+            _services.Settings.SetVisionApiConfig(
+                VisionApiUrlBox.Text,
+                VisionApiModelBox.Text,
+                VisionApiKeyBox.Password);
         }
     }
+
+    private void ApplyOcrEnginePanels(OcrEngineType engine)
+    {
+        LocalOcrPanel.Visibility = engine == OcrEngineType.Local ? Visibility.Visible : Visibility.Collapsed;
+        VisionApiPanel.Visibility = engine == OcrEngineType.VisionApi ? Visibility.Visible : Visibility.Collapsed;
+        OcrTestPanel.Visibility = engine == OcrEngineType.VisionApi
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        RefreshOcrEngineHint(engine);
+    }
+
+    private void RefreshOcrEngineHint(OcrEngineType? engine = null)
+    {
+        if (OcrEngineHint == null)
+        {
+            return;
+        }
+
+        engine ??= _services.Settings.OcrEngine;
+        OcrEngineHint.Text = engine switch
+        {
+            OcrEngineType.Local => "点选下方模型包即可切换。未就绪时识别会回退系统 OCR。",
+            OcrEngineType.VisionApi => "填写兼容 OpenAI 的接口地址、视觉模型和可选 API Key。",
+            _ => "使用 Windows 自带识别，无需下载模型。"
+        };
+    }
+
+    private void OnOcrPackCardClicked(object sender, MouseButtonEventArgs e)
+    {
+        if (_suppressUiEvents || sender is not FrameworkElement element)
+        {
+            return;
+        }
+
+        if (!TryParseOcrPack(element.Tag, out var pack))
+        {
+            return;
+        }
+
+        SelectOcrPack(pack);
+    }
+
+    private async void OnOcrPackActionClicked(object sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        if (_suppressUiEvents || sender is not FrameworkElement element)
+        {
+            return;
+        }
+
+        if (!TryParseOcrPack(element.Tag, out var pack) || pack == OcrLocalPack.Custom)
+        {
+            return;
+        }
+
+        SelectOcrPack(pack);
+
+        if (_services.OcrPacks.IsDownloading)
+        {
+            if (_services.OcrPacks.DownloadingPack == pack)
+            {
+                _services.OcrPacks.CancelDownload();
+            }
+
+            return;
+        }
+
+        if (_services.OcrPacks.IsOfficialInstalled(pack))
+        {
+            _services.OcrPacks.DeleteOfficial(pack);
+            _services.OcrPacks.InvalidateEngine();
+            RefreshLocalOcrPanel();
+            return;
+        }
+
+        try
+        {
+            // 先启动任务（同步设置 IsDownloading），再刷 UI，避免按钮仍显示「下载」被点第二次取消
+            Task downloadTask = _services.OcrPacks.DownloadAsync(pack);
+            RefreshLocalOcrPanel();
+            await downloadTask;
+            _services.OcrPacks.InvalidateEngine();
+        }
+        catch (OperationCanceledException)
+        {
+            DebugLog.Log("设置页取消 OCR 模型下载: " + pack);
+        }
+        catch (Exception ex)
+        {
+            DebugLog.LogException("设置页下载 OCR 模型失败", ex);
+        }
+        finally
+        {
+            RefreshLocalOcrPanel();
+        }
+    }
+
+    private void OnOcrCustomDirLostFocus(object sender, RoutedEventArgs e)
+    {
+        if (_suppressUiEvents)
+        {
+            return;
+        }
+
+        _services.Settings.SetOcrCustomDir(OcrCustomDirBox.Text);
+        _services.OcrPacks.InvalidateEngine();
+        RefreshLocalOcrPanel();
+    }
+
+    private void OnOcrCustomBrowseClicked(object sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        SelectOcrPack(OcrLocalPack.Custom);
+
+        var dialog = new OpenFolderDialog
+        {
+            Title = "选择 OCR 模型目录"
+        };
+
+        if (!string.IsNullOrWhiteSpace(OcrCustomDirBox.Text) && Directory.Exists(OcrCustomDirBox.Text))
+        {
+            dialog.InitialDirectory = OcrCustomDirBox.Text;
+        }
+
+        if (dialog.ShowDialog(this) != true || string.IsNullOrWhiteSpace(dialog.FolderName))
+        {
+            return;
+        }
+
+        OcrCustomDirBox.Text = dialog.FolderName;
+        _services.Settings.SetOcrCustomDir(dialog.FolderName);
+        _services.OcrPacks.InvalidateEngine();
+        RefreshLocalOcrPanel();
+    }
+
+    private OcrDownloadProgress? _ocrDownloadProgress;
+
+    private void OnOcrDownloadProgress(OcrDownloadProgress progress)
+    {
+        Dispatcher.BeginInvoke(() =>
+        {
+            _ocrDownloadProgress = progress;
+            TextBlock status = progress.Pack == OcrLocalPack.Small
+                ? OcrPackSmallStatus
+                : OcrPackMediumStatus;
+            status.Text = progress.Message;
+            OcrLocalActiveHint.Text = DescribeLocalActiveModel();
+            RefreshLocalOcrButtons();
+        }, DispatcherPriority.Render);
+    }
+
+    private void OnOcrPacksChanged()
+    {
+        Dispatcher.BeginInvoke(RefreshLocalOcrPanel);
+    }
+
+    private void SelectOcrPack(OcrLocalPack pack)
+    {
+        if (OcrCustomDirBox.Text != _services.Settings.OcrCustomDir)
+        {
+            _services.Settings.SetOcrCustomDir(OcrCustomDirBox.Text);
+        }
+
+        if (_services.Settings.OcrLocalPack != pack)
+        {
+            _services.Settings.SetOcrLocalPack(pack);
+            _services.OcrPacks.InvalidateEngine();
+        }
+
+        RefreshLocalOcrPanel();
+    }
+
+    private void RefreshLocalOcrPanel()
+    {
+        if (LocalOcrPanel == null)
+        {
+            return;
+        }
+
+        ApplyPackCardChrome(OcrPackSmallCard, _services.Settings.OcrLocalPack == OcrLocalPack.Small);
+        ApplyPackCardChrome(OcrPackMediumCard, _services.Settings.OcrLocalPack == OcrLocalPack.Medium);
+        ApplyPackCardChrome(OcrPackCustomCard, _services.Settings.OcrLocalPack == OcrLocalPack.Custom);
+
+        OcrPackSmallStatus.Text = _services.OcrPacks.OfficialStatusText(OcrLocalPack.Small);
+        OcrPackMediumStatus.Text = _services.OcrPacks.OfficialStatusText(OcrLocalPack.Medium);
+
+        OcrPackCustomStatus.Text = CustomPackStatus();
+        OcrLocalActiveHint.Text = DescribeLocalActiveModel();
+        if (!_services.OcrPacks.IsDownloading)
+        {
+            _ocrDownloadProgress = _services.OcrPacks.CurrentProgress;
+        }
+
+        RefreshLocalOcrButtons();
+        if (_services.Settings.OcrEngine == OcrEngineType.Local)
+        {
+            RefreshOcrEngineHint(OcrEngineType.Local);
+        }
+
+        Dispatcher.BeginInvoke(RefreshScrollExtent, DispatcherPriority.Loaded);
+    }
+
+    private void RefreshLocalOcrButtons()
+    {
+        bool downloading = _services.OcrPacks.IsDownloading;
+        var current = _services.OcrPacks.DownloadingPack;
+        SetOfficialButton(OcrPackSmallButton, OcrLocalPack.Small, downloading, current);
+        SetOfficialButton(OcrPackMediumButton, OcrLocalPack.Medium, downloading, current);
+        ApplyDownloadBar(OcrPackSmallProgress, OcrLocalPack.Small, downloading, current);
+        ApplyDownloadBar(OcrPackMediumProgress, OcrLocalPack.Medium, downloading, current);
+    }
+
+    private void ApplyDownloadBar(
+        System.Windows.Controls.ProgressBar bar,
+        OcrLocalPack pack,
+        bool downloading,
+        OcrLocalPack? current)
+    {
+        bool show = downloading && current == pack;
+        bar.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        if (!show)
+        {
+            bar.IsIndeterminate = false;
+            bar.Value = 0;
+            return;
+        }
+
+        var live = _ocrDownloadProgress ?? _services.OcrPacks.CurrentProgress;
+        bar.IsIndeterminate = live?.IsIndeterminate == true;
+        bar.Value = live is { Pack: var livePack } && livePack == pack
+            ? live.Percent
+            : 0;
+    }
+
+    private void SetOfficialButton(
+        Wpf.Ui.Controls.Button button,
+        OcrLocalPack pack,
+        bool downloading,
+        OcrLocalPack? current)
+    {
+        if (downloading)
+        {
+            bool thisPack = current == pack;
+            button.Content = thisPack ? "取消" : "下载";
+            button.IsEnabled = thisPack;
+            return;
+        }
+
+        button.IsEnabled = true;
+        button.Content = _services.OcrPacks.IsOfficialInstalled(pack) ? "删除" : "下载";
+    }
+
+    private static void ApplyPackCardChrome(Border card, bool selected)
+    {
+        card.SetResourceReference(
+            Border.BackgroundProperty,
+            selected ? ThemeService.CardSelectedBrushKey : ThemeService.SearchBrushKey);
+        card.SetResourceReference(
+            Border.BorderBrushProperty,
+            selected ? ThemeService.AccentBrushKey : ThemeService.BorderBrushKey);
+        card.BorderThickness = new Thickness(selected ? 1.5 : 1);
+    }
+
+    /// <summary>模型包下方的当前启动提示：已选档位 + 是否真正能跑。</summary>
+    private string DescribeLocalActiveModel()
+    {
+        var resolved = _services.OcrPacks.ResolveCurrent();
+        string name = string.IsNullOrWhiteSpace(resolved.Title) ? "离线模型" : resolved.Title;
+
+        if (_services.OcrPacks.IsDownloading &&
+            _services.OcrPacks.DownloadingPack == _services.Settings.OcrLocalPack)
+        {
+            return "当前启动：" + name + "（正在下载…）";
+        }
+
+        if (resolved.Error != null)
+        {
+            string reason = resolved.Error.StartsWith("未下载", StringComparison.Ordinal)
+                ? "未下载"
+                : resolved.Error;
+            return "当前启动：" + name + "（" + reason + "，识别时回退系统 OCR）";
+        }
+
+        return "当前启动：" + name + "（已就绪）";
+    }
+
+    private string CustomPackStatus()
+    {
+        string dir = OcrCustomDirBox.Text;
+        var resolved = _services.OcrPacks.InspectCustom(dir);
+        if (resolved.Error != null)
+        {
+            return resolved.Error;
+        }
+
+        long bytes = 0;
+        foreach (string? path in new[] { resolved.DetPath, resolved.RecPath, resolved.KeysPath })
+        {
+            if (!string.IsNullOrEmpty(path) && File.Exists(path))
+            {
+                bytes += new FileInfo(path).Length;
+            }
+        }
+
+        string size = bytes > 0 ? " · " + (bytes / (1024d * 1024d)).ToString("0.0") + " MB" : string.Empty;
+        return "已就绪" + size;
+    }
+
+    private static bool TryParseOcrPack(object? tag, out OcrLocalPack pack) =>
+        Enum.TryParse(tag?.ToString(), ignoreCase: true, out pack);
 
     // ---------- 文案 ----------
 

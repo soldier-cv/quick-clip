@@ -15,6 +15,7 @@ public sealed class AppServices : IDisposable
     public DatabaseService Database { get; private set; }
     public QrCodeService Qr { get; }
     public OcrService Ocr { get; }
+    public OcrModelPackService OcrPacks { get; }
     public PasteService Paste { get; }
     public ClipboardMonitor Monitor { get; }
     public ClipboardPipeline Pipeline { get; }
@@ -37,7 +38,8 @@ public sealed class AppServices : IDisposable
 
         Database = new DatabaseService(Settings.DatabasePath ?? Paths.DatabasePath);
         Qr = new QrCodeService();
-        Ocr = new OcrService(Settings);
+        OcrPacks = new OcrModelPackService(Paths, Settings);
+        Ocr = new OcrService(Settings, OcrPacks);
         Paste = new PasteService();
         Pipeline = new ClipboardPipeline(Paths, Database, Qr, Paste, Settings);
         Hotkey = new HotkeyService();
@@ -252,6 +254,7 @@ public sealed class AppServices : IDisposable
         ClipboardGuard.Dispose();
         Tray.Dispose();
         Update.Dispose();
+        OcrPacks.Dispose();
         Database.Dispose();
     }
 }

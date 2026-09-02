@@ -20,6 +20,7 @@
                  KeyDown="OnWindowKeyDown"
                  SourceInitialized="OnSourceInitialized"
                  Closing="OnWindowClosing"
+                 Activated="OnWindowActivated"
                  Deactivated="OnWindowDeactivated">
 
     <ui:FluentWindow.Resources>
@@ -329,6 +330,9 @@
                                                                  Value="True">
                                                         <Setter Property="Visibility" Value="Visible" />
                                                     </DataTrigger>
+                                                    <DataTrigger Binding="{Binding IsOcrBusy}" Value="True">
+                                                        <Setter Property="Visibility" Value="Visible" />
+                                                    </DataTrigger>
                                                 </Style.Triggers>
                                             </Style>
                                         </StackPanel.Style>
@@ -355,10 +359,57 @@
                                                    Padding="5"
                                                    Margin="2,0"
                                                    CornerRadius="6"
-                                                   ToolTip="OCR"
+                                                   ToolTip="{Binding OcrToolTip}"
                                                    Visibility="{Binding IsImage, Converter={StaticResource BoolToVis}}"
                                                    Click="OnOcrClicked">
-                                            <ui:SymbolIcon Symbol="ScanText24" FontSize="15" />
+                                            <Grid Width="16" Height="16">
+                                                <ui:SymbolIcon Symbol="ScanText24" FontSize="15">
+                                                    <ui:SymbolIcon.Style>
+                                                        <Style TargetType="ui:SymbolIcon">
+                                                            <Setter Property="Visibility" Value="Visible" />
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding IsOcrBusy}" Value="True">
+                                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </ui:SymbolIcon.Style>
+                                                </ui:SymbolIcon>
+                                                <!-- 不用 ProgressRing：按钮禁用/透明主题下会画成空白。虚线圆旋转更稳。 -->
+                                                <Ellipse Width="14"
+                                                         Height="14"
+                                                         Stroke="{DynamicResource Theme.Accent}"
+                                                         StrokeThickness="1.8"
+                                                         StrokeDashArray="9 5"
+                                                         RenderTransformOrigin="0.5,0.5">
+                                                    <Ellipse.RenderTransform>
+                                                        <RotateTransform />
+                                                    </Ellipse.RenderTransform>
+                                                    <Ellipse.Style>
+                                                        <Style TargetType="Ellipse">
+                                                            <Setter Property="Visibility" Value="Collapsed" />
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding IsOcrBusy}" Value="True">
+                                                                    <Setter Property="Visibility" Value="Visible" />
+                                                                    <DataTrigger.EnterActions>
+                                                                        <BeginStoryboard x:Name="OcrSpinBoard">
+                                                                            <Storyboard RepeatBehavior="Forever">
+                                                                                <DoubleAnimation Storyboard.TargetProperty="RenderTransform.Angle"
+                                                                                                 From="0"
+                                                                                                 To="360"
+                                                                                                 Duration="0:0:0.75" />
+                                                                            </Storyboard>
+                                                                        </BeginStoryboard>
+                                                                    </DataTrigger.EnterActions>
+                                                                    <DataTrigger.ExitActions>
+                                                                        <StopStoryboard BeginStoryboardName="OcrSpinBoard" />
+                                                                    </DataTrigger.ExitActions>
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </Ellipse.Style>
+                                                </Ellipse>
+                                            </Grid>
                                         </ui:Button>
                                         <ui:Button Appearance="Transparent"
                                                    Padding="5"

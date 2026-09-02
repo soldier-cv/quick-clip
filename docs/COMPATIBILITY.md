@@ -28,7 +28,7 @@ QuickClip 基于 **.NET 8 + WPF** 开发，目标平台为：
 | SQLite 历史（条数上限淘汰） | 🟢 | 🟢 | `Microsoft.Data.Sqlite` |
 | 键盘粘贴回填 | 🟢 | 🟢 | `SendInput` |
 | UI 材质 | Acrylic | Mica / Acrylic | WPF-UI；远程显示自动降级 |
-| 离线 OCR | 🟢（需语言包） | 🟢 | `Windows.Media.Ocr`（WinRT） |
+| 离线 OCR | 🟢（需语言包） | 🟢 | `Windows.Media.Ocr`（WinRT）；可选 PP-OCRv6 模型包 |
 
 ---
 
@@ -43,7 +43,7 @@ QuickClip 基于 **.NET 8 + WPF** 开发，目标平台为：
 ### 2.2 离线 OCR
 
 - 依赖系统内置 `Windows.Media.Ocr`（Windows 10 1511+）
-- 需安装对应 OCR 语言包；缺失时界面会提示，并可配置 Ollama / OpenAI 作为可选引擎
+- 需安装对应 OCR 语言包；缺失时界面会提示。也可在设置里下载 PP-OCRv6 离线包，或配置 OpenAI 兼容视觉接口
 
 ### 2.3 打包部署
 

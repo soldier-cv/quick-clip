@@ -65,6 +65,12 @@ graph TD
 3. **Windows 原生离线 OCR**：
    - 引用 WinRT 原生库 `Windows.Media.Ocr.OcrEngine`；
    - 将剪贴板位图转换为 `SoftwareBitmap`，直接本地调用 `engine.RecognizeAsync(softwareBitmap)` 毫秒级提取文本。
+4. **可选 PP-OCRv6 离线包**（不打进安装包）：
+   - 设置页下载 Small / Medium，或指定自备 `det` + `rec` + 字典目录；
+   - 模型落在 `%LOCALAPPDATA%\QuickClip\ocr\`；失败回退系统 OCR。
+   - 下载进度与失败原因保留在设置页；HTTP 状态、文件大小、SHA256 校验写入 `debug.log`。
+5. **OpenAI 兼容视觉接口**：
+   - 一组地址 + 模型 + 可选 API Key；默认按 chat/completions。URL 若仍是旧版 `/api/generate` 则走 Ollama 原生。
 
 ### 2.4 存储结构与条数淘汰
 - 本地数据库：`quickclip.db`（SQLite）
@@ -134,7 +140,9 @@ graph TD
 
 ### 4.1 全局热键服务线程模型
 - `HotkeyService.Start` 在 UI 线程创建隐藏消息窗口（`HwndSource`），用于接收 `RegisterHotKey` 的 `WM_HOTKEY`；随后启动独立后台线程安装 `WH_KEYBOARD_LL` 钩子并运行标准 Win32 消息泵（`GetMessage` 循环）。
-- `RegisterHotKey` 注册结果记录到日志：`Win+V` 在开启剪贴板历史时必然返回 1409，属预期行为，此时由钩子接管；其余热键注册失败时同样回退钩子匹配（按设置中的修饰键 + 主键判断）。
+- `RegisterHotKey` 必须在创建隐藏窗口的 UI 线程调用。后台线程（如更新检查写时间戳）触发 `Settings.Changed` 时若直接注册，会得到 **1408**（`ERROR_WINDOW_OF_OTHER_THREAD`），并误把已成功的注册标成失败。时间戳保存不再广播 Changed；其它设置变更也切回 UI 线程再注册。
+- `RegisterHotKey` 注册结果记录到日志：`Win+V` 在开启剪贴板历史时必然返回 **1409**，属预期行为，此时由钩子接管；**1408 不是系统占用**。其余热键注册失败时同样回退钩子匹配（按设置中的修饰键 + 主键判断）。
+- 热键唤起后短时 `HWND_TOPMOST` 并忽略 `Deactivated`，避免 Activate 被前台锁拒绝后立刻藏回托盘；`Activated` 不得清掉这段宽限。
 - 卸载时依次 `UnregisterHotKey`、`UnhookWindowsHookEx`、`PostThreadMessage(WM_QUIT)` 退出消息泵，避免线程泄漏。
 - 设置变更（`SettingsService.Changed`）会触发 `HotkeyService.ApplyHotkeys` 重新注册，热键即时生效。
 ### 4.2 SendInput 结构体（x64 易踩坑）
@@ -147,8 +155,10 @@ graph TD
 - 自身粘贴回填时 `PasteService.IsSelfPasting` 置位 600ms，流水线据此过滤，避免「复制 → 入库 → 回填 → 再捕获」死循环。
 
 ### 4.4 诊断日志
-- `DebugLog` 默认写入 `%LOCALAPPDATA%\QuickClip\debug.log`（超过 5MB 自动滚动备份），设置 `QUICKCLIP_DEBUG_LOG=1` 可额外记录逐键等详细调试信息。
-- 日志覆盖：钩子安装结果 / Win+V 与 Ctrl+Shift+V 拦截 / 窗口切换 / 异常堆栈等关键路径。
+- `DebugLog` 默认写入 `%LOCALAPPDATA%\QuickClip\debug.log`；单文件超过 2MB 滚动为 `debug.log.1` / `debug.log.2`（合计约 6MB），滚动失败时硬上限 8MB 暂停写入。
+- 设置 `QUICKCLIP_DEBUG_LOG=1` 可额外记录逐键等详细调试信息。
+- 日志覆盖：钩子安装结果 / Win+V 与 Ctrl+Shift+V 拦截 / 窗口切换 / OCR 模型下载（HTTP、大小、校验）/ 视觉 OCR 请求元数据（不含密钥与图片）/ 异常堆栈。
+- URL 只记 host+path，去掉 query（避免 CDN `auth_key`）；禁止写入 API Key 与剪贴板正文。
 - 全局异常兜底：UI 线程异常标记已处理不崩溃，进程级与未观察任务异常记录完整堆栈。
 
 ### 4.5 渲染环境自动降级（远程/虚拟显示）

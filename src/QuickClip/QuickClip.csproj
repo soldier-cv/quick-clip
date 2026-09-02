@@ -12,9 +12,9 @@
     <Description>专为 Windows 打造的现代化、极速、纯离线剪贴板增强工具</Description>
     <RootNamespace>QuickClip</RootNamespace>
     <ApplicationIcon>Assets\quickclip.ico</ApplicationIcon>
-    <Version>1.2.4</Version>
-    <AssemblyVersion>1.2.4.0</AssemblyVersion>
-    <FileVersion>1.2.4.0</FileVersion>
+    <Version>1.2.5</Version>
+    <AssemblyVersion>1.2.5.0</AssemblyVersion>
+    <FileVersion>1.2.5.0</FileVersion>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">
@@ -25,6 +25,7 @@
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.10" />
     <PackageReference Include="PinYinConverterCore" Version="1.0.2" />
     <PackageReference Include="QRCoder" Version="1.8.0" />
+    <PackageReference Include="RapidOcrNet" Version="4.1.0" />
     <PackageReference Include="WPF-UI" Version="4.3.0" />
     <PackageReference Include="ZXing.Net.Bindings.Windows.Compatibility" Version="0.16.14" />
   </ItemGroup>
@@ -32,5 +33,13 @@
   <ItemGroup>
     <Resource Include="Assets\quickclip.ico" />
   </ItemGroup>
+
+  <!-- RapidOcrNet 会把拉丁 v5 模型拷进输出目录；中文包按需下载，不随安装包分发 -->
+  <Target Name="RemoveBundledRapidOcrModels" AfterTargets="CopyModelsBuild">
+    <RemoveDir Directories="$(TargetDir)models" />
+  </Target>
+  <Target Name="RemoveBundledRapidOcrModelsOnPublish" AfterTargets="CopyModelsPublish">
+    <RemoveDir Directories="$(PublishDir)models" />
+  </Target>
 
 </Project>

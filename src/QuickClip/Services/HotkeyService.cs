@@ -119,24 +119,60 @@ public sealed class HotkeyService : IDisposable
         }
     }
 
+    /// <summary>
+    /// RegisterHotKey / UnregisterHotKey 必须在创建隐藏窗口的 UI 线程调用。
+    /// 后台线程（如更新检查写 LastUpdateCheckUtc）触发 Settings.Changed 时若直接注册，
+    /// 会得到 1408 ERROR_WINDOW_OF_OTHER_THREAD，并误把已成功的注册标成失败。
+    /// </summary>
+    private void RunOnUi(Action action)
+    {
+        Dispatcher? dispatcher = _uiDispatcher;
+        if (dispatcher == null || dispatcher.CheckAccess())
+        {
+            action();
+            return;
+        }
+
+        dispatcher.BeginInvoke(action);
+    }
+
     /// <summary>设置变更后重新应用热键注册（保留窗口与钩子线程）。</summary>
     public void ApplyHotkeys(SettingsService settings)
     {
-        lock (_lock)
+        RunOnUi(() =>
         {
-            _plainPasteBinding = settings.PlainPasteHotkey;
-            _plainPasteEnabled = settings.PlainPasteEnabled;
-            ApplyHotkeysCore();
-        }
+            lock (_lock)
+            {
+                bool unchanged = _plainPasteBinding == settings.PlainPasteHotkey &&
+                                 _plainPasteEnabled == settings.PlainPasteEnabled;
+                _plainPasteBinding = settings.PlainPasteHotkey;
+                _plainPasteEnabled = settings.PlainPasteEnabled;
+
+                // 热键未变且当前注册仍有效：不要卸载重装（避免后台 Saved 误伤）
+                if (unchanged &&
+                    _hwnd != IntPtr.Zero &&
+                    _winVRegistered &&
+                    (!_plainPasteEnabled || _plainPasteRegistered))
+                {
+                    DebugLog.LogDetail("热键配置未变，跳过重新注册");
+                    return;
+                }
+
+                ApplyHotkeysCore();
+            }
+        });
     }
 
     /// <summary>重新尝试应用热键注册（供系统剪贴板冲突配置变更后即时刷新）。</summary>
     public void RefreshHotkeys()
     {
-        lock (_lock)
+        RunOnUi(() =>
         {
-            ApplyHotkeysCore();
-        }
+            lock (_lock)
+            {
+                ApplyHotkeysCore();
+            }
+        });
     }
 
     private void ApplyHotkeysCore()
@@ -146,16 +182,15 @@ public sealed class HotkeyService : IDisposable
             return;
         }
 
-        // 先卸载旧注册，避免残留
         if (_winVRegistered)
         {
-            NativeMethods.UnregisterHotKey(_hwnd, HotkeyIdWinV);
+            UnregisterHotKey(HotkeyIdWinV, "Win+V");
             _winVRegistered = false;
         }
 
         if (_plainPasteRegistered)
         {
-            NativeMethods.UnregisterHotKey(_hwnd, HotkeyIdPlainPaste);
+            UnregisterHotKey(HotkeyIdPlainPaste, "纯文本粘贴");
             _plainPasteRegistered = false;
         }
 
@@ -163,7 +198,7 @@ public sealed class HotkeyService : IDisposable
         _winVRegistered = TryRegisterHotKey(HotkeyBinding.WinV, HotkeyIdWinV, "Win+V");
         if (!_winVRegistered)
         {
-            DebugLog.Log("Win+V 已被系统占用，改用低级钩子接管");
+            DebugLog.Log("Win+V 未能 RegisterHotKey，改用低级钩子接管");
         }
 
         // 固定纯文本粘贴热键：注册失败（组合被占用）时回退钩子
@@ -182,14 +217,44 @@ public sealed class HotkeyService : IDisposable
         }
     }
 
+    private void UnregisterHotKey(int id, string label)
+    {
+        bool ok = NativeMethods.UnregisterHotKey(_hwnd, id);
+        int error = Marshal.GetLastWin32Error();
+        if (!ok)
+        {
+            DebugLog.Log($"卸载热键 {label} 失败 (LastError={error} {DescribeHotkeyError(error)})");
+        }
+    }
+
     private bool TryRegisterHotKey(HotkeyBinding binding, int id, string label)
     {
         uint mods = binding.ToModifierFlags() | NativeMethods.MOD_NOREPEAT;
         uint vk = (uint)KeyInterop.VirtualKeyFromKey(binding.Key);
         bool ok = NativeMethods.RegisterHotKey(_hwnd, id, mods, vk);
-        DebugLog.Log($"注册热键 {label} [{binding}] => {ok} (LastError={Marshal.GetLastWin32Error()})");
+        int error = Marshal.GetLastWin32Error();
+        if (ok)
+        {
+            DebugLog.Log($"注册热键 {label} [{binding}] => True");
+        }
+        else
+        {
+            DebugLog.Log(
+                $"注册热键 {label} [{binding}] => False (LastError={error} {DescribeHotkeyError(error)})");
+        }
+
         return ok;
     }
+
+    /// <summary>1408 是错线程，不是「系统占用」；1409 才是热键已被占用。</summary>
+    private static string DescribeHotkeyError(int error) => error switch
+    {
+        0 => "OK",
+        1408 => "ERROR_WINDOW_OF_OTHER_THREAD",
+        1409 => "ERROR_HOTKEY_ALREADY_REGISTERED",
+        1419 => "ERROR_HOTKEY_NOT_REGISTERED",
+        _ => "Win32"
+    };
 
     /// <summary>WM_HOTKEY 处理：RegisterHotKey 接管的热键在这里触发。</summary>
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)

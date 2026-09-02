@@ -12,7 +12,8 @@
   previews\         # 图片缩略图
   settings.json     # 热键、自启动、OCR、自动更新等
   updates\          # 已下载的更新包
-  debug.log         # 诊断日志
+  ocr\              # 用户下载的 PP-OCRv6 模型包
+  debug.log         # 诊断日志（滚动备份 debug.log.1 / .2）
 ```
 
 仓库与发布包**不包含**上述文件（见 `.gitignore`）。
@@ -22,8 +23,8 @@
 | 项目 | 处理 |
 | --- | --- |
 | 剪贴板正文 | 仅存本地 SQLite，**不**写入 `debug.log` |
-| OpenAI API Key | 仅存本地 `settings.json`；设置页用 PasswordBox；**禁止**写入日志 |
-| 网络 | 日常离线。默认会静默访问 GitHub Releases（可关）；用户自选的 Ollama/OpenAI OCR 也会联网。更新包仅从 `github.com` / `*.githubusercontent.com` 下载 |
+| 视觉接口 API Key | 仅存本地 `settings.json`；设置页用 PasswordBox；**禁止**写入日志 |
+| 网络 | 日常离线。默认会静默访问 GitHub Releases（可关）；用户自选的 OpenAI 兼容视觉 OCR、以及主动下载的 PP-OCRv6 模型包也会联网。更新包仅从 `github.com` / `*.githubusercontent.com` 下载；OCR 模型来自 RapidOCR 魔搭清单（魔搭 / 国内 CDN）并校验 SHA256 |
 
 ## 贡献时注意
 

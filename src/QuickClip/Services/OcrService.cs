@@ -9,18 +9,18 @@ using Windows.Storage.Streams;
 
 namespace QuickClip.Services;
 
-/// <summary>OCR 识别引擎：系统自带（离线）/ Ollama（本地大模型）/ OpenAI（云端 API）。</summary>
+/// <summary>OCR 识别引擎：系统自带 / 离线模型包 / 视觉接口（Ollama 与 OpenAI 兼容接口共用）。</summary>
 public enum OcrEngineType
 {
     System,
-    Ollama,
-    OpenAi
+    Local,
+    VisionApi
 }
 
 /// <summary>
 /// OCR 识别服务。默认使用 Windows 10/11 系统内置引擎（零模型、零联网）；
-/// 也可配置 Ollama 本地视觉模型或 OpenAI 云端视觉 API 提升识别率，
-/// AI 引擎失败时自动回退到系统 OCR，不影响使用。
+/// 也可配置 PP-OCRv6 离线包，或一个视觉 HTTP 接口（Ollama 原生 / OpenAI 兼容）。
+/// 非系统引擎失败时回退系统 OCR。
 /// </summary>
 public sealed class OcrService
 {
@@ -28,10 +28,12 @@ public sealed class OcrService
     private static readonly HttpClient Http = CreateHttpClient();
 
     private readonly SettingsService _settings;
+    private readonly OcrModelPackService _packs;
 
-    public OcrService(SettingsService settings)
+    public OcrService(SettingsService settings, OcrModelPackService packs)
     {
         _settings = settings;
+        _packs = packs;
     }
 
     private static HttpClient CreateHttpClient()
@@ -48,6 +50,9 @@ public sealed class OcrService
 
     /// <summary>当前是否使用系统内置引擎。</summary>
     public bool IsSystemEngine => _settings.OcrEngine == OcrEngineType.System;
+
+    /// <summary>当前是否使用下载的离线模型包。</summary>
+    public bool IsLocalEngine => _settings.OcrEngine == OcrEngineType.Local;
 
     /// <summary>最近一次识别是否发生降级（AI 引擎失败回退系统 OCR），供 UI 提示。</summary>
     public string? LastWarning { get; private set; }
@@ -72,55 +77,56 @@ public sealed class OcrService
 
         ClipboardImageNormalizer.RepairFileIfFullyTransparent(imagePath);
 
-        if (_settings.OcrEngine == OcrEngineType.Ollama)
+        if (_settings.OcrEngine == OcrEngineType.Local)
         {
-            if (string.IsNullOrWhiteSpace(_settings.OllamaModel))
+            try
             {
-                LastWarning = "未配置 Ollama 模型，已回退系统 OCR";
-            }
-            else
-            {
-                try
+                string? text = await _packs.RecognizeAsync(imagePath);
+                if (!string.IsNullOrWhiteSpace(text))
                 {
-                    string? text = await RecognizeWithOllamaAsync(imagePath);
-                    if (!string.IsNullOrWhiteSpace(text))
-                    {
-                        LastEngineTitle = DescribeEngine(OcrEngineType.Ollama);
-                        return text;
-                    }
+                    LastEngineTitle = DescribeEngine(OcrEngineType.Local);
+                    return text;
+                }
 
-                    LastWarning = "Ollama 未返回文字，已回退系统 OCR";
-                }
-                catch (Exception ex)
-                {
-                    DebugLog.LogException("Ollama OCR 失败，回退系统 OCR", ex);
-                    LastWarning = "Ollama 识别失败：" + SummarizeError(ex) + "，已回退系统 OCR";
-                }
+                LastWarning = "离线模型未返回文字，已回退系统 OCR";
+            }
+            catch (Exception ex)
+            {
+                DebugLog.LogException("离线模型 OCR 失败，回退系统 OCR", ex);
+                LastWarning = "离线模型识别失败：" + SummarizeError(ex) + "，已回退系统 OCR";
             }
         }
-        else if (_settings.OcrEngine == OcrEngineType.OpenAi)
+        else if (_settings.OcrEngine == OcrEngineType.VisionApi)
         {
-            if (string.IsNullOrWhiteSpace(_settings.OpenAiApiKey))
+            if (string.IsNullOrWhiteSpace(_settings.VisionApiModel))
             {
-                LastWarning = "未配置 OpenAI API Key，已回退系统 OCR";
+                LastWarning = "未配置视觉模型，已回退系统 OCR";
+                DebugLog.Log("视觉 OCR 跳过：未填写模型名");
+            }
+            else if (string.IsNullOrWhiteSpace(_settings.VisionApiUrl))
+            {
+                LastWarning = "未配置视觉接口地址，已回退系统 OCR";
+                DebugLog.Log("视觉 OCR 跳过：未填写接口地址");
             }
             else
             {
                 try
                 {
-                    string? text = await RecognizeWithOpenAiAsync(imagePath);
+                    string? text = await RecognizeWithVisionApiAsync(imagePath);
                     if (!string.IsNullOrWhiteSpace(text))
                     {
-                        LastEngineTitle = DescribeEngine(OcrEngineType.OpenAi);
+                        LastEngineTitle = DescribeEngine(OcrEngineType.VisionApi);
                         return text;
                     }
 
-                    LastWarning = "OpenAI 未返回文字，已回退系统 OCR";
+                    LastWarning = "视觉接口未返回文字，已回退系统 OCR";
+                    DebugLog.Log("视觉 OCR 空响应，回退系统 OCR endpoint=" +
+                                 DebugLog.DescribeUrl(_settings.VisionApiUrl));
                 }
                 catch (Exception ex)
                 {
-                    DebugLog.LogException("OpenAI OCR 失败，回退系统 OCR", ex);
-                    LastWarning = "OpenAI 识别失败：" + SummarizeError(ex) + "，已回退系统 OCR";
+                    DebugLog.LogException("视觉 OCR 失败，回退系统 OCR", ex);
+                    LastWarning = "视觉接口识别失败：" + SummarizeError(ex) + "，已回退系统 OCR";
                 }
             }
         }
@@ -152,25 +158,70 @@ public sealed class OcrService
             return "系统离线 OCR 无需测试接口。请在列表里对图片点 OCR。";
         }
 
-        if (_settings.OcrEngine == OcrEngineType.Ollama &&
-            string.IsNullOrWhiteSpace(_settings.OllamaModel))
+        if (_settings.OcrEngine == OcrEngineType.Local)
+        {
+            var resolved = _packs.ResolveCurrent();
+            if (resolved.Error != null)
+            {
+                return "失败：" + resolved.Error;
+            }
+
+            string localTemp = Path.Combine(Path.GetTempPath(), $"quickclip-ocr-probe-{Guid.NewGuid():N}.png");
+            try
+            {
+                WriteProbeImage(localTemp);
+                string? text = await _packs.RecognizeAsync(localTemp);
+                if (string.IsNullOrWhiteSpace(text))
+                {
+                    return $"已加载 {resolved.Title}，但未返回文字。";
+                }
+
+                string snippet = text.Replace('\r', ' ').Replace('\n', ' ').Trim();
+                if (snippet.Length > 80)
+                {
+                    snippet = snippet[..80] + "…";
+                }
+
+                return $"成功（{resolved.Title}）：{snippet}";
+            }
+            catch (Exception ex)
+            {
+                DebugLog.LogException("离线 OCR 测试失败", ex);
+                return "失败：" + SummarizeError(ex);
+            }
+            finally
+            {
+                try
+                {
+                    if (File.Exists(localTemp))
+                    {
+                        File.Delete(localTemp);
+                    }
+                }
+                catch
+                {
+                    // ignore
+                }
+            }
+        }
+
+        if (_settings.OcrEngine == OcrEngineType.VisionApi &&
+            string.IsNullOrWhiteSpace(_settings.VisionApiModel))
         {
             return "失败：未填写视觉模型。";
         }
 
-        if (_settings.OcrEngine == OcrEngineType.OpenAi &&
-            string.IsNullOrWhiteSpace(_settings.OpenAiApiKey))
+        if (_settings.OcrEngine == OcrEngineType.VisionApi &&
+            string.IsNullOrWhiteSpace(_settings.VisionApiUrl))
         {
-            return "失败：未填写 API Key。";
+            return "失败：未填写接口地址。";
         }
 
         string temp = Path.Combine(Path.GetTempPath(), $"quickclip-ocr-probe-{Guid.NewGuid():N}.png");
         try
         {
             WriteProbeImage(temp);
-            string? text = _settings.OcrEngine == OcrEngineType.Ollama
-                ? await RecognizeWithOllamaAsync(temp)
-                : await RecognizeWithOpenAiAsync(temp);
+            string? text = await RecognizeWithVisionApiAsync(temp);
 
             if (string.IsNullOrWhiteSpace(text))
             {
@@ -208,14 +259,21 @@ public sealed class OcrService
 
     public string DescribeEngine(OcrEngineType engine) => engine switch
     {
-        OcrEngineType.Ollama => "ollama-" + (_settings.OllamaModel.Trim().Length == 0
-            ? "未命名"
-            : _settings.OllamaModel.Trim()),
-        OcrEngineType.OpenAi => _settings.OpenAiModel.Trim().Length == 0
-            ? "OpenAI"
-            : _settings.OpenAiModel.Trim(),
+        OcrEngineType.Local => _packs.DescribeCurrentPack(),
+        OcrEngineType.VisionApi => DescribeVisionTitle(),
         _ => "离线识别"
     };
+
+    private string DescribeVisionTitle()
+    {
+        string model = _settings.VisionApiModel.Trim();
+        if (model.Length == 0)
+        {
+            return "视觉接口";
+        }
+
+        return IsOllamaNativeEndpoint(_settings.VisionApiUrl) ? "ollama-" + model : model;
+    }
 
     /// <summary>Windows 内置 OCR：识别图片文件中的文字（离线）。</summary>
     private async Task<string?> RecognizeWithSystemAsync(string imagePath)
@@ -276,20 +334,46 @@ public sealed class OcrService
         return string.IsNullOrWhiteSpace(result.Text) ? null : result.Text;
     }
 
-    /// <summary>Ollama 本地视觉模型：POST /api/generate，图片以 base64 传入。</summary>
-    private async Task<string?> RecognizeWithOllamaAsync(string imagePath)
+    /// <summary>
+    /// 按 URL 判断协议：含 /api/generate 或 /api/chat 走 Ollama 原生；其余按 OpenAI chat/completions。
+    /// Ollama 的 /v1/chat/completions 走兼容协议。
+    /// </summary>
+    internal static bool IsOllamaNativeEndpoint(string url)
+    {
+        string trimmed = url.Trim();
+        return trimmed.Contains("/api/generate", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.Contains("/api/chat", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task<string?> RecognizeWithVisionApiAsync(string imagePath)
+    {
+        string endpoint = NormalizeEndpoint(_settings.VisionApiUrl);
+        bool ollama = IsOllamaNativeEndpoint(endpoint);
+        DebugLog.Log(
+            $"视觉 OCR 请求 protocol={(ollama ? "ollama" : "openai")} model={_settings.VisionApiModel.Trim()} " +
+            $"endpoint={DebugLog.DescribeUrl(endpoint)} hasKey={!string.IsNullOrWhiteSpace(_settings.VisionApiKey)}");
+
+        return ollama
+            ? await RecognizeWithOllamaAsync(imagePath, endpoint)
+            : await RecognizeWithOpenAiAsync(imagePath, endpoint);
+    }
+
+    /// <summary>Ollama 原生：POST /api/generate，图片以 base64 传入。</summary>
+    private async Task<string?> RecognizeWithOllamaAsync(string imagePath, string endpoint)
     {
         var request = new
         {
-            model = _settings.OllamaModel,
+            model = _settings.VisionApiModel,
             prompt = "请识别图片中的全部文字，仅返回识别出的文字内容。",
             images = new[] { ToBase64(imagePath) },
             stream = false
         };
 
-        // 用户配置的是完整 URL，不再拼接 /api/generate
-        string endpoint = NormalizeEndpoint(_settings.OllamaBaseUrl);
-        var response = await Http.PostAsJsonAsync(endpoint, request);
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, endpoint);
+        AttachOptionalBearer(httpRequest);
+        httpRequest.Content = JsonContent.Create(request);
+
+        var response = await Http.SendAsync(httpRequest);
         await EnsureSuccessWithBodyAsync(response);
 
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
@@ -298,11 +382,11 @@ public sealed class OcrService
     }
 
     /// <summary>OpenAI 兼容视觉 API：对用户填写的完整 endpoint 原样 POST（须含 chat/completions 等路径）。</summary>
-    private async Task<string?> RecognizeWithOpenAiAsync(string imagePath)
+    private async Task<string?> RecognizeWithOpenAiAsync(string imagePath, string endpoint)
     {
         var request = new
         {
-            model = _settings.OpenAiModel,
+            model = _settings.VisionApiModel,
             max_tokens = 2048,
             messages = new[]
             {
@@ -318,10 +402,8 @@ public sealed class OcrService
             }
         };
 
-        string endpoint = NormalizeEndpoint(_settings.OpenAiBaseUrl);
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, endpoint);
-        httpRequest.Headers.Authorization =
-            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _settings.OpenAiApiKey);
+        AttachOptionalBearer(httpRequest);
         httpRequest.Content = JsonContent.Create(request);
 
         var response = await Http.SendAsync(httpRequest);
@@ -334,6 +416,17 @@ public sealed class OcrService
             .GetProperty("content")
             .GetString();
         return string.IsNullOrWhiteSpace(text) ? null : text;
+    }
+
+    private void AttachOptionalBearer(HttpRequestMessage request)
+    {
+        if (string.IsNullOrWhiteSpace(_settings.VisionApiKey))
+        {
+            return;
+        }
+
+        request.Headers.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _settings.VisionApiKey);
     }
 
     /// <summary>图片转 JPEG base64；全透明 Alpha 先铺白底，长边超过 1280 再缩小，减轻网关 502。</summary>
@@ -381,6 +474,9 @@ public sealed class OcrService
 
         body = CompactJsonError(body);
         string suffix = string.IsNullOrEmpty(body) ? string.Empty : " " + body;
+        DebugLog.Log(
+            $"视觉 OCR HTTP {(int)response.StatusCode} {response.ReasonPhrase} " +
+            $"url={DebugLog.DescribeUrl(response.RequestMessage?.RequestUri?.ToString())} body={suffix}");
         throw new HttpRequestException(
             $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}.{suffix}");
     }

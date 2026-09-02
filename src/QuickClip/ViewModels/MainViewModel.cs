@@ -123,6 +123,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public event Action<string, string>? OcrResultReady;
 
     private CancellationTokenSource? _itemAddedDebounce;
+    private readonly HashSet<long> _ocrBusyIds = new();
 
     public MainViewModel(AppServices services)
     {
@@ -175,6 +176,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             for (int i = 0; i < filtered.Count; i++)
             {
                 var vm = new ClipboardItemViewModel(filtered[i]) { Index = i + 1 };
+                if (_ocrBusyIds.Contains(filtered[i].Id))
+                {
+                    vm.IsOcrBusy = true;
+                }
+
                 Items.Add(vm);
                 if (selectedId is long id && filtered[i].Id == id)
                 {
@@ -307,42 +313,72 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         QrImageReady?.Invoke(bytes);
     }
 
-    public async Task OcrSelectedAsync()
+    public async Task OcrSelectedAsync(ClipboardItemViewModel? target = null)
     {
-        var selected = SelectedItem;
+        var selected = target ?? SelectedItem;
         if (selected == null || !selected.IsImage)
         {
             StatusText = "非图片不支持 OCR 识别";
             return;
         }
 
+        if (selected.IsOcrBusy || !_ocrBusyIds.Add(selected.Item.Id))
+        {
+            return;
+        }
+
         if (_services.Ocr.IsSystemEngine && !_services.Ocr.IsSupported)
         {
+            _ocrBusyIds.Remove(selected.Item.Id);
             StatusText = "系统 OCR 需要 Windows 10 及以上系统";
             return;
         }
 
+        selected.IsOcrBusy = true;
         StatusText = "正在 OCR 识别…";
-        var result = await _services.Ocr.RecognizeAsync(selected.Item.PreviewPath!);
-        string? warning = _services.Ocr.LastWarning;
-        string title = _services.Ocr.LastEngineTitle;
-
-        if (string.IsNullOrWhiteSpace(result))
+        try
         {
-            StatusText = !string.IsNullOrWhiteSpace(warning)
-                ? warning
-                : "未识别到文字";
-            // 失败也弹层，避免状态栏被截断、误以为没反应
-            OcrResultReady?.Invoke(title, warning ?? "未识别到文字");
-            return;
-        }
+            var result = await _services.Ocr.RecognizeAsync(selected.Item.PreviewPath!);
+            string? warning = _services.Ocr.LastWarning;
+            string title = _services.Ocr.LastEngineTitle;
 
-        // 有结果时仍展示降级提示（如 AI 失败后回退系统 OCR 成功）
-        StatusText = !string.IsNullOrWhiteSpace(warning)
-            ? $"{warning} · 已识别"
-            : "OCR 完成";
-        string body = string.IsNullOrWhiteSpace(warning) ? result : warning + Environment.NewLine + Environment.NewLine + result;
-        OcrResultReady?.Invoke(title, body);
+            if (string.IsNullOrWhiteSpace(result))
+            {
+                StatusText = !string.IsNullOrWhiteSpace(warning)
+                    ? warning
+                    : "未识别到文字";
+                // 失败也弹层，避免状态栏被截断、误以为没反应
+                OcrResultReady?.Invoke(title, warning ?? "未识别到文字");
+                return;
+            }
+
+            // 有结果时仍展示降级提示（如 AI 失败后回退系统 OCR 成功）
+            StatusText = !string.IsNullOrWhiteSpace(warning)
+                ? $"{warning} · 已识别"
+                : "OCR 完成";
+            string body = string.IsNullOrWhiteSpace(warning)
+                ? result
+                : warning + Environment.NewLine + Environment.NewLine + result;
+            OcrResultReady?.Invoke(title, body);
+        }
+        finally
+        {
+            _ocrBusyIds.Remove(selected.Item.Id);
+            void ClearBusy()
+            {
+                var live = Items.FirstOrDefault(item => item.Item.Id == selected.Item.Id) ?? selected;
+                live.IsOcrBusy = false;
+            }
+
+            if (System.Windows.Application.Current.Dispatcher.CheckAccess())
+            {
+                ClearBusy();
+            }
+            else
+            {
+                await System.Windows.Application.Current.Dispatcher.InvokeAsync(ClearBusy);
+            }
+        }
     }
 
     /// <summary>将选中条目（文本 / 链接 / 图片 / 文件）覆盖到系统剪贴板，不自动粘贴。

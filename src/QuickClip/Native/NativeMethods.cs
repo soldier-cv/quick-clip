@@ -262,6 +262,59 @@ internal static class NativeMethods
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool SetForegroundWindow(IntPtr hWnd);
 
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool BringWindowToTop(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+
+    public const int SW_SHOW = 5;
+
+    [DllImport("user32.dll", EntryPoint = "ShowWindow")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool ShowWindowApi(IntPtr hWnd, int nCmdShow);
+
+    /// <summary>
+    /// 热键唤起时进程往往没有“最近一次真实输入”，SetForegroundWindow 会被前台锁拒绝。
+    /// 先把前台线程输入队列附到本线程，再置前；失败则返回 false，由调用方临时 TOPMOST。
+    /// </summary>
+    public static bool ForceForeground(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        IntPtr foreground = GetForegroundWindow();
+        if (foreground == hwnd)
+        {
+            return true;
+        }
+
+        ShowWindowApi(hwnd, SW_SHOW);
+        BringWindowToTop(hwnd);
+
+        uint fgThread = foreground == IntPtr.Zero
+            ? 0
+            : GetWindowThreadProcessId(foreground, out _);
+        uint thisThread = GetCurrentThreadId();
+        bool attached = false;
+        if (fgThread != 0 && fgThread != thisThread)
+        {
+            attached = AttachThreadInput(fgThread, thisThread, true);
+        }
+
+        bool ok = SetForegroundWindow(hwnd);
+        if (attached)
+        {
+            AttachThreadInput(fgThread, thisThread, false);
+        }
+
+        return ok || GetForegroundWindow() == hwnd;
+    }
+
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint uFlags);

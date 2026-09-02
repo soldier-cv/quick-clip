@@ -44,20 +44,25 @@ public sealed class SettingsService
     /// <summary>OCR 识别引擎。</summary>
     public OcrEngineType OcrEngine { get; private set; } = OcrEngineType.System;
 
-    /// <summary>Ollama 完整请求 URL（须含路径，如 /api/generate；程序不再拼接）。</summary>
-    public string OllamaBaseUrl { get; private set; } = "http://localhost:11434/api/generate";
+    /// <summary>离线模型档（仅引擎为 Local 时生效）。默认高精度 Medium。</summary>
+    public OcrLocalPack OcrLocalPack { get; private set; } = OcrLocalPack.Medium;
 
-    /// <summary>Ollama 视觉模型名（需支持图片输入，如 llava / qwen2.5vl）。</summary>
-    public string OllamaModel { get; private set; } = "llava";
+    /// <summary>自定义离线模型目录（仅 OcrLocalPack=Custom）。</summary>
+    public string OcrCustomDir { get; private set; } = string.Empty;
 
-    /// <summary>OpenAI 兼容完整请求 URL（须含 /chat/completions 等路径；不要只填到 /v1）。</summary>
-    public string OpenAiBaseUrl { get; private set; } = "https://api.openai.com/v1/chat/completions";
+    /// <summary>视觉接口完整请求 URL（Ollama 原生或 OpenAI 兼容，须含路径）。</summary>
+    public string VisionApiUrl { get; private set; } = DefaultVisionApiUrl;
 
-    /// <summary>OpenAI 视觉模型名。</summary>
-    public string OpenAiModel { get; private set; } = "gpt-4o-mini";
+    /// <summary>视觉模型名（需支持看图）。</summary>
+    public string VisionApiModel { get; private set; } = DefaultVisionApiModel;
 
-    /// <summary>OpenAI API Key（仅保存在本地 settings.json）。</summary>
-    public string? OpenAiApiKey { get; private set; }
+    /// <summary>视觉接口 API Key（可选；仅保存在本地 settings.json，禁止写日志）。</summary>
+    public string? VisionApiKey { get; private set; }
+
+    private const string DefaultVisionApiUrl = "https://api.openai.com/v1/chat/completions";
+    private const string DefaultVisionApiModel = "gpt-4o-mini";
+    private const string DefaultOllamaUrl = "http://localhost:11434/api/generate";
+    private const string DefaultOllamaModel = "llava";
 
     /// <summary>历史最大条数（含置顶；超出淘汰最旧非置顶）。默认 233。</summary>
     public int MaxHistoryItems { get; private set; } = 233;
@@ -126,25 +131,22 @@ public sealed class SettingsService
             Theme = ParseTheme(dto.Theme);
             DatabasePath = string.IsNullOrWhiteSpace(dto.DatabasePath) ? null : dto.DatabasePath;
 
-            if (dto.OcrEngine is { } engineName && Enum.TryParse<OcrEngineType>(engineName, out var engine))
+            if (dto.OcrEngine is { } engineName)
             {
-                OcrEngine = engine;
+                OcrEngine = ParseOcrEngine(engineName);
             }
 
-            if (!string.IsNullOrWhiteSpace(dto.OllamaBaseUrl))
+            if (dto.OcrLocalPack is { } packName && Enum.TryParse<OcrLocalPack>(packName, out var pack))
             {
-                OllamaBaseUrl = MigrateOllamaEndpoint(dto.OllamaBaseUrl);
+                OcrLocalPack = pack;
             }
 
-            if (!string.IsNullOrWhiteSpace(dto.OllamaModel)) OllamaModel = dto.OllamaModel;
-
-            if (!string.IsNullOrWhiteSpace(dto.OpenAiBaseUrl))
+            if (!string.IsNullOrWhiteSpace(dto.OcrCustomDir))
             {
-                OpenAiBaseUrl = MigrateOpenAiEndpoint(dto.OpenAiBaseUrl);
+                OcrCustomDir = dto.OcrCustomDir.Trim();
             }
 
-            if (!string.IsNullOrWhiteSpace(dto.OpenAiModel)) OpenAiModel = dto.OpenAiModel;
-            OpenAiApiKey = dto.OpenAiApiKey;
+            ApplyVisionApiFromDto(dto, dto.OcrEngine);
 
             TextOnlyCapture = dto.TextOnlyCapture ?? false;
             AutoCheckUpdates = dto.AutoCheckUpdates ?? true;
@@ -155,7 +157,8 @@ public sealed class SettingsService
 
             DebugLog.Log(
                 $"已加载设置: 纯文本粘贴={PlainPasteHotkey}({(PlainPasteEnabled ? "启用" : "禁用")}), " +
-                $"自启动={AutoStart}, 主题={Theme}, 窗口置顶={WindowAlwaysOnTop}, OCR={OcrEngine}");
+                $"自启动={AutoStart}, 主题={Theme}, 窗口置顶={WindowAlwaysOnTop}, OCR={OcrEngine}/{OcrLocalPack} " +
+                $"vision={DebugLog.DescribeUrl(VisionApiUrl)}");
         }
         catch (Exception ex)
         {
@@ -233,7 +236,8 @@ public sealed class SettingsService
     public void SetLastUpdateCheckUtc(DateTime utc)
     {
         LastUpdateCheckUtc = DateTime.SpecifyKind(utc, DateTimeKind.Utc);
-        Save();
+        // 时间戳不应广播 Changed：后台线程保存会牵动热键重新注册
+        Save(raiseChanged: false);
     }
 
     private static DateTime? ParseUtc(string? text)
@@ -408,43 +412,162 @@ public sealed class SettingsService
         Save();
     }
 
-    /// <summary>更新 Ollama 配置并持久化。</summary>
-    public void SetOllamaConfig(string baseUrl, string model)
+    /// <summary>更新离线模型档并持久化。</summary>
+    public void SetOcrLocalPack(OcrLocalPack pack)
     {
-        string nextUrl = string.IsNullOrWhiteSpace(baseUrl)
-            ? OllamaBaseUrl
-            : MigrateOllamaEndpoint(baseUrl);
-        string nextModel = string.IsNullOrWhiteSpace(model) ? OllamaModel : model.Trim();
-        if (OllamaBaseUrl == nextUrl && OllamaModel == nextModel)
+        if (!Enum.IsDefined(pack))
+        {
+            pack = OcrLocalPack.Medium;
+        }
+
+        if (OcrLocalPack == pack)
         {
             return;
         }
 
-        OllamaBaseUrl = nextUrl;
-        OllamaModel = nextModel;
+        OcrLocalPack = pack;
+        Save();
+    }
+
+    /// <summary>更新自定义离线模型目录并持久化。</summary>
+    public void SetOcrCustomDir(string? directory)
+    {
+        string next = string.IsNullOrWhiteSpace(directory) ? string.Empty : directory.Trim();
+        if (OcrCustomDir == next)
+        {
+            return;
+        }
+
+        OcrCustomDir = next;
         Save();
     }
 
     /// <summary>
-    /// 更新 OpenAI 兼容接口配置并持久化（apiKey 为空表示清空）。
+    /// 更新视觉接口配置并持久化（apiKey 为空表示清空）。
     /// 地址为完整 endpoint；API Key 仅存本地 settings.json，禁止写入日志。
     /// </summary>
-    public void SetOpenAiConfig(string baseUrl, string model, string? apiKey)
+    public void SetVisionApiConfig(string baseUrl, string model, string? apiKey)
     {
         string nextUrl = string.IsNullOrWhiteSpace(baseUrl)
-            ? OpenAiBaseUrl
-            : MigrateOpenAiEndpoint(baseUrl);
-        string nextModel = string.IsNullOrWhiteSpace(model) ? OpenAiModel : model.Trim();
+            ? VisionApiUrl
+            : MigrateVisionEndpoint(baseUrl);
+        string nextModel = string.IsNullOrWhiteSpace(model) ? VisionApiModel : model.Trim();
         string? nextKey = string.IsNullOrWhiteSpace(apiKey) ? null : apiKey.Trim();
-        if (OpenAiBaseUrl == nextUrl && OpenAiModel == nextModel && OpenAiApiKey == nextKey)
+        if (VisionApiUrl == nextUrl && VisionApiModel == nextModel && VisionApiKey == nextKey)
         {
             return;
         }
 
-        OpenAiBaseUrl = nextUrl;
-        OpenAiModel = nextModel;
-        OpenAiApiKey = nextKey;
+        VisionApiUrl = nextUrl;
+        VisionApiModel = nextModel;
+        VisionApiKey = nextKey;
         Save();
+    }
+
+    /// <summary>旧版 Ollama / OpenAI 枚举合并为 VisionApi。</summary>
+    internal static OcrEngineType ParseOcrEngine(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return OcrEngineType.System;
+        }
+
+        if (name.Equals("Ollama", StringComparison.OrdinalIgnoreCase) ||
+            name.Equals("OpenAi", StringComparison.OrdinalIgnoreCase) ||
+            name.Equals("VisionApi", StringComparison.OrdinalIgnoreCase))
+        {
+            return OcrEngineType.VisionApi;
+        }
+
+        return Enum.TryParse(name, ignoreCase: true, out OcrEngineType engine)
+            ? engine
+            : OcrEngineType.System;
+    }
+
+    /// <summary>
+    /// 新字段优先；否则从旧 Ollama/OpenAI 配置迁移。
+    /// 用户同时填过两者时，优先已改过的 OpenAI（含 Key），再回退 Ollama。
+    /// </summary>
+    private void ApplyVisionApiFromDto(SettingsData dto, string? originalEngine)
+    {
+        if (!string.IsNullOrWhiteSpace(dto.VisionApiUrl) ||
+            !string.IsNullOrWhiteSpace(dto.VisionApiModel) ||
+            dto.VisionApiKey != null)
+        {
+            if (!string.IsNullOrWhiteSpace(dto.VisionApiUrl))
+            {
+                VisionApiUrl = MigrateVisionEndpoint(dto.VisionApiUrl);
+            }
+
+            if (!string.IsNullOrWhiteSpace(dto.VisionApiModel))
+            {
+                VisionApiModel = dto.VisionApiModel.Trim();
+            }
+
+            VisionApiKey = string.IsNullOrWhiteSpace(dto.VisionApiKey) ? null : dto.VisionApiKey.Trim();
+            return;
+        }
+
+        bool legacyOllama = originalEngine != null &&
+                            originalEngine.Equals("Ollama", StringComparison.OrdinalIgnoreCase);
+        bool openAiCustom =
+            !string.IsNullOrWhiteSpace(dto.OpenAiApiKey) ||
+            (!string.IsNullOrWhiteSpace(dto.OpenAiBaseUrl) &&
+             !dto.OpenAiBaseUrl.Trim().TrimEnd('/').Equals(DefaultVisionApiUrl, StringComparison.OrdinalIgnoreCase)) ||
+            (!string.IsNullOrWhiteSpace(dto.OpenAiModel) &&
+             !dto.OpenAiModel.Trim().Equals(DefaultVisionApiModel, StringComparison.OrdinalIgnoreCase));
+
+        if (legacyOllama && !openAiCustom)
+        {
+            if (!string.IsNullOrWhiteSpace(dto.OllamaBaseUrl))
+            {
+                VisionApiUrl = MigrateOllamaEndpoint(dto.OllamaBaseUrl);
+            }
+            else
+            {
+                VisionApiUrl = DefaultOllamaUrl;
+            }
+
+            VisionApiModel = string.IsNullOrWhiteSpace(dto.OllamaModel)
+                ? DefaultOllamaModel
+                : dto.OllamaModel.Trim();
+            VisionApiKey = null;
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(dto.OpenAiBaseUrl) ||
+            !string.IsNullOrWhiteSpace(dto.OpenAiModel) ||
+            !string.IsNullOrWhiteSpace(dto.OpenAiApiKey))
+        {
+            if (!string.IsNullOrWhiteSpace(dto.OpenAiBaseUrl))
+            {
+                VisionApiUrl = MigrateOpenAiEndpoint(dto.OpenAiBaseUrl);
+            }
+
+            if (!string.IsNullOrWhiteSpace(dto.OpenAiModel))
+            {
+                VisionApiModel = dto.OpenAiModel.Trim();
+            }
+
+            VisionApiKey = string.IsNullOrWhiteSpace(dto.OpenAiApiKey) ? null : dto.OpenAiApiKey.Trim();
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(dto.OllamaBaseUrl) || !string.IsNullOrWhiteSpace(dto.OllamaModel))
+        {
+            if (!string.IsNullOrWhiteSpace(dto.OllamaBaseUrl))
+            {
+                VisionApiUrl = MigrateOllamaEndpoint(dto.OllamaBaseUrl);
+            }
+            else
+            {
+                VisionApiUrl = DefaultOllamaUrl;
+            }
+
+            VisionApiModel = string.IsNullOrWhiteSpace(dto.OllamaModel)
+                ? DefaultOllamaModel
+                : dto.OllamaModel.Trim();
+        }
     }
 
     /// <summary>
@@ -482,8 +605,28 @@ public sealed class SettingsService
         return trimmed + "/api/generate";
     }
 
-    /// <summary>写入磁盘并广播变更。</summary>
-    public void Save()
+    /// <summary>按地址形态补全路径：Ollama 根地址 → /api/generate，以 /v1 结尾 → /chat/completions。</summary>
+    internal static string MigrateVisionEndpoint(string url)
+    {
+        string trimmed = url.Trim().TrimEnd('/');
+        if (trimmed.Contains("/api/generate", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.Contains("/api/chat", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.Contains("/chat/completions", StringComparison.OrdinalIgnoreCase))
+        {
+            return trimmed;
+        }
+
+        if (trimmed.Contains(":11434") ||
+            trimmed.Contains("ollama", StringComparison.OrdinalIgnoreCase))
+        {
+            return MigrateOllamaEndpoint(trimmed);
+        }
+
+        return MigrateOpenAiEndpoint(trimmed);
+    }
+
+    /// <summary>写入磁盘；raiseChanged 为 false 时只落盘（用于更新检查时间戳）。</summary>
+    public void Save(bool raiseChanged = true)
     {
         try
         {
@@ -496,11 +639,11 @@ public sealed class SettingsService
                 Theme = Theme.ToString(),
                 // 不再写入 DatabasePath：设置页已移除自定义路径；旧文件中的字段读入后也不会再回写
                 OcrEngine = OcrEngine.ToString(),
-                OllamaBaseUrl = OllamaBaseUrl,
-                OllamaModel = OllamaModel,
-                OpenAiBaseUrl = OpenAiBaseUrl,
-                OpenAiModel = OpenAiModel,
-                OpenAiApiKey = OpenAiApiKey,
+                OcrLocalPack = OcrLocalPack.ToString(),
+                OcrCustomDir = string.IsNullOrWhiteSpace(OcrCustomDir) ? null : OcrCustomDir,
+                VisionApiUrl = VisionApiUrl,
+                VisionApiModel = VisionApiModel,
+                VisionApiKey = VisionApiKey,
                 MaxHistoryItems = MaxHistoryItems,
                 TextOnlyCapture = TextOnlyCapture,
                 AutoCheckUpdates = AutoCheckUpdates,
@@ -525,7 +668,10 @@ public sealed class SettingsService
             DebugLog.LogException("保存设置失败", ex);
         }
 
-        Changed?.Invoke();
+        if (raiseChanged)
+        {
+            Changed?.Invoke();
+        }
     }
 }
 
@@ -539,6 +685,12 @@ public sealed class SettingsData
     public string? Theme { get; set; }
     public string? DatabasePath { get; set; }
     public string? OcrEngine { get; set; }
+    public string? OcrLocalPack { get; set; }
+    public string? OcrCustomDir { get; set; }
+    public string? VisionApiUrl { get; set; }
+    public string? VisionApiModel { get; set; }
+    public string? VisionApiKey { get; set; }
+    /// <summary>旧字段，仅读取以迁移到 VisionApi*。</summary>
     public string? OllamaBaseUrl { get; set; }
     public string? OllamaModel { get; set; }
     public string? OpenAiBaseUrl { get; set; }

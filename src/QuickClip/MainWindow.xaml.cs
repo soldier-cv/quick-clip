@@ -19,6 +19,9 @@ public partial class MainWindow : FluentWindow
     private readonly MainViewModel _viewModel;
     private SettingsWindow? _settingsWindow;
     private bool _exiting;
+    /// <summary>热键唤起后短时忽略 Deactivated，避免 Activate 被前台锁拒绝时立刻 Hide。</summary>
+    private DateTime _suppressDeactivateUntil = DateTime.MinValue;
+    private DispatcherTimer? _hotkeyTopmostTimer;
 
     /// <summary>视图模型（设置窗口切换数据库后需要刷新列表）。</summary>
     public MainViewModel ViewModel => _viewModel;
@@ -222,8 +225,26 @@ public partial class MainWindow : FluentWindow
         _exiting = true;
     }
 
+    private void OnWindowActivated(object? sender, EventArgs e)
+    {
+        // 不要清掉热键唤起宽限：Activate 成功后 WPF 仍可能立刻再打 Deactivated。
+        var handle = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+        if (handle != IntPtr.Zero && DateTime.UtcNow >= _suppressDeactivateUntil)
+        {
+            ApplyTopmostState(handle);
+        }
+    }
+
     private void OnWindowDeactivated(object? sender, EventArgs e)
     {
+        // 热键唤起时前台锁常让 Activate 失败，WPF 会立刻打 Deactivated。
+        // 宽限内不藏，否则用户只看到托盘、点图标之后 Win+V 才可用。
+        if (DateTime.UtcNow < _suppressDeactivateUntil)
+        {
+            DebugLog.Log("忽略失焦隐藏（热键唤起宽限）");
+            return;
+        }
+
         // 失焦即隐：点到其他应用时隐藏（仿系统 Win+V）。
         // 打开设置窗时主窗也会失焦，不能当「点到外部」——否则列表会被误收起。
         if (IsVisible && !_exiting && !_services.Settings.WindowAlwaysOnTop &&
@@ -231,8 +252,8 @@ public partial class MainWindow : FluentWindow
             OcrOverlay.Visibility == Visibility.Collapsed &&
             !IsSettingsWindowOpen())
         {
-            PreviewPopup.IsOpen = false;
-            Hide();
+            DebugLog.Log("失焦隐藏面板");
+            HideWindow();
         }
     }
 
@@ -270,6 +291,9 @@ public partial class MainWindow : FluentWindow
         // 记录唤起前的目标窗口，用于粘贴回填
         _services.Paste.RememberTargetWindow();
         PositionWindow();
+        // 钩子/RegisterHotKey 唤起不算“进程收到用户输入”，前台锁会让 Activate 失败并立刻 Deactivated。
+        // Activated 里曾经清掉宽限，导致约 1 秒后失焦把刚唤起的面板藏回托盘。
+        _suppressDeactivateUntil = DateTime.UtcNow.AddMilliseconds(1500);
         Show();
         Activate();
 
@@ -286,24 +310,42 @@ public partial class MainWindow : FluentWindow
         var handle = new System.Windows.Interop.WindowInteropHelper(this).Handle;
         if (handle != IntPtr.Zero)
         {
-            // 先按“窗口置顶”设置同步 Win32 z-order，修复隐藏/显示后置顶被 WPF Topmost 短路丢失的问题
-            ApplyTopmostState(handle);
-
-            // 兜底置前：热键唤起时系统前台锁可能阻止 Activate（面板“呼不出”或落到其他窗口后面）。
-            // 仅在前台仍是其他窗口时才临时置顶强制带到最前；避免每次唤起都做 TOPMOST→NOTOPMOST
-            // 往返（在远程/虚拟显示环境下会引发整屏闪烁）。
-            if (QuickClip.Native.NativeMethods.GetForegroundWindow() != handle)
-            {
-                const uint flags = QuickClip.Native.NativeMethods.SWP_NOMOVE |
-                                   QuickClip.Native.NativeMethods.SWP_NOSIZE |
-                                   QuickClip.Native.NativeMethods.SWP_SHOWWINDOW;
-                QuickClip.Native.NativeMethods.SetWindowPos(handle, QuickClip.Native.NativeMethods.HWND_TOPMOST, 0, 0, 0, 0, flags);
-                QuickClip.Native.NativeMethods.SetForegroundWindow(handle);
-                ApplyTopmostState(handle);
-            }
+            const uint flags = QuickClip.Native.NativeMethods.SWP_NOMOVE |
+                               QuickClip.Native.NativeMethods.SWP_NOSIZE |
+                               QuickClip.Native.NativeMethods.SWP_SHOWWINDOW;
+            QuickClip.Native.NativeMethods.SetWindowPos(
+                handle, QuickClip.Native.NativeMethods.HWND_TOPMOST, 0, 0, 0, 0, flags);
+            bool foreground = QuickClip.Native.NativeMethods.ForceForeground(handle);
+            DebugLog.Log($"热键唤起 ForceForeground={foreground}，宽限内保持 TOPMOST");
+            ScheduleHotkeyTopmostDemote();
         }
 
         DebugLog.Log("窗口已显示");
+    }
+
+    /// <summary>宽限结束后按「窗口置顶」设置恢复 z-order，避免一直抢在所有窗口之上。</summary>
+    private void ScheduleHotkeyTopmostDemote()
+    {
+        _hotkeyTopmostTimer ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1500) };
+        _hotkeyTopmostTimer.Tick -= OnHotkeyTopmostDemote;
+        _hotkeyTopmostTimer.Tick += OnHotkeyTopmostDemote;
+        _hotkeyTopmostTimer.Stop();
+        _hotkeyTopmostTimer.Start();
+    }
+
+    private void OnHotkeyTopmostDemote(object? sender, EventArgs e)
+    {
+        _hotkeyTopmostTimer?.Stop();
+        if (!IsVisible)
+        {
+            return;
+        }
+
+        var handle = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+        if (handle != IntPtr.Zero)
+        {
+            ApplyTopmostState(handle);
+        }
     }
 
     /// <summary>按“窗口置顶”设置强制同步 Win32 z-order，避免 WPF Topmost 属性值未变化时不再重新下发。</summary>
@@ -321,6 +363,7 @@ public partial class MainWindow : FluentWindow
 
     private void HideWindow()
     {
+        _hotkeyTopmostTimer?.Stop();
         PreviewPopup.IsOpen = false;
         Hide();
         DebugLog.Log("窗口已隐藏");
@@ -1095,11 +1138,14 @@ public partial class MainWindow : FluentWindow
 
     private void OnOcrClicked(object sender, RoutedEventArgs e)
     {
-        if (GetCardViewModel(sender) is { } vm)
+        e.Handled = true;
+        if (GetCardViewModel(sender) is not { } vm || vm.IsOcrBusy)
         {
-            _viewModel.SelectedItem = vm;
-            _ = _viewModel.OcrSelectedAsync();
+            return;
         }
+
+        _viewModel.SelectedItem = vm;
+        _ = _viewModel.OcrSelectedAsync(vm);
     }
 
     /// <summary>保存选中图片到本地（另存为对话框 + 复制预览 PNG）。</summary>

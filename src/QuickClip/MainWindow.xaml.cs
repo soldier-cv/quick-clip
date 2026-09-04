@@ -1136,6 +1136,15 @@ public partial class MainWindow : FluentWindow
         }
     }
 
+    private void OnCopyFilePathClicked(object sender, RoutedEventArgs e)
+    {
+        if (GetCardViewModel(sender) is { } vm)
+        {
+            _viewModel.SelectedItem = vm;
+            _ = _viewModel.CopyFilePathAsync(vm);
+        }
+    }
+
     private void OnOcrClicked(object sender, RoutedEventArgs e)
     {
         e.Handled = true;

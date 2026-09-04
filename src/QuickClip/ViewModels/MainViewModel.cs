@@ -381,17 +381,20 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
-    /// <summary>将选中条目（文本 / 链接 / 图片 / 文件）覆盖到系统剪贴板，不自动粘贴。
+    /// <summary>复制当前选中项内容到系统剪贴板。
     /// 回写剪贴板会触发监听，须抑制捕获，否则会在列表第一行再插一条相同记录。</summary>
-    public async Task CopySelectedToClipboard()
+    public Task CopySelectedToClipboard() =>
+        CopyItemToClipboardAsync(SelectedItem);
+
+    /// <summary>将指定条目内容复制到系统剪贴板。</summary>
+    public async Task CopyItemToClipboardAsync(ClipboardItemViewModel? target)
     {
-        var selected = SelectedItem;
-        if (selected == null)
+        if (target == null)
         {
             return;
         }
 
-        var item = selected.Item;
+        var item = target.Item;
         // 先抑制再写：双击时 MouseUp 复制 + DoubleClick 粘贴会连续写两次剪贴板
         _services.Pipeline.SuppressCapture(BuildDedupKeyHint(item));
         try
@@ -419,6 +422,52 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
 
         StatusText = "已复制";
+    }
+
+    /// <summary>将文件列表中的纯文件名以换行形式复制到系统剪贴板。</summary>
+    public async Task CopyFileNamesAsync(ClipboardItemViewModel? target)
+    {
+        if (target == null)
+        {
+            return;
+        }
+
+        var item = target.Item;
+        if (item.ContentType != ClipboardContentType.File || string.IsNullOrEmpty(item.TextContent))
+        {
+            return;
+        }
+
+        var paths = item.TextContent.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries);
+        var names = paths.Select(p =>
+        {
+            string? n = Path.GetFileName(p);
+            return string.IsNullOrEmpty(n) ? p : n;
+        });
+        string joinedNames = string.Join(Environment.NewLine, names);
+
+        _services.Pipeline.SuppressCapture("text:" + joinedNames);
+        await _services.Paste.CopyTextAsync(joinedNames, plainOnly: true);
+        StatusText = "已复制文件名";
+    }
+
+    /// <summary>将文件项的完整绝对路径以纯文本形式复制到系统剪贴板。</summary>
+    public async Task CopyFilePathAsync(ClipboardItemViewModel? target)
+    {
+        if (target == null)
+        {
+            return;
+        }
+
+        var item = target.Item;
+        if (item.ContentType != ClipboardContentType.File || string.IsNullOrEmpty(item.TextContent))
+        {
+            return;
+        }
+
+        _services.Pipeline.SuppressCapture("text:" + item.TextContent);
+        await _services.Paste.CopyTextAsync(item.TextContent, plainOnly: true);
+        StatusText = "已复制全路径";
     }
 
     /// <summary>将已识别二维码的文本覆盖到系统剪贴板（纯文本），不新增历史。</summary>

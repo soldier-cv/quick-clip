@@ -42,13 +42,31 @@ public sealed class PasteService
     }
 
     /// <summary>
-    /// 将系统剪贴板中的文本以纯文本形式粘贴到前台窗口（全局 Ctrl+Shift+V）。
-    /// 剪贴板无文本时不做任何操作。
+    /// 将系统剪贴板中的内容以纯文本形式粘贴到前台窗口（全局 Ctrl+Shift+V）。
+    /// 若剪贴板中为复制的文件列表，则提取各文件名（换行分隔）作为纯文本粘贴；
+    /// 若为普通文本/富文本，则去除格式以纯文本粘贴。
+    /// 剪贴板无对应内容时不做任何操作。
     /// </summary>
     public void PastePlainTextFromClipboard()
     {
         _ = RunPasteAsync(() =>
         {
+            string[]? files = NativeClipboard.TryGetFiles();
+            if (files is { Length: > 0 })
+            {
+                var names = files.Select(f =>
+                {
+                    string? name = Path.GetFileName(f);
+                    return string.IsNullOrEmpty(name) ? f : name;
+                });
+                string fileNamesText = string.Join(Environment.NewLine, names);
+                if (!string.IsNullOrEmpty(fileNamesText))
+                {
+                    CopyTextCore(fileNamesText, plainOnly: true);
+                    return;
+                }
+            }
+
             string? text = NativeClipboard.TryGetText();
             if (!string.IsNullOrEmpty(text))
             {

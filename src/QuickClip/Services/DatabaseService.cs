@@ -48,8 +48,8 @@ public sealed class DatabaseService : IDisposable
             using var cmd = _connection.CreateCommand();
             cmd.CommandText = """
                 INSERT INTO clipboard_items
-                    (content_type, text_content, preview_path, qr_content, char_count, is_pinned)
-                VALUES ($type, $text, $preview, $qr, $charCount, $pinned);
+                    (content_type, text_content, preview_path, qr_content, char_count, is_pinned, created_at)
+                VALUES ($type, $text, $preview, $qr, $charCount, $pinned, $createdAt);
                 SELECT last_insert_rowid();
                 """;
             cmd.Parameters.AddWithValue("$type", item.ContentType.ToString());
@@ -58,6 +58,7 @@ public sealed class DatabaseService : IDisposable
             cmd.Parameters.AddWithValue("$qr", (object?)item.QrContent ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$charCount", item.CharCount);
             cmd.Parameters.AddWithValue("$pinned", item.IsPinned ? 1 : 0);
+            cmd.Parameters.AddWithValue("$createdAt", item.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss.fff"));
             item.Id = (long)(await cmd.ExecuteScalarAsync())!;
             return item.Id;
         }
@@ -135,8 +136,27 @@ public sealed class DatabaseService : IDisposable
         try
         {
             using var cmd = _connection.CreateCommand();
-            cmd.CommandText = "UPDATE clipboard_items SET is_pinned = $pinned WHERE id = $id;";
-            cmd.Parameters.AddWithValue("$pinned", pinned ? 1 : 0);
+            if (pinned)
+            {
+                cmd.CommandText = "UPDATE clipboard_items SET is_pinned = 1 WHERE id = $id;";
+            }
+            else
+            {
+                // 取消置顶时，排在除了置顶项的首位（作为最新的非置顶项）：
+                // 时间更新为当前时间，且确保严格大于当前库中除自身外所有非置顶项的时间
+                cmd.CommandText = """
+                    UPDATE clipboard_items
+                    SET is_pinned = 0,
+                        created_at = CASE
+                            WHEN (SELECT MAX(created_at) FROM clipboard_items WHERE is_pinned = 0 AND id != $id) >= $now
+                            THEN (SELECT strftime('%Y-%m-%d %H:%M:%f', MAX(created_at), '+0.001 seconds') FROM clipboard_items WHERE is_pinned = 0 AND id != $id)
+                            ELSE $now
+                        END
+                    WHERE id = $id;
+                    """;
+                cmd.Parameters.AddWithValue("$now", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"));
+            }
+
             cmd.Parameters.AddWithValue("$id", id);
             await cmd.ExecuteNonQueryAsync();
         }

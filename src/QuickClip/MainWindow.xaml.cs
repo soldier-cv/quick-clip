@@ -1199,12 +1199,16 @@ public partial class MainWindow : FluentWindow
         }
     }
 
-    private void OnPinClicked(object sender, RoutedEventArgs e)
+    private async void OnPinClicked(object sender, RoutedEventArgs e)
     {
         if (GetCardViewModel(sender) is { } vm)
         {
             _viewModel.SelectedItem = vm;
-            _ = _viewModel.TogglePinSelectedAsync();
+            await _viewModel.TogglePinSelectedAsync(vm);
+            if (_viewModel.SelectedItem != null)
+            {
+                ItemList.ScrollIntoView(_viewModel.SelectedItem);
+            }
         }
     }
 

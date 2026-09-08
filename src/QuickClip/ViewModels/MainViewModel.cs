@@ -273,9 +273,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         await RefreshAsync();
     }
 
-    public async Task TogglePinSelectedAsync()
+    public async Task TogglePinSelectedAsync(ClipboardItemViewModel? target = null)
     {
-        var selected = SelectedItem;
+        var selected = target ?? SelectedItem;
         if (selected == null)
         {
             return;
@@ -285,6 +285,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         await _services.Database.TogglePinAsync(selected.Item.Id, pinned);
         selected.Item.IsPinned = pinned;
         StatusText = pinned ? "已置顶" : "已取消置顶";
+        SelectedItem = selected;
         await RefreshAsync();
     }
 

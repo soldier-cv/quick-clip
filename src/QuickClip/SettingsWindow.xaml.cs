@@ -196,12 +196,34 @@ public partial class SettingsWindow : Window
     }
 
     /// <summary>
-    /// 刷新 Windows 剪贴板历史接管状态与 UI 指示徽章。
+    /// 刷新 Windows 剪贴板接管状态与 UI 指示徽章。
     /// </summary>
     private void RefreshSysClipboardStatus()
     {
+        bool takeOver = _services.Settings.TakeOverSystemClipboard;
         bool sysEnabled = SystemClipboardService.IsClipboardHistoryEnabled();
         bool nativeRegistered = _services.Hotkey.IsWinVRegistered;
+
+        SysClipboardToggleButton.Content = takeOver ? "关闭接管" : "启用接管";
+
+        if (!takeOver)
+        {
+            SysClipboardStatusText.Text = sysEnabled ? "未接管（系统历史开启）" : "未接管（系统历史关闭）";
+            if (FindResource("Theme.TextSecondary") is MediaBrush idleBrush)
+            {
+                SysClipboardStatusText.Foreground = idleBrush;
+            }
+
+            if (FindResource("Theme.Card") is MediaBrush idleCardBrush)
+            {
+                SysClipboardStatusBadge.Background = idleCardBrush;
+            }
+
+            SysClipboardHintText.Text =
+                "已关闭接管，Windows 自带剪贴板历史与 Win+V 按接管前状态还原。" +
+                "QuickClip 仍由键盘钩子接管 Win+V，但可能与系统剪贴板历史同时响应。";
+            return;
+        }
 
         if (sysEnabled)
         {
@@ -232,24 +254,26 @@ public partial class SettingsWindow : Window
     }
 
     /// <summary>
-    /// 一键切换 Windows 剪贴板历史开启/禁用状态并重新应用热键。
+    /// 切换「接管系统剪贴板」：开启时快照并接管，关闭时按接管前快照精确还原系统状态。
     /// </summary>
     private void OnToggleSysClipboardClicked(object sender, RoutedEventArgs e)
     {
-        bool current = SystemClipboardService.IsClipboardHistoryEnabled();
-        bool target = !current;
-        bool success = SystemClipboardService.SetClipboardHistoryEnabled(target);
-        if (success)
+        bool target = !_services.Settings.TakeOverSystemClipboard;
+        try
         {
-            // 重新尝试原生注册 Win+V
-            _services.Hotkey.RefreshHotkeys();
-            RefreshSysClipboardStatus();
-            SetHotkeyHint(target ? "已恢复 Windows 自带剪贴板历史" : "已禁用 Windows 自带剪贴板历史，Win+V 已独占释放");
+            _services.SetSystemClipboardTakeOver(target);
         }
-        else
+        catch (Exception ex)
         {
-            SetHotkeyHint("修改 Windows 剪贴板配置失败，请检查注册表写入权限");
+            DebugLog.LogException("切换系统剪贴板接管失败", ex);
+            SetHotkeyHint("修改系统剪贴板配置失败，请检查注册表写入权限");
+            return;
         }
+
+        RefreshSysClipboardStatus();
+        SetHotkeyHint(target
+            ? "已启用接管：Windows 剪贴板历史已关闭，Win+V 由 QuickClip 独占"
+            : "已关闭接管：Windows 剪贴板历史与 Win+V 已按接管前状态还原");
     }
 
     private void OnSettingsChanged()
@@ -566,13 +590,36 @@ public partial class SettingsWindow : Window
         _services.Settings.SetTextOnlyCapture(TextOnlyCheck.IsChecked == true);
     }
 
-    private void OnMaxHistoryLostFocus(object sender, RoutedEventArgs e)
+    private async void OnMaxHistoryLostFocus(object sender, RoutedEventArgs e)
     {
         if (_suppressUiEvents) return;
         if (!int.TryParse(MaxHistoryBox.Text.Trim(), out int n))
         {
             MaxHistoryBox.Text = _services.Settings.MaxHistoryItems.ToString();
             return;
+        }
+
+        // 调小上限会立即永久删除最旧的非置顶记录：先确认，避免输入框失焦/误触就删库
+        int clamped = SettingsService.ClampMaxHistory(n);
+        if (clamped < _services.Settings.MaxHistoryItems)
+        {
+            int count = await _services.Database.CountAsync();
+            if (clamped < count)
+            {
+                var confirm = System.Windows.MessageBox.Show(
+                    this,
+                    $"当前已有 {count} 条历史。\n新上限 {clamped} 会立即永久删除最旧的 {count - clamped} 条非置顶记录（置顶保留）。\n\n确定继续？",
+                    "调整历史条数",
+                    System.Windows.MessageBoxButton.YesNo,
+                    System.Windows.MessageBoxImage.Warning,
+                    System.Windows.MessageBoxResult.No);
+
+                if (confirm != System.Windows.MessageBoxResult.Yes)
+                {
+                    MaxHistoryBox.Text = _services.Settings.MaxHistoryItems.ToString();
+                    return;
+                }
+            }
         }
 
         _services.Settings.SetMaxHistoryItems(n);

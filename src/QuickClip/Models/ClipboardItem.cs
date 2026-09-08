@@ -18,6 +18,12 @@ public sealed class ClipboardItem
 
     public string? TextContent { get; set; }
 
+    /// <summary>剪贴板中的 CF_HTML 原文（含 Version/StartHTML 头），用于回写保留富文本格式。</summary>
+    public string? HtmlContent { get; set; }
+
+    /// <summary>剪贴板中的 CF_RTF 原文，用于回写保留富文本格式。</summary>
+    public string? RtfContent { get; set; }
+
     /// <summary>图片预览文件路径（仅图片类型）。</summary>
     public string? PreviewPath { get; set; }
 

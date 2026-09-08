@@ -40,6 +40,13 @@ public static class NativeClipboard
 
     private static uint? _pngFormatId;
 
+    private static uint? _htmlFormatId;
+
+    private static uint? _rtfFormatId;
+
+    /// <summary>当前剪贴板序列号（每次内容变更递增，用于识别自身写入）。</summary>
+    public static uint CurrentSequence => NativeMethods.GetClipboardSequenceNumber();
+
     /// <summary>CF_TEXT 使用系统 ANSI 代码页编码，避免 CJK 系统下乱码。</summary>
     private static Encoding CreateAnsiEncoding()
     {
@@ -164,6 +171,56 @@ public static class NativeClipboard
         }
     }
 
+    /// <summary>剪贴板中的文本及其富文本格式（一次打开剪贴板读全，避免多次 Open/Close 竞态）。</summary>
+    public readonly record struct ClipboardTextData(string? Text, string? Html, string? Rtf);
+
+    /// <summary>富文本格式的大小上限（超过则只保留纯文本，避免数据库与内存被大段 HTML 撑爆）。</summary>
+    private const long MaxRichTextBytes = 1024 * 1024;
+
+    /// <summary>一次性读取纯文本 + HTML Format + Rich Text Format。</summary>
+    public static ClipboardTextData TryGetTextFormats()
+    {
+        if (!TryOpen(ReadOpenAttempts))
+        {
+            return default;
+        }
+
+        try
+        {
+            string? text = null;
+            if (NativeMethods.IsClipboardFormatAvailable(NativeMethods.CF_UNICODETEXT))
+            {
+                text = ReadUnicodeText(NativeMethods.GetClipboardData(NativeMethods.CF_UNICODETEXT));
+            }
+
+            if (string.IsNullOrEmpty(text) &&
+                NativeMethods.IsClipboardFormatAvailable(NativeMethods.CF_TEXT))
+            {
+                text = ReadAnsiText(NativeMethods.GetClipboardData(NativeMethods.CF_TEXT));
+            }
+
+            string? html = null;
+            uint htmlFormat = GetHtmlFormatId();
+            if (htmlFormat != 0 && NativeMethods.IsClipboardFormatAvailable(htmlFormat))
+            {
+                html = ReadUtf8(NativeMethods.GetClipboardData(htmlFormat), MaxRichTextBytes);
+            }
+
+            string? rtf = null;
+            uint rtfFormat = GetRtfFormatId();
+            if (rtfFormat != 0 && NativeMethods.IsClipboardFormatAvailable(rtfFormat))
+            {
+                rtf = ReadAnsiText(NativeMethods.GetClipboardData(rtfFormat), MaxRichTextBytes);
+            }
+
+            return new ClipboardTextData(text, html, rtf);
+        }
+        finally
+        {
+            NativeMethods.CloseClipboard();
+        }
+    }
+
     /// <summary>从剪贴板取出位图（DIBV5 优先，回退 DIB）。调用方须 Dispose。</summary>
     public static Bitmap? TryGetBitmap()
     {
@@ -198,7 +255,14 @@ public static class NativeClipboard
 
     // ---------- 写入 ----------
 
-    public static bool TrySetText(string text, bool plainOnly)
+    public static bool TrySetText(string text, bool plainOnly) => TrySetText(text, plainOnly, null, null);
+
+    /// <summary>
+    /// 写入文本；plainOnly=false 且提供了富文本时，额外写入 "HTML Format" 与 "Rich Text Format"，
+    /// 让目标程序（Word / 浏览器 / 富文本编辑器）能保留原格式。
+    /// 纯文本始终先写入且必须成功，富文本属于尽力而为（失败不影响粘贴）。
+    /// </summary>
+    public static bool TrySetText(string text, bool plainOnly, string? html, string? rtf)
     {
         if (!TryOpen(WriteOpenAttempts))
         {
@@ -226,6 +290,32 @@ public static class NativeClipboard
                 if (NativeMethods.SetClipboardData(NativeMethods.CF_TEXT, hAnsi) == IntPtr.Zero)
                 {
                     FreeHandle(hAnsi);
+                }
+
+                if (!string.IsNullOrEmpty(html))
+                {
+                    uint htmlFormat = GetHtmlFormatId();
+                    if (htmlFormat != 0)
+                    {
+                        IntPtr hHtml = BytesToHGlobal(Encoding.UTF8.GetBytes(html));
+                        if (NativeMethods.SetClipboardData(htmlFormat, hHtml) == IntPtr.Zero)
+                        {
+                            FreeHandle(hHtml);
+                        }
+                    }
+                }
+
+                if (!string.IsNullOrEmpty(rtf))
+                {
+                    uint rtfFormat = GetRtfFormatId();
+                    if (rtfFormat != 0)
+                    {
+                        IntPtr hRtf = StringToHGlobalAnsi(rtf);
+                        if (NativeMethods.SetClipboardData(rtfFormat, hRtf) == IntPtr.Zero)
+                        {
+                            FreeHandle(hRtf);
+                        }
+                    }
                 }
             }
 
@@ -323,7 +413,45 @@ public static class NativeClipboard
         return _pngFormatId.Value;
     }
 
+    private static uint GetHtmlFormatId()
+    {
+        if (_htmlFormatId is null)
+        {
+            _htmlFormatId = NativeMethods.RegisterClipboardFormat("HTML Format");
+        }
+
+        return _htmlFormatId.Value;
+    }
+
+    private static uint GetRtfFormatId()
+    {
+        if (_rtfFormatId is null)
+        {
+            _rtfFormatId = NativeMethods.RegisterClipboardFormat("Rich Text Format");
+        }
+
+        return _rtfFormatId.Value;
+    }
+
     // ---------- 内存读取辅助 ----------
+
+    /// <summary>读取 UTF-8 文本（HTML Format 用），超过 maxBytes 返回 null。</summary>
+    private static string? ReadUtf8(IntPtr hGlobal, long maxBytes)
+    {
+        byte[]? bytes = ReadAllBytes(hGlobal, maxBytes);
+        if (bytes == null || bytes.Length == 0)
+        {
+            return null;
+        }
+
+        int length = Array.IndexOf(bytes, (byte)0);
+        if (length < 0)
+        {
+            length = bytes.Length;
+        }
+
+        return Encoding.UTF8.GetString(bytes, 0, length);
+    }
 
     private static string? ReadUnicodeText(IntPtr hGlobal)
     {
@@ -347,9 +475,11 @@ public static class NativeClipboard
         return Encoding.Unicode.GetString(bytes, 0, length);
     }
 
-    private static string? ReadAnsiText(IntPtr hGlobal)
+    private static string? ReadAnsiText(IntPtr hGlobal) => ReadAnsiText(hGlobal, MaxTextReadBytes);
+
+    private static string? ReadAnsiText(IntPtr hGlobal, long maxBytes)
     {
-        byte[]? bytes = ReadAllBytes(hGlobal, MaxTextReadBytes);
+        byte[]? bytes = ReadAllBytes(hGlobal, maxBytes);
         if (bytes == null || bytes.Length == 0)
         {
             return null;

@@ -16,28 +16,139 @@ public sealed class DatabaseService : IDisposable
     public DatabaseService(string dbPath)
     {
         CurrentPath = dbPath;
-        _connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = dbPath }.ToString());
-        _connection.Open();
-        EnsureSchema();
+        try
+        {
+            _connection = OpenAndPrepare(dbPath);
+        }
+        catch (SqliteException ex) when (IsCorruptDatabase(ex))
+        {
+            // 数据库文件损坏时不让整个应用启动失败：改名备份后重建空库，
+            // 用户历史丢失但应用可用，且原始文件保留在数据目录便于人工抢救。
+            DebugLog.LogException($"数据库文件损坏，已备份并重建: {dbPath}", ex);
+            string backup = BackupCorruptDatabase(dbPath);
+            DebugLog.Log($"损坏数据库已备份为: {backup}");
+            _connection = OpenAndPrepare(dbPath);
+        }
     }
 
-    private void EnsureSchema()
+    private static SqliteConnection OpenAndPrepare(string dbPath)
     {
-        using var cmd = _connection.CreateCommand();
-        cmd.CommandText = """
-            CREATE TABLE IF NOT EXISTS clipboard_items (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                content_type TEXT NOT NULL,
-                text_content TEXT,
-                preview_path TEXT,
-                qr_content TEXT,
-                char_count INTEGER,
-                is_pinned INTEGER DEFAULT 0,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            );
-            CREATE INDEX IF NOT EXISTS idx_created_at ON clipboard_items(created_at);
-            """;
-        cmd.ExecuteNonQuery();
+        var connection = new SqliteConnection(
+            new SqliteConnectionStringBuilder { DataSource = dbPath }.ToString());
+        try
+        {
+            connection.Open();
+            EnsureSchema(connection);
+            return connection;
+        }
+        catch
+        {
+            connection.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>是否属于「文件不是数据库 / 已损坏」，而非临时占用或权限问题。</summary>
+    private static bool IsCorruptDatabase(SqliteException ex) =>
+        ex.SqliteErrorCode is 11 or 26 ||
+        ex.Message.Contains("not a database", StringComparison.OrdinalIgnoreCase) ||
+        ex.Message.Contains("malformed", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>把损坏的库文件（连同 -wal/-shm）改名备份，返回备份路径。</summary>
+    private static string BackupCorruptDatabase(string dbPath)
+    {
+        string backup = $"{dbPath}.corrupt-{DateTime.Now:yyyyMMddHHmmss}";
+        try
+        {
+            if (File.Exists(dbPath))
+            {
+                File.Move(dbPath, backup);
+            }
+
+            foreach (string suffix in new[] { "-wal", "-shm" })
+            {
+                string side = dbPath + suffix;
+                if (File.Exists(side))
+                {
+                    try
+                    {
+                        File.Move(side, backup + suffix);
+                    }
+                    catch
+                    {
+                        // 边车文件搬不动不影响重建
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            DebugLog.LogException("备份损坏数据库失败", ex);
+        }
+
+        return backup;
+    }
+
+    private static void EnsureSchema(SqliteConnection connection)
+    {
+        using (var cmd = connection.CreateCommand())
+        {
+            cmd.CommandText = """
+                CREATE TABLE IF NOT EXISTS clipboard_items (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    content_type TEXT NOT NULL,
+                    text_content TEXT,
+                    html_content TEXT,
+                    rtf_content TEXT,
+                    preview_path TEXT,
+                    qr_content TEXT,
+                    char_count INTEGER,
+                    is_pinned INTEGER DEFAULT 0,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE INDEX IF NOT EXISTS idx_created_at ON clipboard_items(created_at);
+                """;
+            cmd.ExecuteNonQuery();
+        }
+
+        // 老库补列（SQLite 不支持 ADD COLUMN IF NOT EXISTS）
+        EnsureColumn(connection, "html_content", "TEXT");
+        EnsureColumn(connection, "rtf_content", "TEXT");
+    }
+
+    private static void EnsureColumn(SqliteConnection connection, string column, string type)
+    {
+        try
+        {
+            bool exists = false;
+            using (var probe = connection.CreateCommand())
+            {
+                probe.CommandText = "PRAGMA table_info(clipboard_items);";
+                using var reader = probe.ExecuteReader();
+                while (reader.Read())
+                {
+                    if (string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase))
+                    {
+                        exists = true;
+                        break;
+                    }
+                }
+            }
+
+            if (exists)
+            {
+                return;
+            }
+
+            using var alter = connection.CreateCommand();
+            alter.CommandText = $"ALTER TABLE clipboard_items ADD COLUMN {column} {type};";
+            alter.ExecuteNonQuery();
+            DebugLog.Log($"数据库已补充列: {column} {type}");
+        }
+        catch (Exception ex)
+        {
+            DebugLog.LogException($"补充数据库列失败: {column}", ex);
+        }
     }
 
     public async Task<long> InsertAsync(ClipboardItem item)
@@ -48,12 +159,15 @@ public sealed class DatabaseService : IDisposable
             using var cmd = _connection.CreateCommand();
             cmd.CommandText = """
                 INSERT INTO clipboard_items
-                    (content_type, text_content, preview_path, qr_content, char_count, is_pinned, created_at)
-                VALUES ($type, $text, $preview, $qr, $charCount, $pinned, $createdAt);
+                    (content_type, text_content, html_content, rtf_content, preview_path,
+                     qr_content, char_count, is_pinned, created_at)
+                VALUES ($type, $text, $html, $rtf, $preview, $qr, $charCount, $pinned, $createdAt);
                 SELECT last_insert_rowid();
                 """;
             cmd.Parameters.AddWithValue("$type", item.ContentType.ToString());
             cmd.Parameters.AddWithValue("$text", (object?)item.TextContent ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$html", (object?)item.HtmlContent ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$rtf", (object?)item.RtfContent ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$preview", (object?)item.PreviewPath ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$qr", (object?)item.QrContent ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$charCount", item.CharCount);
@@ -61,6 +175,22 @@ public sealed class DatabaseService : IDisposable
             cmd.Parameters.AddWithValue("$createdAt", item.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss.fff"));
             item.Id = (long)(await cmd.ExecuteScalarAsync())!;
             return item.Id;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <summary>当前历史总条数（含置顶）。用于调整条数上限前确认会删掉多少条。</summary>
+    public async Task<int> CountAsync()
+    {
+        await _gate.WaitAsync();
+        try
+        {
+            using var cmd = _connection.CreateCommand();
+            cmd.CommandText = "SELECT COUNT(*) FROM clipboard_items;";
+            return (int)(long)(await cmd.ExecuteScalarAsync())!;
         }
         finally
         {
@@ -76,8 +206,8 @@ public sealed class DatabaseService : IDisposable
             var items = new List<ClipboardItem>();
             using var cmd = _connection.CreateCommand();
             cmd.CommandText = """
-                SELECT id, content_type, text_content, preview_path, qr_content,
-                       char_count, is_pinned, created_at
+                SELECT id, content_type, text_content, html_content, rtf_content,
+                       preview_path, qr_content, char_count, is_pinned, created_at
                 FROM clipboard_items
                 ORDER BY is_pinned DESC, created_at DESC, id DESC
                 LIMIT $limit;
@@ -362,11 +492,13 @@ public sealed class DatabaseService : IDisposable
                 ? type
                 : ClipboardContentType.Text,
             TextContent = reader.IsDBNull(2) ? null : reader.GetString(2),
-            PreviewPath = reader.IsDBNull(3) ? null : reader.GetString(3),
-            QrContent = reader.IsDBNull(4) ? null : reader.GetString(4),
-            CharCount = reader.GetInt64(5),
-            IsPinned = reader.GetInt64(6) != 0,
-            CreatedAt = reader.IsDBNull(7) ? DateTime.Now : ParseDate(reader.GetString(7))
+            HtmlContent = reader.IsDBNull(3) ? null : reader.GetString(3),
+            RtfContent = reader.IsDBNull(4) ? null : reader.GetString(4),
+            PreviewPath = reader.IsDBNull(5) ? null : reader.GetString(5),
+            QrContent = reader.IsDBNull(6) ? null : reader.GetString(6),
+            CharCount = reader.GetInt64(7),
+            IsPinned = reader.GetInt64(8) != 0,
+            CreatedAt = reader.IsDBNull(9) ? DateTime.Now : ParseDate(reader.GetString(9))
         };
     }
 

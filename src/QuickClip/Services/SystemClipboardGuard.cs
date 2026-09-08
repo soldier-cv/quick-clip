@@ -13,6 +13,9 @@ namespace QuickClip.Services;
 /// 本守卫以低频轮询监视前台窗口：一旦发现系统剪贴板历史窗口弹出，立即注入 ESC 关闭它，
 /// 随后唤起 QuickClip 面板，保证在任意窗口下按 Win+V 最终都落到 QuickClip。
 /// 钩子正常接管时系统剪贴板历史根本不会出现，本守卫零干扰；仅作为钩子失效时的兜底。
+///
+/// 防自激：每个窗口句柄只处理一次，句柄消失后才从已处理集合移除，
+/// 避免「ESC 没能关掉窗口」时每 5 秒注入一次 ESC 并反复切换面板。
 /// </summary>
 public sealed class SystemClipboardGuard : IDisposable
 {
@@ -25,17 +28,16 @@ public sealed class SystemClipboardGuard : IDisposable
     /// <summary>轮询间隔：兼顾响应速度与 CPU 开销（约 8 次/秒）。</summary>
     private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(120);
 
-    /// <summary>同一窗口句柄再次处理前的等待时间，避免窗口句柄值被系统复用后重复触发。</summary>
-    private static readonly TimeSpan SameWindowCooldown = TimeSpan.FromSeconds(5);
-
-    /// <summary>注入 ESC 后等待其被系统剪贴板历史窗口消费的缓冲，避免 ESC 误落到刚唤起的面板上。</summary>
-    private static readonly TimeSpan EscapeSettleDelay = TimeSpan.FromMilliseconds(90);
+    /// <summary>注入 ESC 后等待窗口关闭的上限；超时说明 ESC 未生效（例如被 UIPI 拦截）。</summary>
+    private static readonly TimeSpan EscapeCloseTimeout = TimeSpan.FromMilliseconds(400);
 
     private readonly Dispatcher _uiDispatcher;
     private readonly System.Threading.Timer _timer;
+    private readonly object _handledLock = new();
 
-    private IntPtr _lastIntercepted = IntPtr.Zero;
-    private DateTime _lastInterceptUtc = DateTime.MinValue;
+    /// <summary>已处理过的系统剪贴板历史窗口句柄；窗口消失后移除，可再次处理新窗口。</summary>
+    private readonly HashSet<IntPtr> _handledWindows = new();
+
     private volatile bool _disposed;
 
     /// <summary>检测到系统剪贴板历史窗口并完成接管时触发（UI 线程），用于唤起/切换面板。</summary>
@@ -62,24 +64,23 @@ public sealed class SystemClipboardGuard : IDisposable
                 return;
             }
 
-            // 防抖：同一窗口句柄在冷却期内只处理一次（窗口关闭后新弹出的窗口是新句柄，会再次处理）
-            bool sameWindow = hwnd == _lastIntercepted;
-            if (sameWindow && DateTime.UtcNow - _lastInterceptUtc < SameWindowCooldown)
+            lock (_handledLock)
             {
-                return;
+                // 清理已经消失的窗口句柄：窗口被系统复用同一个句柄值时才不会漏处理
+                _handledWindows.RemoveWhere(handle =>
+                    !NativeMethods.IsWindow(handle) || !NativeMethods.IsWindowVisible(handle));
+
+                if (!_handledWindows.Add(hwnd))
+                {
+                    // 同一个窗口还没关掉：不再重复注入 ESC / 反复切换面板
+                    return;
+                }
             }
 
-            _lastIntercepted = hwnd;
-            _lastInterceptUtc = DateTime.UtcNow;
-            DebugLog.Log($"检测到系统剪贴板历史窗口 (hwnd={hwnd})，关闭并唤起 QuickClip");
+            DebugLog.Log($"检测到系统剪贴板历史窗口 (hwnd={hwnd}, pid={GetProcessId(hwnd)})，关闭并唤起 QuickClip");
 
-            // 注入 ESC 关闭系统剪贴板历史：ESC 是其系统设计的关闭键，SendInput 是物理模拟按键，
-            // 不受 UIPI 权限隔离限制，对高权限窗口同样有效，且不会与窗口消息产生竞争。
-            NativeMethods.SendEscape();
-
-            // 等 ESC 被剪贴板历史窗口消费后再唤起面板，防止 ESC 误触发刚获得焦点的面板
-            Thread.Sleep(EscapeSettleDelay);
-            _uiDispatcher.BeginInvoke(() => ToggleRequested?.Invoke());
+            // 注入 ESC 是物理模拟按键，不会与窗口消息竞争；等待动作放到后台线程，避免阻塞计时器回调
+            _ = Task.Run(() => Intercept(hwnd));
         }
         catch (Exception ex)
         {
@@ -87,7 +88,40 @@ public sealed class SystemClipboardGuard : IDisposable
         }
     }
 
-    /// <summary>判断窗口是否为系统剪贴板历史窗口（类名 + 标题双重匹配，避免误伤普通 UWP 窗口）。</summary>
+    /// <summary>注入 ESC 关闭系统剪贴板历史窗口，确认关闭后再唤起面板。</summary>
+    private void Intercept(IntPtr hwnd)
+    {
+        try
+        {
+            NativeMethods.SendEscape();
+
+            var deadline = DateTime.UtcNow + EscapeCloseTimeout;
+            while (DateTime.UtcNow < deadline)
+            {
+                if (!NativeMethods.IsWindow(hwnd) || !NativeMethods.IsWindowVisible(hwnd))
+                {
+                    break;
+                }
+
+                Thread.Sleep(30);
+            }
+
+            bool closed = !NativeMethods.IsWindow(hwnd) || !NativeMethods.IsWindowVisible(hwnd);
+            if (!closed)
+            {
+                // ESC 未能关闭（例如对高权限窗口被 UIPI 拦截）：仍然唤起面板，但不再重复注入
+                DebugLog.Log($"ESC 未能关闭系统剪贴板历史窗口 (hwnd={hwnd})，已标记为处理过，不再重复注入");
+            }
+
+            _uiDispatcher.BeginInvoke(() => ToggleRequested?.Invoke());
+        }
+        catch (Exception ex)
+        {
+            DebugLog.LogException("关闭系统剪贴板历史窗口失败", ex);
+        }
+    }
+
+    /// <summary>判断窗口是否为系统剪贴板历史窗口（类名 + 标题双重匹配，并排除本进程自己的窗口）。</summary>
     private static bool IsClipboardHistoryWindow(IntPtr hwnd)
     {
         if (!NativeMethods.IsWindowVisible(hwnd))
@@ -102,6 +136,12 @@ public sealed class SystemClipboardGuard : IDisposable
         }
 
         if (!string.Equals(className.ToString(), CoreWindowClassName, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        // 排除自身窗口（QuickClip 面板不是 CoreWindow，这里只是防御性判断）
+        if (GetProcessId(hwnd) == Environment.ProcessId)
         {
             return false;
         }
@@ -121,6 +161,19 @@ public sealed class SystemClipboardGuard : IDisposable
         }
 
         return false;
+    }
+
+    private static uint GetProcessId(IntPtr hwnd)
+    {
+        try
+        {
+            NativeMethods.GetWindowThreadProcessId(hwnd, out uint pid);
+            return pid;
+        }
+        catch
+        {
+            return 0;
+        }
     }
 
     private static string? GetWindowTitle(IntPtr hwnd)

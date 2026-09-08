@@ -163,6 +163,7 @@
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="168" />
                                 <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <TextBlock Text="系统剪贴板接管"
                                        Foreground="{DynamicResource Theme.Text}"
@@ -189,6 +190,16 @@
                                     </Border>
                                 </StackPanel>
                             </Border>
+                            <ui:Button x:Name="SysClipboardToggleButton"
+                                       Grid.Column="2"
+                                       Margin="8,0,0,0"
+                                       Appearance="Secondary"
+                                       Height="34"
+                                       Padding="12,0"
+                                       VerticalAlignment="Center"
+                                       Content="关闭接管"
+                                       Click="OnToggleSysClipboardClicked"
+                                       ToolTip="关闭后按接管前的注册表快照还原 Windows 自带剪贴板历史与 Win+V" />
                         </Grid>
                         <TextBlock x:Name="SysClipboardHintText"
                                    Margin="184,2,16,6"

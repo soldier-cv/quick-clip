@@ -124,6 +124,16 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     private CancellationTokenSource? _itemAddedDebounce;
     private readonly HashSet<long> _ocrBusyIds = new();
+    private readonly HashSet<long> _deletingIds = new();
+
+    /// <summary>刷新代际：并发刷新时只有最新一次的结果可以落到 UI（避免旧搜索结果覆盖新结果）。</summary>
+    private int _refreshGeneration;
+
+    /// <summary>
+    /// 面板可见时置 true：新捕获不再抢占当前选中项，
+    /// 否则用户正准备按 Enter 时后台捕获会把选中项换成刚复制的那条。
+    /// </summary>
+    public bool SuppressAutoSelect { get; set; }
 
     public MainViewModel(AppServices services)
     {
@@ -153,13 +163,16 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
     public async Task RefreshAsync()
     {
+        int generation = Interlocked.Increment(ref _refreshGeneration);
         int limit = _services.Settings.MaxHistoryItems;
-        var items = await _services.Database.GetRecentAsync(limit);
+        int filterIndex = FilterIndex;
         string query = _searchText;
         long? selectedId = SelectedItem?.Item.Id;
 
+        var items = await _services.Database.GetRecentAsync(limit);
+
         var filtered = items
-            .Where(i => FilterIndex switch
+            .Where(i => filterIndex switch
             {
                 1 => i.ContentType is ClipboardContentType.Text or ClipboardContentType.Link,
                 2 => i.ContentType == ClipboardContentType.Image,
@@ -168,6 +181,13 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             })
             .Where(i => SearchService.IsMatch(i, query))
             .ToList();
+
+        // 期间又发起了更新的刷新：本次结果已过期，丢弃
+        if (generation != Volatile.Read(ref _refreshGeneration))
+        {
+            DebugLog.LogDetail($"丢弃过期的列表刷新（gen={generation}）");
+            return;
+        }
 
         await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
         {
@@ -220,7 +240,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
 
         var item = selected.Item;
-        _services.Pipeline.SuppressCapture(BuildDedupKeyHint(item));
+        // 自身回写由剪贴板序列号识别，这里不再需要抑制窗口
         switch (item.ContentType)
         {
             case ClipboardContentType.Image:
@@ -239,7 +259,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 }
                 break;
             default:
-                _services.Paste.PasteText(item.TextContent, plainOnly);
+                // 非纯文本粘贴时带上原剪贴板的 HTML/RTF，保留格式（没有富文本则退化为纯文本）
+                _services.Paste.PasteText(
+                    item.TextContent,
+                    plainOnly,
+                    plainOnly ? null : item.HtmlContent,
+                    plainOnly ? null : item.RtfContent);
                 break;
         }
     }
@@ -252,25 +277,40 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             return;
         }
 
-        await _services.Database.DeleteAsync(selected.Item.Id);
-        ThumbnailCache.RemoveByPath(selected.Item.PreviewPath);
-
-        // 同步删除图片预览文件
-        if (selected.IsImage && !string.IsNullOrEmpty(selected.Item.PreviewPath))
+        // 重入保护：双击「删除」按钮 / 连按 Delete 时，第二次点击可能已落在
+        // 被虚拟化回收并重新绑定的卡片上，会把相邻条目一起删掉。
+        if (!_deletingIds.Add(selected.Item.Id))
         {
-            try
-            {
-                File.Delete(selected.Item.PreviewPath);
-            }
-            catch (Exception ex)
-            {
-                // 文件可能被占用，不影响条目删除
-                DebugLog.LogException("删除预览图失败（可忽略）", ex);
-            }
+            DebugLog.LogDetail($"忽略重复删除请求: id={selected.Item.Id}");
+            return;
         }
 
-        StatusText = "已删除";
-        await RefreshAsync();
+        try
+        {
+            await _services.Database.DeleteAsync(selected.Item.Id);
+            ThumbnailCache.RemoveByPath(selected.Item.PreviewPath);
+
+            // 同步删除图片预览文件
+            if (selected.IsImage && !string.IsNullOrEmpty(selected.Item.PreviewPath))
+            {
+                try
+                {
+                    File.Delete(selected.Item.PreviewPath);
+                }
+                catch (Exception ex)
+                {
+                    // 文件可能被占用，不影响条目删除
+                    DebugLog.LogException("删除预览图失败（可忽略）", ex);
+                }
+            }
+
+            StatusText = "已删除";
+            await RefreshAsync();
+        }
+        finally
+        {
+            _deletingIds.Remove(selected.Item.Id);
+        }
     }
 
     public async Task TogglePinSelectedAsync(ClipboardItemViewModel? target = null)
@@ -382,8 +422,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
-    /// <summary>复制当前选中项内容到系统剪贴板。
-    /// 回写剪贴板会触发监听，须抑制捕获，否则会在列表第一行再插一条相同记录。</summary>
+    /// <summary>复制当前选中项内容到系统剪贴板（自身回写由剪贴板序列号识别，不会重复入库）。</summary>
     public Task CopySelectedToClipboard() =>
         CopyItemToClipboardAsync(SelectedItem);
 
@@ -396,33 +435,28 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
 
         var item = target.Item;
-        // 先抑制再写：双击时 MouseUp 复制 + DoubleClick 粘贴会连续写两次剪贴板
-        _services.Pipeline.SuppressCapture(BuildDedupKeyHint(item));
         try
         {
-            switch (item.ContentType)
+            bool ok = item.ContentType switch
             {
-                case ClipboardContentType.Image:
-                    await _services.Paste.CopyImageAsync(item.PreviewPath);
-                    break;
-                case ClipboardContentType.File:
-                    var files = item.TextContent?.Split(
-                        new[] { Environment.NewLine }, StringSplitOptions.RemoveEmptyEntries);
-                    await _services.Paste.CopyFilesAsync(files);
-                    break;
-                default:
-                    await _services.Paste.CopyTextAsync(item.TextContent);
-                    break;
-            }
+                ClipboardContentType.Image => await _services.Paste.CopyImageAsync(item.PreviewPath),
+                ClipboardContentType.File => await _services.Paste.CopyFilesAsync(
+                    item.TextContent?.Split(
+                        new[] { Environment.NewLine }, StringSplitOptions.RemoveEmptyEntries)),
+                _ => await _services.Paste.CopyTextAsync(
+                    item.TextContent,
+                    plainOnly: false,
+                    html: item.HtmlContent,
+                    rtf: item.RtfContent)
+            };
+
+            StatusText = ok ? "已复制" : "复制失败";
         }
         catch (Exception ex)
         {
             DebugLog.LogException("复制到剪贴板失败", ex);
             StatusText = "复制失败，剪贴板可能被占用";
-            return;
         }
-
-        StatusText = "已复制";
     }
 
     /// <summary>将文件列表中的纯文件名以换行形式复制到系统剪贴板。</summary>
@@ -447,9 +481,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         });
         string joinedNames = string.Join(Environment.NewLine, names);
 
-        _services.Pipeline.SuppressCapture("text:" + joinedNames);
-        await _services.Paste.CopyTextAsync(joinedNames, plainOnly: true);
-        StatusText = "已复制文件名";
+        StatusText = await _services.Paste.CopyTextAsync(joinedNames, plainOnly: true)
+            ? "已复制文件名"
+            : "复制失败";
     }
 
     /// <summary>将文件项的完整绝对路径以纯文本形式复制到系统剪贴板。</summary>
@@ -466,9 +500,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             return;
         }
 
-        _services.Pipeline.SuppressCapture("text:" + item.TextContent);
-        await _services.Paste.CopyTextAsync(item.TextContent, plainOnly: true);
-        StatusText = "已复制全路径";
+        StatusText = await _services.Paste.CopyTextAsync(item.TextContent, plainOnly: true)
+            ? "已复制全路径"
+            : "复制失败";
     }
 
     /// <summary>将已识别二维码的文本覆盖到系统剪贴板（纯文本），不新增历史。</summary>
@@ -481,30 +515,18 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             return;
         }
 
-        string text = selected.QrText;
-        _services.Pipeline.SuppressCapture("text:" + text);
         try
         {
-            await _services.Paste.CopyTextAsync(text);
+            StatusText = await _services.Paste.CopyTextAsync(selected.QrText)
+                ? "已复制二维码文本"
+                : "复制失败";
         }
         catch (Exception ex)
         {
             DebugLog.LogException("复制二维码文本失败", ex);
             StatusText = "复制失败，剪贴板可能被占用";
-            return;
         }
-
-        StatusText = "已复制二维码文本";
     }
-
-    /// <summary>与捕获侧近似的去重键提示（文本精确；文件/图片靠 Suppress 时间窗）。</summary>
-    private static string? BuildDedupKeyHint(ClipboardItem item) =>
-        item.ContentType switch
-        {
-            ClipboardContentType.Text or ClipboardContentType.Link
-                => string.IsNullOrEmpty(item.TextContent) ? null : "text:" + item.TextContent,
-            _ => null
-        };
 
     private void DebounceRefresh()
     {
@@ -588,7 +610,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                 Items.RemoveAt(Items.Count - 1);
             }
 
-            SelectedItem = vm;
+            // 面板可见（用户正在挑选）时不抢占选中项，否则 Enter 会粘到刚捕获的那条
+            if (!SuppressAutoSelect)
+            {
+                SelectedItem = vm;
+            }
+
             IsEmpty = Items.Count == 0;
             OnPropertyChanged(nameof(EmptyHint));
         });

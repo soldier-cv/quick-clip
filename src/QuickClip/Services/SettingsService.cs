@@ -29,6 +29,12 @@ public sealed class SettingsService
     /// <summary>是否开机自启动。</summary>
     public bool AutoStart { get; private set; }
 
+    /// <summary>
+    /// 是否接管系统剪贴板（关闭 Windows 剪贴板历史 + 让 Explorer 释放 Win+V）。
+    /// 默认开启；关闭时按接管前快照恢复系统状态，且之后启动不再接管。
+    /// </summary>
+    public bool TakeOverSystemClipboard { get; private set; } = true;
+
     /// <summary>外观主题（默认 Terminal）。</summary>
     public AppTheme Theme { get; private set; } = AppTheme.Terminal;
 
@@ -69,6 +75,9 @@ public sealed class SettingsService
 
     /// <summary>仅记录文本/链接，忽略图片与文件。</summary>
     public bool TextOnlyCapture { get; private set; }
+
+    /// <summary>暂停捕获：临时不记录任何剪贴板内容（复制密码等敏感内容时使用）。</summary>
+    public bool CapturePaused { get; private set; }
 
     /// <summary>启动后延迟检查 GitHub 并下载对应渠道安装包。默认开启。</summary>
     public bool AutoCheckUpdates { get; private set; } = true;
@@ -127,6 +136,7 @@ public sealed class SettingsService
             PlainPasteHotkey = HotkeyBinding.PlainPasteDefault;
             PlainPasteEnabled = dto.PlainPasteEnabled ?? true;
             AutoStart = dto.AutoStart ?? false;
+            TakeOverSystemClipboard = dto.TakeOverSystemClipboard ?? true;
             WindowAlwaysOnTop = dto.WindowAlwaysOnTop ?? false;
             Theme = ParseTheme(dto.Theme);
             DatabasePath = string.IsNullOrWhiteSpace(dto.DatabasePath) ? null : dto.DatabasePath;
@@ -149,6 +159,7 @@ public sealed class SettingsService
             ApplyVisionApiFromDto(dto, dto.OcrEngine);
 
             TextOnlyCapture = dto.TextOnlyCapture ?? false;
+            CapturePaused = dto.CapturePaused ?? false;
             AutoCheckUpdates = dto.AutoCheckUpdates ?? true;
             LastUpdateCheckUtc = ParseUtc(dto.LastUpdateCheckUtc);
             MaxHistoryItems = ClampMaxHistory(dto.MaxHistoryItems ?? DefaultMaxHistoryItems);
@@ -219,6 +230,30 @@ public sealed class SettingsService
     {
         if (TextOnlyCapture == enabled) return;
         TextOnlyCapture = enabled;
+        Save();
+    }
+
+    /// <summary>暂停 / 恢复剪贴板捕获。</summary>
+    public void SetCapturePaused(bool paused)
+    {
+        if (CapturePaused == paused)
+        {
+            return;
+        }
+
+        CapturePaused = paused;
+        Save();
+    }
+
+    /// <summary>切换「接管系统剪贴板」；持久化由调用方负责联动注册表。</summary>
+    public void SetTakeOverSystemClipboard(bool enabled)
+    {
+        if (TakeOverSystemClipboard == enabled)
+        {
+            return;
+        }
+
+        TakeOverSystemClipboard = enabled;
         Save();
     }
 
@@ -635,6 +670,7 @@ public sealed class SettingsService
                 PlainPaste = HotkeyData.FromBinding(PlainPasteHotkey),
                 PlainPasteEnabled = PlainPasteEnabled,
                 AutoStart = AutoStart,
+                TakeOverSystemClipboard = TakeOverSystemClipboard,
                 WindowAlwaysOnTop = WindowAlwaysOnTop,
                 Theme = Theme.ToString(),
                 // 不再写入 DatabasePath：设置页已移除自定义路径；旧文件中的字段读入后也不会再回写
@@ -646,6 +682,7 @@ public sealed class SettingsService
                 VisionApiKey = VisionApiKey,
                 MaxHistoryItems = MaxHistoryItems,
                 TextOnlyCapture = TextOnlyCapture,
+                CapturePaused = CapturePaused,
                 AutoCheckUpdates = AutoCheckUpdates,
                 LastUpdateCheckUtc = LastUpdateCheckUtc?.ToUniversalTime().ToString("o"),
                 PanelHotkeys = new PanelHotkeysData
@@ -681,6 +718,7 @@ public sealed class SettingsData
     public HotkeyData? PlainPaste { get; set; }
     public bool? PlainPasteEnabled { get; set; }
     public bool? AutoStart { get; set; }
+    public bool? TakeOverSystemClipboard { get; set; }
     public bool? WindowAlwaysOnTop { get; set; }
     public string? Theme { get; set; }
     public string? DatabasePath { get; set; }
@@ -698,6 +736,7 @@ public sealed class SettingsData
     public string? OpenAiApiKey { get; set; }
     public int? MaxHistoryItems { get; set; }
     public bool? TextOnlyCapture { get; set; }
+    public bool? CapturePaused { get; set; }
     public bool? AutoCheckUpdates { get; set; }
     public string? LastUpdateCheckUtc { get; set; }
     public PanelHotkeysData? PanelHotkeys { get; set; }

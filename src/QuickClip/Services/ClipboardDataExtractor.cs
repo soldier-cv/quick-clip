@@ -13,9 +13,18 @@ public sealed class CapturedClipboardData
     public ClipboardContentType ContentType { get; set; }
     public string? Text { get; set; }
     public string[]? Files { get; set; }
+
+    /// <summary>CF_HTML 原文（来自富文本来源，如浏览器 / Word）。</summary>
+    public string? Html { get; set; }
+
+    /// <summary>CF_RTF 原文。</summary>
+    public string? Rtf { get; set; }
     public string? PreviewPath { get; set; }
     public long CharCount { get; set; }
     public string? DedupKey { get; set; }
+
+    /// <summary>读取时的剪贴板序列号（用于识别「这是我们自己刚写进去的内容」）。</summary>
+    public uint SequenceNumber { get; set; }
 }
 
 /// <summary>
@@ -30,26 +39,53 @@ public static class ClipboardDataExtractor
     {
         try
         {
+            // 先取序列号再读内容：读取可能耗时，读完再比一次，
+            // 若期间剪贴板又变了，本次快照已过期（那次变更会再触发一次通知），直接丢弃。
+            uint sequenceBefore = NativeClipboard.CurrentSequence;
+
+            CapturedClipboardData? data = null;
+
             // 优先级：文件 > 文本 > 图片
             // 注意：Windows 资源管理器复制文件时会同时放入 CF_HDROP 与 CF_UNICODETEXT（文件路径文本），
             // 必须优先检测 CF_HDROP 文件列表，否则文件会被错误识别为普通文本。
             string[]? files = NativeClipboard.TryGetFiles();
             if (files is { Length: > 0 })
             {
-                return CaptureFiles(files);
+                data = CaptureFiles(files);
+            }
+            else
+            {
+                // 一次打开剪贴板读全：纯文本 + HTML Format + Rich Text Format
+                var textData = NativeClipboard.TryGetTextFormats();
+                if (!string.IsNullOrEmpty(textData.Text))
+                {
+                    data = CaptureText(textData.Text, textData.Html, textData.Rtf);
+                }
+                else
+                {
+                    using var bitmap = ClipboardImageNormalizer.TryCaptureBitmap();
+                    if (bitmap != null)
+                    {
+                        data = CaptureImage(bitmap, paths);
+                    }
+                }
             }
 
-            string? text = NativeClipboard.TryGetText();
-            if (!string.IsNullOrEmpty(text))
+            if (data == null)
             {
-                return CaptureText(text);
+                return null;
             }
 
-            using var bitmap = ClipboardImageNormalizer.TryCaptureBitmap();
-            if (bitmap != null)
+            uint sequenceAfter = NativeClipboard.CurrentSequence;
+            if (sequenceAfter != sequenceBefore)
             {
-                return CaptureImage(bitmap, paths);
+                DebugLog.LogDetail($"剪贴板在读取期间再次变更（{sequenceBefore} → {sequenceAfter}），丢弃本次快照");
+                TryDelete(data.PreviewPath);
+                return null;
             }
+
+            data.SequenceNumber = sequenceAfter;
+            return data;
         }
         catch (Exception ex) when (ex is COMException or ExternalException)
         {
@@ -59,7 +95,7 @@ public static class ClipboardDataExtractor
         return null;
     }
 
-    private static CapturedClipboardData? CaptureText(string text)
+    private static CapturedClipboardData? CaptureText(string text, string? html, string? rtf)
     {
         if (string.IsNullOrWhiteSpace(text))
         {
@@ -82,6 +118,8 @@ public static class ClipboardDataExtractor
         {
             ContentType = isLink ? ClipboardContentType.Link : ClipboardContentType.Text,
             Text = text,
+            Html = html,
+            Rtf = rtf,
             CharCount = text.Length,
             DedupKey = "text:" + text
         };
@@ -177,8 +215,13 @@ public static class ClipboardDataExtractor
         }
     }
 
-    private static void TryDelete(string path)
+    private static void TryDelete(string? path)
     {
+        if (string.IsNullOrEmpty(path))
+        {
+            return;
+        }
+
         try
         {
             if (File.Exists(path))

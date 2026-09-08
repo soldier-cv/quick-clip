@@ -93,6 +93,14 @@ internal static class NativeMethods
     [DllImport("user32.dll", SetLastError = true)]
     public static extern uint RegisterClipboardFormat(string lpszFormat);
 
+    /// <summary>
+    /// 剪贴板序列号：每次剪贴板内容变更都会递增。
+    /// 用它判断「这次捕获到的内容是不是我们自己刚写进去的」，比时间窗抑制可靠得多
+    /// （时间窗会把用户在 2.5 秒内的真实复制一起丢掉）。
+    /// </summary>
+    [DllImport("user32.dll")]
+    public static extern uint GetClipboardSequenceNumber();
+
     /// <summary>当前打开剪贴板的窗口句柄（无人打开时为 0）。</summary>
     [DllImport("user32.dll")]
     public static extern IntPtr GetOpenClipboardWindow();
@@ -378,28 +386,38 @@ internal static class NativeMethods
 
     /// <summary>
     /// 模拟一次 Ctrl+V 击键；若 Ctrl/Shift/Alt/Win 正被物理按住（如热键触发时），
-    /// 先合成释放这些修饰键，避免目标程序把粘贴识别成 Shift+Ctrl+V 等其他组合。
-    /// 不主动“恢复”按下，因为用户随后松开物理按键时系统会自然收到弹起事件。
+    /// 先合成释放这些修饰键，避免目标程序把粘贴识别成 Shift+Ctrl+V 等其他组合，
+    /// 并在粘贴完成后重新按下它们——否则系统会认为修饰键已弹起，
+    /// 与物理键盘状态不一致（用户继续按住 Ctrl 打字时行为异常，钩子里的修饰键快照也是错的）。
+    /// 重新按下的事件带自身标记，钩子会跳过，不会形成回环。
     /// </summary>
     public static void SendCtrlV()
     {
-        bool ctrl = IsKeyDown(VK_CONTROL);
-        bool shift = IsKeyDown(VK_SHIFT);
-        bool alt = IsKeyDown(VK_MENU);
-        bool winLeft = IsKeyDown(VK_LWIN);
-        bool winRight = IsKeyDown(VK_RWIN);
+        var released = new List<int>(4);
+        if (IsKeyDown(VK_CONTROL)) released.Add(VK_CONTROL);
+        if (IsKeyDown(VK_SHIFT)) released.Add(VK_SHIFT);
+        if (IsKeyDown(VK_MENU)) released.Add(VK_MENU);
+        if (IsKeyDown(VK_LWIN)) released.Add(VK_LWIN);
+        if (IsKeyDown(VK_RWIN)) released.Add(VK_RWIN);
 
-        var inputs = new INPUT[4 + (ctrl ? 1 : 0) + (shift ? 1 : 0) + (alt ? 1 : 0) + (winLeft ? 1 : 0) + (winRight ? 1 : 0)];
+        var inputs = new INPUT[released.Count * 2 + 4];
         int i = 0;
-        if (ctrl) inputs[i++] = KeyInput(VK_CONTROL, KEYEVENTF_KEYUP);
-        if (shift) inputs[i++] = KeyInput(VK_SHIFT, KEYEVENTF_KEYUP);
-        if (alt) inputs[i++] = KeyInput(VK_MENU, KEYEVENTF_KEYUP);
-        if (winLeft) inputs[i++] = KeyInput(VK_LWIN, KEYEVENTF_KEYUP);
-        if (winRight) inputs[i++] = KeyInput(VK_RWIN, KEYEVENTF_KEYUP);
+        foreach (int vk in released)
+        {
+            inputs[i++] = KeyInput(vk, KEYEVENTF_KEYUP);
+        }
+
         inputs[i++] = KeyInput(VK_CONTROL, 0);
         inputs[i++] = KeyInput(VK_V, 0);
         inputs[i++] = KeyInput(VK_V, KEYEVENTF_KEYUP);
         inputs[i++] = KeyInput(VK_CONTROL, KEYEVENTF_KEYUP);
+
+        // 恢复物理上仍按住的修饰键
+        foreach (int vk in released)
+        {
+            inputs[i++] = KeyInput(vk, 0);
+        }
+
         uint sent = SendInput((uint)i, inputs, Marshal.SizeOf<INPUT>());
         if (sent != i)
         {

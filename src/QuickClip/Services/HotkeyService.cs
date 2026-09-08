@@ -32,8 +32,14 @@ public sealed class HotkeyService : IDisposable
     private IntPtr _hwnd = IntPtr.Zero;
 
     private Thread? _hookThread;
-    private uint _hookThreadId;
+    private volatile int _hookThreadId;
     private IntPtr _hookId = IntPtr.Zero;
+
+    /// <summary>钩子安装完成（成功或失败）信号：Dispose 必须等它，否则可能漏掉 UnhookWindowsHookEx。</summary>
+    private readonly ManualResetEventSlim _hookInstallDone = new(false);
+
+    /// <summary>Win 状态机卡住的自愈阈值：丢失 Win 弹起（Win+L 锁屏 / UAC 安全桌面）后强制复位。</summary>
+    private const long WinStateStaleMilliseconds = 8000;
 
     // 各热键是否已由 RegisterHotKey 接管（否则钩子回退）
     private volatile bool _winVRegistered;
@@ -49,6 +55,9 @@ public sealed class HotkeyService : IDisposable
     private volatile bool _winKeySwallowed;
     private volatile bool _winKeyReplayed;
     private volatile bool _winChordHandled;
+
+    /// <summary>本次 Win 按下的时间戳（TickCount64），用于状态机超时自愈。</summary>
+    private long _winKeyDownTicks;
 
     // 钩子读取的当前配置快照
     private volatile HotkeyBinding _plainPasteBinding = HotkeyBinding.PlainPasteDefault;
@@ -308,25 +317,33 @@ public sealed class HotkeyService : IDisposable
 
     private void HookThreadMain()
     {
-        _hookThreadId = NativeMethods.GetCurrentThreadId();
+        _hookThreadId = (int)NativeMethods.GetCurrentThreadId();
         DebugLog.Log("热键钩子线程已启动");
 
+        IntPtr hookId = IntPtr.Zero;
         try
         {
             string moduleName = Process.GetCurrentProcess().MainModule?.ModuleName ?? string.Empty;
-            _hookId = NativeMethods.SetWindowsHookEx(
+            hookId = NativeMethods.SetWindowsHookEx(
                 NativeMethods.WH_KEYBOARD_LL,
                 _proc,
                 NativeMethods.GetModuleHandle(moduleName),
                 0);
-            DebugLog.Log($"安装低级键盘钩子: HookId={_hookId}, LastError={Marshal.GetLastWin32Error()}, Module={moduleName}");
+            Interlocked.Exchange(ref _hookId, hookId);
+            ResetWinStateMachine();
+            DebugLog.Log($"安装低级键盘钩子: HookId={hookId}, LastError={Marshal.GetLastWin32Error()}, Module={moduleName}");
         }
         catch (Exception ex)
         {
             DebugLog.LogException("键盘钩子安装失败", ex);
         }
+        finally
+        {
+            // 无论成败都要放行 Dispose，避免它在 _hookInstallDone 上等满超时
+            _hookInstallDone.Set();
+        }
 
-        if (_hookId == IntPtr.Zero)
+        if (hookId == IntPtr.Zero)
         {
             string error = $"键盘钩子安装失败 (Win32 错误 {Marshal.GetLastWin32Error()})，Win+V 可能无法接管";
             DebugLog.Log(error);
@@ -351,7 +368,34 @@ public sealed class HotkeyService : IDisposable
         DebugLog.Log("热键钩子线程消息泵退出");
     }
 
+    /// <summary>
+    /// 钩子回调入口：任何异常都必须吞掉，否则 Windows 会把钩子当成故障并移除（表现为 Win+V 彻底失效）。
+    /// </summary>
     private IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)
+    {
+        try
+        {
+            return HookCallbackCore(nCode, wParam, lParam);
+        }
+        catch (Exception ex)
+        {
+            DebugLog.LogException("键盘钩子回调异常", ex);
+            return NativeMethods.CallNextHookEx(_hookId, nCode, wParam, lParam);
+        }
+    }
+
+    /// <summary>复位 Win 键状态机（钩子安装时、以及丢失弹起超时后调用）。</summary>
+    private void ResetWinStateMachine()
+    {
+        _winKeyDown = false;
+        _winKeySwallowed = false;
+        _winKeyReplayed = false;
+        _winChordHandled = false;
+        _winVKeyDown = false;
+        _winKeyDownTicks = 0;
+    }
+
+    private IntPtr HookCallbackCore(int nCode, IntPtr wParam, IntPtr lParam)
     {
         if (nCode >= 0)
         {
@@ -375,12 +419,22 @@ public sealed class HotkeyService : IDisposable
                 {
                     if (isKeyDown)
                     {
+                        // 丢失 Win 弹起（Win+L 锁屏 / UAC 安全桌面 / 钩子被系统移除后重装）会让状态机
+                        // 长期卡在「Win 按住」，残留的 _winKeyReplayed 会让后续 Win+X 被漏给应用或被吞。
+                        // 超时即强制复位，按新的一次按下处理。
+                        if (_winKeyDown && Environment.TickCount64 - _winKeyDownTicks > WinStateStaleMilliseconds)
+                        {
+                            DebugLog.Log("Win 键状态超过阈值未收到弹起，强制复位状态机");
+                            ResetWinStateMachine();
+                        }
+
                         if (!_winKeyDown)
                         {
                             _winKeyDown = true;
                             _winKeySwallowed = true;
                             _winKeyReplayed = false;
                             _winChordHandled = false;
+                            _winKeyDownTicks = Environment.TickCount64;
                             DebugLog.LogDetail("捕获 Win 键按下（已吞掉，等待和弦判定）");
                         }
 
@@ -569,23 +623,40 @@ public sealed class HotkeyService : IDisposable
             _hwndSource = null;
             _hwnd = IntPtr.Zero;
 
-            if (_hookId != IntPtr.Zero)
+            // 钩子由后台线程安装：必须等安装完成，否则可能读到 0 而漏掉 UnhookWindowsHookEx（钩子泄漏）
+            if (_hookThread is { IsAlive: true })
             {
-                NativeMethods.UnhookWindowsHookEx(_hookId);
-                _hookId = IntPtr.Zero;
+                _hookInstallDone.Wait(2000);
             }
 
-            if (_hookThreadId != 0)
+            IntPtr hookId = Interlocked.Exchange(ref _hookId, IntPtr.Zero);
+            if (hookId != IntPtr.Zero)
             {
-                NativeMethods.PostThreadMessage(_hookThreadId, NativeMethods.WM_QUIT, IntPtr.Zero, IntPtr.Zero);
+                if (!NativeMethods.UnhookWindowsHookEx(hookId))
+                {
+                    DebugLog.Log($"卸载键盘钩子失败 (LastError={Marshal.GetLastWin32Error()})");
+                }
+            }
+
+            int hookThreadId = _hookThreadId;
+            if (hookThreadId != 0)
+            {
+                if (!NativeMethods.PostThreadMessage((uint)hookThreadId, NativeMethods.WM_QUIT, IntPtr.Zero, IntPtr.Zero))
+                {
+                    DebugLog.Log($"向钩子线程投递 WM_QUIT 失败 (LastError={Marshal.GetLastWin32Error()})");
+                }
             }
 
             if (_hookThread is { IsAlive: true })
             {
-                _hookThread.Join(2000);
+                if (!_hookThread.Join(2000))
+                {
+                    DebugLog.Log("钩子线程未在 2 秒内退出");
+                }
             }
 
             _hookThread = null;
+            _hookThreadId = 0;
             DebugLog.Log("热键服务已卸载");
         }
     }

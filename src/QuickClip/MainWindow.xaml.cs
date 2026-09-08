@@ -23,6 +23,12 @@ public partial class MainWindow : FluentWindow
     private DateTime _suppressDeactivateUntil = DateTime.MinValue;
     private DispatcherTimer? _hotkeyTopmostTimer;
 
+    /// <summary>自有模态对话框（确认框 / 另存为）打开期间为 true：它会让主窗失焦，不能当成「点到外部」隐藏面板。</summary>
+    private bool _modalDialogOpen;
+
+    /// <summary>删除按钮节流：双击/连点时的第二次点击不应再作用于（可能已复用的）卡片。</summary>
+    private long _lastDeleteClickTicks;
+
     /// <summary>视图模型（设置窗口切换数据库后需要刷新列表）。</summary>
     public MainViewModel ViewModel => _viewModel;
 
@@ -61,6 +67,9 @@ public partial class MainWindow : FluentWindow
         _services.Tray.InstallUpdateRequested += ApplyPendingUpdate;
         _services.Tray.OpenDataFolderRequested += OpenDataFolderFromTray;
         _services.Tray.ClearTodayHistoryRequested += ClearTodayFromTray;
+        _services.Tray.CapturePauseToggleRequested += ToggleCapturePause;
+        // 粘贴/复制失败：面板通常已隐藏，这里同时更新状态栏（面板重新打开时可见）
+        _services.Paste.PasteFailed += OnPasteFailed;
 
         PositionWindow();
 
@@ -76,10 +85,22 @@ public partial class MainWindow : FluentWindow
         ThemeService.Changed += OnThemeChanged;
         Closed += (_, _) =>
         {
+            _services.Paste.PasteFailed -= OnPasteFailed;
             _services.Settings.Changed -= OnSettingsChanged;
             ThemeService.Changed -= OnThemeChanged;
         };
         OnSettingsChanged();
+    }
+
+    private void OnPasteFailed(string message)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.BeginInvoke(() => OnPasteFailed(message));
+            return;
+        }
+
+        _viewModel.StatusText = message;
     }
 
     private static readonly uint WmShowQuickClip = QuickClip.Native.NativeMethods.RegisterWindowMessage("QUICKCLIP_SHOW_WINDOW_MSG");
@@ -246,10 +267,11 @@ public partial class MainWindow : FluentWindow
         }
 
         // 失焦即隐：点到其他应用时隐藏（仿系统 Win+V）。
-        // 打开设置窗时主窗也会失焦，不能当「点到外部」——否则列表会被误收起。
+        // 打开设置窗 / 自有模态对话框时主窗也会失焦，不能当「点到外部」——否则列表会被误收起。
         if (IsVisible && !_exiting && !_services.Settings.WindowAlwaysOnTop &&
             QrOverlay.Visibility == Visibility.Collapsed &&
             OcrOverlay.Visibility == Visibility.Collapsed &&
+            !_modalDialogOpen &&
             !IsSettingsWindowOpen())
         {
             DebugLog.Log("失焦隐藏面板");
@@ -261,9 +283,32 @@ public partial class MainWindow : FluentWindow
     private bool IsSettingsWindowOpen() =>
         _settingsWindow is { IsVisible: true };
 
+    /// <summary>
+    /// 显示自有模态对话框：期间主窗会失焦，必须屏蔽「失焦即隐」，
+    /// 否则点「保存到本地」「清空列表」时面板会在对话框后面消失。
+    /// </summary>
+    private T ShowOwnedModal<T>(Func<T> show)
+    {
+        _modalDialogOpen = true;
+        try
+        {
+            return show();
+        }
+        finally
+        {
+            _modalDialogOpen = false;
+            // 对话框关闭后把焦点还回面板（未置顶时）
+            if (IsVisible)
+            {
+                Activate();
+            }
+        }
+    }
+
     private void OnTitleBarCloseClicked(object sender, RoutedEventArgs e)
     {
-        Hide();
+        // 必须走 HideWindow：只 Hide() 会让 StaysOpen=True 的悬停浮层和置顶定时器留在屏幕上
+        HideWindow();
     }
 
     /// <summary>唤起 / 切换窗口（可由键盘钩子或托盘触发）。</summary>
@@ -303,6 +348,9 @@ public partial class MainWindow : FluentWindow
             _viewModel.SelectedItem = _viewModel.Items[0];
             ItemList.ScrollIntoView(_viewModel.Items[0]);
         }
+
+        // 面板可见期间新捕获不抢占选中项（见 MainViewModel.SuppressAutoSelect）
+        _viewModel.SuppressAutoSelect = true;
 
         SearchBox.Focus();
         SearchBox.SelectAll();
@@ -365,6 +413,7 @@ public partial class MainWindow : FluentWindow
     {
         _hotkeyTopmostTimer?.Stop();
         PreviewPopup.IsOpen = false;
+        _viewModel.SuppressAutoSelect = false;
         Hide();
         DebugLog.Log("窗口已隐藏");
     }
@@ -446,6 +495,10 @@ public partial class MainWindow : FluentWindow
             return;
         }
 
+        // 焦点在搜索框时：粘贴类快捷键仍然可用（Win+V → 输入 → Enter 是主流程），
+        // 但删除 / 置顶等破坏性动作必须屏蔽，否则会一边打字一边删掉历史条目。
+        bool typing = IsSearchFocused();
+
         if (settings.HidePanelHotkey.Matches(key, modifiers))
         {
             HideWindow();
@@ -455,39 +508,57 @@ public partial class MainWindow : FluentWindow
 
         if (settings.PasteSelectedPlainHotkey.Matches(key, modifiers))
         {
-            PasteSelected(plainOnly: true);
+            // 长按不重复粘贴
+            if (!e.IsRepeat)
+            {
+                PasteSelected(plainOnly: true);
+            }
+
             e.Handled = true;
             return;
         }
 
         if (settings.PasteSelectedHotkey.Matches(key, modifiers))
         {
-            PasteSelected(plainOnly: false);
+            if (!e.IsRepeat)
+            {
+                PasteSelected(plainOnly: false);
+            }
+
             e.Handled = true;
             return;
         }
 
         if (settings.DeleteSelectedHotkey.Matches(key, modifiers))
         {
-            _ = _viewModel.DeleteSelectedAsync();
+            if (!typing && !e.IsRepeat)
+            {
+                _ = _viewModel.DeleteSelectedAsync();
+            }
+
             e.Handled = true;
             return;
         }
 
         if (settings.TogglePinHotkey.Matches(key, modifiers))
         {
-            ToggleWindowPin();
+            if (!typing && !e.IsRepeat)
+            {
+                ToggleWindowPin();
+            }
+
             e.Handled = true;
             return;
         }
 
-        if (settings.CopySelectedHotkey.Matches(key, modifiers) && !IsSearchFocused())
+        if (settings.CopySelectedHotkey.Matches(key, modifiers) && !typing)
         {
             _ = _viewModel.CopySelectedToClipboard();
             e.Handled = true;
             return;
         }
 
+        // 方向键在搜索框聚焦时仍需可用（Win+V → 输入关键词 → 上下键选择 → Enter 粘贴）
         if (settings.MoveDownHotkey.Matches(key, modifiers))
         {
             MoveSelection(1);
@@ -503,7 +574,7 @@ public partial class MainWindow : FluentWindow
         }
 
         // 1~9 / 小键盘：固定快速粘贴
-        if (modifiers == ModifierKeys.None && !IsSearchFocused())
+        if (modifiers == ModifierKeys.None && !typing)
         {
             if (key is >= Key.D1 and <= Key.D9)
             {
@@ -1181,7 +1252,9 @@ public partial class MainWindow : FluentWindow
             DefaultExt = ".png"
         };
 
-        if (dialog.ShowDialog(this) != true)
+        // 模态对话框期间主窗失焦，不能让「失焦即隐」把面板藏到对话框后面
+        bool confirmed = ShowOwnedModal(() => dialog.ShowDialog(this) == true);
+        if (!confirmed)
         {
             return;
         }
@@ -1214,11 +1287,23 @@ public partial class MainWindow : FluentWindow
 
     private void OnDeleteClicked(object sender, RoutedEventArgs e)
     {
-        if (GetCardViewModel(sender) is { } vm)
+        if (GetCardViewModel(sender) is not { } vm)
         {
-            _viewModel.SelectedItem = vm;
-            _ = _viewModel.DeleteSelectedAsync();
+            return;
         }
+
+        // 双击/连点删除按钮：第二次点击时卡片可能已被虚拟化容器复用（DataContext 变成相邻条目），
+        // 因此除了 VM 内部按 id 的重入保护，这里再做一次短时抖动过滤。
+        long now = Environment.TickCount64;
+        if (now - _lastDeleteClickTicks < 400)
+        {
+            DebugLog.LogDetail("忽略删除按钮的重复点击");
+            return;
+        }
+
+        _lastDeleteClickTicks = now;
+        _viewModel.SelectedItem = vm;
+        _ = _viewModel.DeleteSelectedAsync();
     }
 
     private static ClipboardItemViewModel? GetCardViewModel(object sender)
@@ -1320,6 +1405,29 @@ public partial class MainWindow : FluentWindow
             : $"窗口置顶：失焦不隐藏，粘贴后保持打开（{pinKeys}）";
 
         RefreshHelpTip();
+        UpdateCaptureBadges();
+    }
+
+    /// <summary>同步「已暂停捕获 / 仅文本」状态徽章：捕获被限制时必须可见。</summary>
+    private void UpdateCaptureBadges()
+    {
+        CapturePausedBadge.Visibility = _services.Settings.CapturePaused
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        TextOnlyBadge.Visibility = _services.Settings.TextOnlyCapture
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+    }
+
+    /// <summary>托盘「暂停捕获」勾选：暂停后不再记录任何剪贴板内容。</summary>
+    private void ToggleCapturePause(bool paused)
+    {
+        _services.SetCapturePaused(paused);
+        UpdateCaptureBadges();
+        _viewModel.StatusText = paused ? "已暂停捕获" : "已恢复捕获";
+        _services.Tray.ShowBalloonTip(
+            "QuickClip",
+            paused ? "已暂停捕获剪贴板，复制的内容不会进入历史" : "已恢复捕获剪贴板");
     }
 
     /// <summary>帮助气泡与设置页共用同一套绑定；Win+V / 1~9 为系统保留。</summary>
@@ -1400,6 +1508,20 @@ public partial class MainWindow : FluentWindow
 
     private async void ClearTodayFromTray()
     {
+        // 托盘菜单直接点击即删，风险高：与面板内「清空列表」一样先确认
+        var result = ShowOwnedModal(() => System.Windows.MessageBox.Show(
+            this,
+            "将删除今天的全部非置顶历史记录，置顶条目会保留。\n确定清除今日历史？",
+            "清除今日历史",
+            System.Windows.MessageBoxButton.YesNo,
+            MessageBoxImage.Question,
+            System.Windows.MessageBoxResult.No));
+
+        if (result != System.Windows.MessageBoxResult.Yes)
+        {
+            return;
+        }
+
         await _viewModel.ClearTodayAndRefreshAsync();
         _services.Tray.ShowBalloonTip("QuickClip", _viewModel.StatusText);
     }
@@ -1407,13 +1529,13 @@ public partial class MainWindow : FluentWindow
     /// <summary>列表工具栏：清空全部非置顶历史（置顶保留）。</summary>
     private async void OnClearListClicked(object sender, RoutedEventArgs e)
     {
-        var result = System.Windows.MessageBox.Show(
+        var result = ShowOwnedModal(() => System.Windows.MessageBox.Show(
             this,
             "将删除全部非置顶历史记录，置顶条目会保留。\n确定清空列表？",
             "清空列表",
             System.Windows.MessageBoxButton.YesNo,
             MessageBoxImage.Question,
-            System.Windows.MessageBoxResult.No);
+            System.Windows.MessageBoxResult.No));
 
         if (result != System.Windows.MessageBoxResult.Yes)
         {

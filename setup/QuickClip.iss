@@ -58,6 +58,11 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall
 
+[UninstallRun]
+; 卸载前按接管前快照还原系统剪贴板状态（Windows 剪贴板历史 + Explorer Win+V），
+; 否则卸载后用户的 Win+V 会一直被禁用。runhidden 避免闪出黑框。
+Filename: "{app}\{#MyAppExeName}"; Parameters: "--restore-clipboard"; Flags: runhidden waituntilterminated; RunOnceId: "RestoreSystemClipboard"
+
 [Code]
 function DotNetDesktop8Installed: Boolean;
 var

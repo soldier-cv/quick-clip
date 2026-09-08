@@ -497,6 +497,33 @@
                            TextTrimming="CharacterEllipsis"
                            Text="{Binding StatusText}" />
                 <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
+                    <!-- 暂停捕获 / 仅文本模式：捕获被限制时必须看得见 -->
+                    <Border x:Name="CapturePausedBadge"
+                            Visibility="Collapsed"
+                            Margin="0,0,8,0"
+                            Padding="6,2"
+                            CornerRadius="4"
+                            Background="{DynamicResource Theme.AccentMuted}"
+                            VerticalAlignment="Center"
+                            ToolTip="当前不记录任何剪贴板内容（托盘菜单「暂停捕获」可恢复）">
+                        <TextBlock Text="已暂停捕获"
+                                   FontSize="11"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource Theme.Accent}" />
+                    </Border>
+                    <Border x:Name="TextOnlyBadge"
+                            Visibility="Collapsed"
+                            Margin="0,0,8,0"
+                            Padding="6,2"
+                            CornerRadius="4"
+                            Background="{DynamicResource Theme.AccentMuted}"
+                            VerticalAlignment="Center"
+                            ToolTip="仅记录文本/链接，图片与文件不入库（设置页可关闭）">
+                        <TextBlock Text="仅文本"
+                                   FontSize="11"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource Theme.Accent}" />
+                    </Border>
                     <ui:Button x:Name="HelpTipButton"
                            Appearance="Transparent"
                            Padding="4,2"

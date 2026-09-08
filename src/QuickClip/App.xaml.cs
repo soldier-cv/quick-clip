@@ -26,6 +26,13 @@ public partial class App : System.Windows.Application
         bool fromAutostart = HasAutostartArg(e.Args);
         DebugLog.Log($"开始启动 QuickClip: pid={Environment.ProcessId}, autostart={fromAutostart}, args=[{string.Join(", ", e.Args)}]");
 
+        // 卸载/维护入口：按接管前快照还原系统剪贴板状态后立即退出（不参与单实例判定）
+        if (HasRestoreClipboardArg(e.Args))
+        {
+            RestoreSystemClipboardAndExit();
+            return;
+        }
+
         _mutex = new Mutex(false, @"Local\QuickClip_SingleInstance");
         bool acquired = TryAcquireMutex(_mutex, retries: 10, delayMs: 200);
         DebugLog.Log($"单实例互斥锁获取结果: acquired={acquired}");
@@ -53,33 +60,83 @@ public partial class App : System.Windows.Application
             RenderOptions.ProcessRenderMode = RenderMode.SoftwareOnly;
         }
 
-        _services = new AppServices();
-        if (!_services.Initialize(fromAutostart))
+        // 按用户设置应用主题（写入 DynamicResource + 关闭 DWM 材质）
+        // 服务装配与窗口创建全程兜底：失败必须退出进程，
+        // 否则会留下「没有窗口也没有托盘、却占着单实例互斥锁」的僵尸进程。
+        try
         {
-            DebugLog.Log("服务初始化要求当前进程退出");
+            _services = new AppServices();
+            ThemeService.Apply(_services.Settings.Theme);
+
+            var viewModel = new MainViewModel(_services);
+            var window = new MainWindow(viewModel, _services) { DataContext = viewModel };
+            _services.MainWindow = window;
+
+            // 关键：先创建窗口句柄（触发 SourceInitialized → Monitor.Attach 挂剪贴板监听），
+            // 再启动热键。开机自启动分支不会 Show()，若不主动建句柄，剪贴板监听永远挂不上，
+            // 表现为「重启后按 Win+V 面板能开，但历史里一条都没有」。
+            IntPtr handle = new WindowInteropHelper(window).EnsureHandle();
+            DebugLog.Log($"主窗口句柄已创建: {handle}");
+
+            if (!_services.Initialize(fromAutostart))
+            {
+                DebugLog.Log("服务初始化要求当前进程退出");
+                Shutdown();
+                return;
+            }
+
+            // 首次手动启动展示主窗口，便于用户了解工具已就绪；开机自启动则静默驻留托盘待命
+            if (!fromAutostart)
+            {
+                window.Show();
+                window.Activate();
+            }
+            else
+            {
+                DebugLog.Log("开机自启动：保持后台静默运行");
+            }
+        }
+        catch (Exception ex)
+        {
+            DebugLog.LogException("启动失败，即将退出", ex);
+            try
+            {
+                _services?.Dispose();
+            }
+            catch (Exception disposeEx)
+            {
+                DebugLog.LogException("启动失败后清理服务异常", disposeEx);
+            }
+
+            _services = null;
+            System.Windows.MessageBox.Show(
+                "QuickClip 启动失败，已退出。\n\n" + ex.Message +
+                "\n\n详细信息见 %LOCALAPPDATA%\\QuickClip\\debug.log",
+                "QuickClip",
+                System.Windows.MessageBoxButton.OK,
+                System.Windows.MessageBoxImage.Error);
             Shutdown();
             return;
         }
 
-        // 按用户设置应用主题（写入 DynamicResource + 关闭 DWM 材质）
-        ThemeService.Apply(_services.Settings.Theme);
-
-        var viewModel = new MainViewModel(_services);
-        var window = new MainWindow(viewModel, _services) { DataContext = viewModel };
-        _services.MainWindow = window;
-
-        // 首次手动启动展示主窗口，便于用户了解工具已就绪；开机自启动则静默驻留托盘待命
-        if (!fromAutostart)
-        {
-            window.Show();
-            window.Activate();
-        }
-        else
-        {
-            DebugLog.Log("开机自启动：保持后台静默运行");
-        }
-
         DebugLog.Log("QuickClip 启动完成");
+    }
+
+    /// <summary>卸载/维护模式：还原接管前的系统剪贴板状态后退出（不加载任何服务）。</summary>
+    private void RestoreSystemClipboardAndExit()
+    {
+        try
+        {
+            var paths = new AppPaths();
+            bool ok = SystemClipboardService.RestoreSystemClipboard(paths);
+            DebugLog.Log($"--restore-clipboard 完成: ok={ok}");
+        }
+        catch (Exception ex)
+        {
+            DebugLog.LogException("--restore-clipboard 失败", ex);
+        }
+
+        Shutdown();
     }
 
     protected override void OnExit(System.Windows.ExitEventArgs e)
@@ -108,6 +165,22 @@ public partial class App : System.Windows.Application
 
         return false;
     }
+
+    private static bool HasRestoreClipboardArg(string[] args)
+    {
+        foreach (string arg in args)
+        {
+            if (string.Equals(arg, RestoreClipboardArgument, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>卸载程序调用的维护参数：还原接管前的系统剪贴板状态。</summary>
+    public const string RestoreClipboardArgument = "--restore-clipboard";
 
     private static bool TryAcquireMutex(Mutex mutex, int retries, int delayMs)
     {

@@ -10,6 +10,7 @@ public sealed class TrayIconService : IDisposable
     private readonly NotifyIcon _notifyIcon;
     private readonly ToolStripMenuItem _toggleItem;
     private readonly ToolStripMenuItem _autoStartItem;
+    private readonly ToolStripMenuItem _pauseCaptureItem;
     private readonly ToolStripMenuItem _installUpdateItem;
     private readonly ToolStripMenuItem _exitItem;
 
@@ -17,6 +18,7 @@ public sealed class TrayIconService : IDisposable
     public event Action? ExitRequested;
     public event Action? SettingsRequested;
     public event Action<bool>? AutoStartToggleRequested;
+    public event Action<bool>? CapturePauseToggleRequested;
     public event Action? CheckUpdateRequested;
     public event Action? InstallUpdateRequested;
     public event Action? OpenDataFolderRequested;
@@ -48,6 +50,10 @@ public sealed class TrayIconService : IDisposable
         _autoStartItem = new ToolStripMenuItem("开机自启动") { CheckOnClick = true };
         _autoStartItem.Click += (_, _) => AutoStartToggleRequested?.Invoke(_autoStartItem.Checked);
 
+        // 暂停捕获：临时不记录剪贴板（复制密码等敏感内容时用），面板/托盘状态同步
+        _pauseCaptureItem = new ToolStripMenuItem("暂停捕获") { CheckOnClick = true };
+        _pauseCaptureItem.Click += (_, _) => CapturePauseToggleRequested?.Invoke(_pauseCaptureItem.Checked);
+
         var updateItem = new ToolStripMenuItem("检查更新…");
         updateItem.Click += (_, _) => CheckUpdateRequested?.Invoke();
 
@@ -63,6 +69,7 @@ public sealed class TrayIconService : IDisposable
         menu.Items.Add(dataFolderItem);
         menu.Items.Add(clearTodayItem);
         menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add(_pauseCaptureItem);
         menu.Items.Add(_autoStartItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(updateItem);
@@ -81,6 +88,17 @@ public sealed class TrayIconService : IDisposable
     }
 
     public void SetAutoStartChecked(bool enabled) => _autoStartItem.Checked = enabled;
+
+    /// <summary>同步「暂停捕获」勾选状态（设置变更 / 启动时）。</summary>
+    public void SetCapturePausedChecked(bool paused)
+    {
+        if (_pauseCaptureItem.Checked == paused)
+        {
+            return;
+        }
+
+        _pauseCaptureItem.Checked = paused;
+    }
 
     /// <summary>有已下载更新时显示托盘「安装更新」项。</summary>
     public void SetInstallUpdateVisible(bool visible, string? tagName)
@@ -258,6 +276,7 @@ public sealed class TrayIconService : IDisposable
         _notifyIcon.Dispose();
         _toggleItem.Dispose();
         _autoStartItem.Dispose();
+        _pauseCaptureItem.Dispose();
         _exitItem.Dispose();
     }
 }

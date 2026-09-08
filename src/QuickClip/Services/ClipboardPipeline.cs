@@ -5,24 +5,28 @@ namespace QuickClip.Services;
 
 /// <summary>
 /// 剪贴板处理流水线：去重防抖、类型解析、图片二维码识别、写入数据库。
+///
+/// 自身回写靠「剪贴板序列号」识别（<see cref="PasteService.IsOwnSequence"/>）：
+/// 只有序列号等于自己刚写入的那次才跳过，因此用户在 2.5 秒内的真实复制不会再被丢掉。
 /// </summary>
 public sealed class ClipboardPipeline
 {
     private readonly AppPaths _paths;
-    private DatabaseService _db;
+    private readonly DatabaseService _db;
     private readonly QrCodeService _qr;
     private readonly PasteService _paste;
     private readonly SettingsService _settings;
     private readonly object _lock = new();
 
+    /// <summary>串行化捕获：连续剪贴板通知不再并发跑多条流水线。</summary>
+    private readonly SemaphoreSlim _captureGate = new(1, 1);
+
     private string? _lastKey;
     private DateTime _lastTime = DateTime.MinValue;
-    /// <summary>自身回写系统剪贴板后的忽略截止时间（UTC）。</summary>
-    private DateTime _suppressUntilUtc = DateTime.MinValue;
 
     /// <summary>
     /// 捕获超时看门狗：属主进程延迟渲染卡死时原生 GetClipboardData 仍可能阻塞，
-    /// 不能无限等（挂起的线程会持有剪贴板，导致全系统复制/粘贴失效），超时即跳过本次捕获。
+    /// 不能无限等（被放弃的线程仍持有剪贴板，无法从这里释放），超时即跳过本次捕获。
     /// 取值放宽到 5s：正常大图编码 + 哈希也可能耗时约 2s，避免误判。
     /// </summary>
     private const int CaptureTimeoutMilliseconds = 5000;
@@ -39,42 +43,6 @@ public sealed class ClipboardPipeline
         _settings = settings;
     }
 
-    /// <summary>设置里切换数据库后替换存储目标（旧连接由调用方负责释放）。</summary>
-    public void AttachDatabase(DatabaseService db)
-    {
-        _db = db;
-    }
-
-    /// <summary>
-    /// 应用从历史「复制/粘贴」回写系统剪贴板前调用：短时间内忽略捕获，
-    /// 避免同一条内容再插到列表第一行。
-    /// </summary>
-    public void SuppressCapture(string? dedupKey = null, int milliseconds = 2500)
-    {
-        lock (_lock)
-        {
-            _suppressUntilUtc = DateTime.UtcNow.AddMilliseconds(Math.Max(500, milliseconds));
-            if (!string.IsNullOrEmpty(dedupKey))
-            {
-                _lastKey = dedupKey;
-                _lastTime = DateTime.Now;
-            }
-        }
-    }
-
-    private bool ShouldIgnoreCapture()
-    {
-        if (_paste.IsSelfPasting)
-        {
-            return true;
-        }
-
-        lock (_lock)
-        {
-            return DateTime.UtcNow < _suppressUntilUtc;
-        }
-    }
-
     /// <summary>
     /// 剪贴板变化回调（UI 线程进入，内部异步处理）。
     /// 只读系统剪贴板并可选写入本地历史；任何超限/跳过都不会 Clear 或改写系统剪贴板，
@@ -82,9 +50,23 @@ public sealed class ClipboardPipeline
     /// </summary>
     public async void OnClipboardUpdated()
     {
-        // 自身回写 / 抑制窗口内：不入库（列表点选复制、双击粘贴等）
-        if (ShouldIgnoreCapture())
+        // 用户主动暂停捕获（复制敏感内容时）：不读、不入库
+        if (_settings.CapturePaused)
         {
+            DebugLog.LogDetail("捕获已暂停，跳过本次剪贴板通知");
+            return;
+        }
+
+        // 自身正在写剪贴板（同步竞态窗口）：直接跳过
+        if (_paste.IsSelfPasting)
+        {
+            return;
+        }
+
+        // 串行化：上一个捕获还没结束时直接跳过，避免重复入库 / 预览文件互相覆盖
+        if (!await _captureGate.WaitAsync(0))
+        {
+            DebugLog.LogDetail("已有捕获在处理，跳过本次剪贴板通知");
             return;
         }
 
@@ -97,20 +79,38 @@ public sealed class ClipboardPipeline
             var finished = await Task.WhenAny(dataTask, Task.Delay(CaptureTimeoutMilliseconds));
             if (finished != dataTask)
             {
+                // 被放弃的任务仍可能落盘预览图：等它真正结束时回收，避免孤儿文件长期堆积
+                _ = dataTask.ContinueWith(
+                    t =>
+                    {
+                        if (t.Status == TaskStatus.RanToCompletion)
+                        {
+                            TryDeletePreview(t.Result?.PreviewPath);
+                        }
+                    },
+                    TaskScheduler.Default);
                 DebugLog.Log($"剪贴板捕获超时（{CaptureTimeoutMilliseconds}ms），可能被其他进程占用，本次跳过");
                 return;
             }
 
             var data = dataTask.Result;
+            if (data == null)
+            {
+                return;
+            }
+
+            // 自身回写：序列号一致 → 不入库（比时间窗精确，也不会误丢用户真实复制）
+            if (_paste.IsOwnSequence(data.SequenceNumber))
+            {
+                DebugLog.LogDetail($"忽略自身回写（序列号 {data.SequenceNumber}）");
+                TryDeletePreview(data.PreviewPath);
+                return;
+            }
 
             // await 之后再判一次：抑制窗口可能覆盖异步空档
-            if (data == null || ShouldIgnoreCapture())
+            if (_paste.IsSelfPasting)
             {
-                if (data?.PreviewPath is { } orphan)
-                {
-                    TryDeletePreview(orphan);
-                }
-
+                TryDeletePreview(data.PreviewPath);
                 return;
             }
 
@@ -125,7 +125,7 @@ public sealed class ClipboardPipeline
             lock (_lock)
             {
                 var now = DateTime.Now;
-                // 短时间相同内容去重（连续复制同一段 / 历史回写）
+                // 短时间相同内容去重（连续复制同一段 / 自身回写兜底）
                 if (_lastKey == data.DedupKey && (now - _lastTime).TotalSeconds < 8)
                 {
                     TryDeletePreview(data.PreviewPath);
@@ -149,6 +149,8 @@ public sealed class ClipboardPipeline
                 TextContent = data.ContentType == ClipboardContentType.File
                     ? string.Join(Environment.NewLine, data.Files ?? Array.Empty<string>())
                     : data.Text,
+                HtmlContent = data.Html,
+                RtfContent = data.Rtf,
                 PreviewPath = data.PreviewPath,
                 QrContent = qr,
                 CharCount = data.CharCount,
@@ -172,6 +174,10 @@ public sealed class ClipboardPipeline
         catch (Exception ex)
         {
             DebugLog.LogException("剪贴板流水线处理失败", ex);
+        }
+        finally
+        {
+            _captureGate.Release();
         }
     }
 

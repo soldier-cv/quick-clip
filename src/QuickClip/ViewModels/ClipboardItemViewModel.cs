@@ -97,18 +97,34 @@ public sealed class ClipboardItemViewModel : INotifyPropertyChanged
         _ => SymbolRegular.Document24
     };
 
-    private readonly Lazy<BitmapImage?> _thumbnail;
-
-    /// <summary>图片缩略图（延迟加载，仅列表项实际渲染时解码，避免一次性解码大量图片）。</summary>
-    public BitmapImage? Thumbnail => _thumbnail.Value;
+    /// <summary>
+    /// 图片缩略图：每次取用都走 ThumbnailCache（LRU）。
+    /// 不能用 Lazy 缓存结果——Lazy 会永久持有解码后的 BitmapImage，
+    /// 使缓存淘汰失效，233 条历史的缩略图会一直留在内存里。
+    /// </summary>
+    public BitmapImage? Thumbnail => LoadThumbnail(240);
 
     /// <summary>悬浮预览大图（仅在打开 ToolTip 时才解码）。</summary>
-    public BitmapImage? HoverThumbnail => _hoverThumbnail.Value;
+    public BitmapImage? HoverThumbnail => LoadThumbnail(720);
 
     /// <summary>悬浮预览全文（文本/链接/文件），图片为 null。</summary>
     public string? HoverText { get; }
 
-    private readonly Lazy<BitmapImage?> _hoverThumbnail;
+    private BitmapImage? LoadThumbnail(int decodePixelWidth)
+    {
+        if (!IsImage)
+        {
+            return null;
+        }
+
+        string? path = Item.PreviewPath;
+        if (string.IsNullOrEmpty(path) || !File.Exists(path))
+        {
+            return null;
+        }
+
+        return ThumbnailCache.GetOrCreate(path, decodePixelWidth);
+    }
 
     public ClipboardItemViewModel(ClipboardItem item)
     {
@@ -127,17 +143,6 @@ public sealed class ClipboardItemViewModel : INotifyPropertyChanged
         HoverText = item.ContentType == ClipboardContentType.Image
             ? null
             : item.TextContent;
-
-        // 延迟解码 + LRU 缓存，虚拟化滚出后可被淘汰
-        _thumbnail = new Lazy<BitmapImage?>(() =>
-            IsImage && !string.IsNullOrEmpty(item.PreviewPath) && File.Exists(item.PreviewPath)
-                ? ThumbnailCache.GetOrCreate(item.PreviewPath!, 240)
-                : null);
-
-        _hoverThumbnail = new Lazy<BitmapImage?>(() =>
-            IsImage && !string.IsNullOrEmpty(item.PreviewPath) && File.Exists(item.PreviewPath)
-                ? ThumbnailCache.GetOrCreate(item.PreviewPath!, 720)
-                : null);
     }
 
     public void RefreshDisplay()

@@ -91,16 +91,21 @@ public static class ClipboardImageNormalizer
         var data = bmp.LockBits(rect, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
         try
         {
-            int bytes = Math.Abs(data.Stride) * bmp.Height;
-            var buffer = new byte[bytes];
-            System.Runtime.InteropServices.Marshal.Copy(data.Scan0, buffer, 0, bytes);
-            int stride = Math.Abs(data.Stride);
+            // 逐像素直接读非托管内存：绝大多数图片第一个像素就是不透明的，立即返回。
+            // 旧实现会先把整图 Marshal.Copy 到托管数组（40MP 图 ≈ 160MB），
+            // 每次缩略图缓存未命中都触发一次，代价极高。
+            IntPtr scan0 = data.Scan0;
+            int stride = data.Stride;
+            int absStride = Math.Abs(stride);
+            int firstRowOffset = stride >= 0 ? 0 : absStride * (bmp.Height - 1);
+            int rowStep = stride >= 0 ? absStride : -absStride;
+
             for (int y = 0; y < bmp.Height; y++)
             {
-                int row = y * stride;
+                int rowBase = firstRowOffset + y * rowStep;
                 for (int x = 0; x < bmp.Width; x++)
                 {
-                    if (buffer[row + x * 4 + 3] != 0)
+                    if (System.Runtime.InteropServices.Marshal.ReadByte(scan0, rowBase + x * 4 + 3) != 0)
                     {
                         return false;
                     }

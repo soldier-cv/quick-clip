@@ -96,19 +96,51 @@ public sealed class AppServices : IDisposable
 
         Update.StartSilentChecks();
 
-        // 启动时全自动彻底接管系统剪贴板（关闭系统记录并禁用 Explorer Win+V 热键）
-        SystemClipboardService.EnsureSystemClipboardDisabled();
+        // 系统剪贴板接管策略：默认接管（先快照原始注册表状态）；用户关闭后按快照恢复
+        ApplySystemClipboardPolicy();
 
         // 先挂监听 + 热键（核心路径），再同步托盘
         Monitor.ClipboardUpdated += Pipeline.OnClipboardUpdated;
-        // 历史项复制/粘贴回写系统剪贴板时抑制捕获，避免列表顶部再插一条相同记录
-        Paste.SelfClipboardWrite += () => Pipeline.SuppressCapture();
+        // 粘贴/复制失败（剪贴板被占用、目标窗口未激活、内容缺失）用托盘气泡反馈，
+        // 面板此时通常已经隐藏，状态栏提示用户看不到
+        Paste.PasteFailed += message => Tray.ShowBalloonTip("QuickClip", message);
         Hotkey.HotkeyInstallFailed += message => Tray.ShowBalloonTip("QuickClip", message);
         Settings.Changed += OnSettingsChanged;
         Hotkey.Start(Dispatcher.CurrentDispatcher, Settings);
 
         Tray.SetAutoStartChecked(Settings.AutoStart);
+        Tray.SetCapturePausedChecked(Settings.CapturePaused);
         return true;
+    }
+
+    /// <summary>暂停 / 恢复剪贴板捕获（托盘勾选与设置共用同一来源）。</summary>
+    public void SetCapturePaused(bool paused)
+    {
+        Settings.SetCapturePaused(paused);
+        Tray.SetCapturePausedChecked(paused);
+    }
+
+    /// <summary>
+    /// 应用「接管系统剪贴板」策略：开启时快照并接管，关闭时按快照精确恢复系统状态。
+    /// </summary>
+    private void ApplySystemClipboardPolicy()
+    {
+        if (Settings.TakeOverSystemClipboard)
+        {
+            SystemClipboardService.EnsureSystemClipboardDisabled(Paths);
+        }
+        else
+        {
+            SystemClipboardService.RestoreSystemClipboard(Paths);
+        }
+    }
+
+    /// <summary>设置页切换「接管系统剪贴板」：立即生效并持久化，随后重新尝试注册 Win+V。</summary>
+    public void SetSystemClipboardTakeOver(bool enabled)
+    {
+        Settings.SetTakeOverSystemClipboard(enabled);
+        ApplySystemClipboardPolicy();
+        Hotkey.RefreshHotkeys();
     }
 
     /// <summary>设置变更联动：热键重新注册；自启动仅在状态变化时写注册表并同步托盘勾选。</summary>
@@ -256,5 +288,12 @@ public sealed class AppServices : IDisposable
         Update.Dispose();
         OcrPacks.Dispose();
         Database.Dispose();
+
+        // 退出时按接管前快照还原系统剪贴板状态：
+        // QuickClip 不在运行时，用户的 Win+V 与系统剪贴板历史应当保持可用。
+        if (Settings.TakeOverSystemClipboard)
+        {
+            SystemClipboardService.RestoreSystemClipboard(Paths);
+        }
     }
 }

@@ -26,6 +26,9 @@ public partial class MainWindow : FluentWindow
     /// <summary>自有模态对话框（确认框 / 另存为）打开期间为 true：它会让主窗失焦，不能当成「点到外部」隐藏面板。</summary>
     private bool _modalDialogOpen;
 
+    /// <summary>本次 OCR 的原始识别结果：供「重置」恢复，编辑不改写它。</summary>
+    private string _ocrOriginalText = string.Empty;
+
     /// <summary>删除按钮节流：双击/连点时的第二次点击不应再作用于（可能已复用的）卡片。</summary>
     private long _lastDeleteClickTicks;
 
@@ -486,7 +489,8 @@ public partial class MainWindow : FluentWindow
         if (QrOverlay.Visibility == Visibility.Visible ||
             OcrOverlay.Visibility == Visibility.Visible)
         {
-            if (settings.HidePanelHotkey.Matches(key, modifiers))
+            // OCR 页可直接编辑：Esc 也当关闭，但改动过就先确认，避免手滑丢掉编辑
+            if (key == Key.Escape || settings.HidePanelHotkey.Matches(key, modifiers))
             {
                 OnCloseOverlays(sender, e);
                 e.Handled = true;
@@ -1331,9 +1335,28 @@ public partial class MainWindow : FluentWindow
     private void ShowOcrOverlay(string title, string text)
     {
         OcrTitle.Text = string.IsNullOrWhiteSpace(title) ? "离线识别" : title;
-        OcrText.Text = text;
+        _ocrOriginalText = text ?? string.Empty;
+        OcrText.Text = _ocrOriginalText;
+        OcrResetButton.IsEnabled = false; // 刚打开时与原文一致，按钮置灰；后续按编辑状态更新
         OcrOverlay.Visibility = Visibility.Visible;
         OcrOverlay.IsHitTestVisible = true;
+        // 结果页支持简易编辑：直接落焦并把光标放到末尾，方便接着改错字
+        OcrText.Focus();
+        OcrText.CaretIndex = OcrText.Text.Length;
+    }
+
+    /// <summary>编辑后把「重置」按钮在可用 / 置灰间切换，提示当前是否已偏离原始识别结果。</summary>
+    private void UpdateOcrResetState() =>
+        OcrResetButton.IsEnabled = !string.Equals(OcrText.Text, _ocrOriginalText, StringComparison.Ordinal);
+
+    private void OnOcrTextChanged(object sender, TextChangedEventArgs e) => UpdateOcrResetState();
+
+    private void OnResetOcrClicked(object sender, RoutedEventArgs e)
+    {
+        OcrText.Text = _ocrOriginalText;
+        OcrText.CaretIndex = OcrText.Text.Length;
+        UpdateOcrResetState();
+        _viewModel.StatusText = "已还原识别结果";
     }
 
     private async void OnCopyOcrClicked(object sender, RoutedEventArgs e)
@@ -1357,8 +1380,31 @@ public partial class MainWindow : FluentWindow
 
     private void OnCloseOverlays(object sender, RoutedEventArgs e)
     {
+        // 编辑过 OCR 文字时先确认，避免误关丢掉手工修正的内容
+        if (OcrOverlay.Visibility == Visibility.Visible &&
+            !string.Equals(OcrText.Text, _ocrOriginalText, StringComparison.Ordinal))
+        {
+            var result = ShowOwnedModal(() => System.Windows.MessageBox.Show(
+                this,
+                "识别结果已修改，关闭后修改内容将丢失。\n确定关闭？",
+                "关闭 OCR 结果",
+                System.Windows.MessageBoxButton.YesNo,
+                MessageBoxImage.Question,
+                System.Windows.MessageBoxResult.No));
+
+            if (result != System.Windows.MessageBoxResult.Yes)
+            {
+                // 取消关闭后把焦点还给可编辑框，接着改字
+                OcrText.Focus();
+                return;
+            }
+        }
+
         QrOverlay.Visibility = Visibility.Collapsed;
         OcrOverlay.Visibility = Visibility.Collapsed;
+        // 弹层收起后把键盘焦点还给搜索框：焦点若留在已折叠的 OcrText 上，
+        // 用户得先点一下面板才能继续打字检索
+        SearchBox.Focus();
     }
 
     // ---------- 设置与托盘动作 ----------

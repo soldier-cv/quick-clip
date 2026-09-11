@@ -649,33 +649,58 @@
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="100" />
                                     <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Text="接口地址"
                                            Foreground="{DynamicResource Theme.TextSecondary}"
                                            FontSize="13"
                                            VerticalAlignment="Center" />
-                                <TextBox x:Name="VisionApiUrlBox"
-                                         Grid.Column="1"
-                                         Height="34"
-                                         Padding="10,0"
-                                         VerticalContentAlignment="Center"
-                                         LostFocus="OnVisionApiConfigLostFocus" />
+                                <ui:TextBox x:Name="VisionApiUrlBox"
+                                            Grid.Column="1"
+                                            Height="34"
+                                            Padding="10,0"
+                                            PlaceholderText="https://api.openai.com/v1/chat/completions"
+                                            VerticalContentAlignment="Center"
+                                            TextChanged="OnVisionApiUrlTextChanged"
+                                            LostFocus="OnVisionApiConfigLostFocus" />
+                                <ui:Button x:Name="FillSampleUrlButton"
+                                           Grid.Column="2"
+                                           Height="34"
+                                           Margin="8,0,0,0"
+                                           Padding="10,0"
+                                           Appearance="Secondary"
+                                           Content="填入样例"
+                                           ToolTip="填入默认样例地址并直接选中域名段供快速编辑"
+                                           Click="OnFillSampleUrlClicked" />
                             </Grid>
                             <Grid Margin="0,10,0,0">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="100" />
                                     <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Text="视觉模型"
                                            Foreground="{DynamicResource Theme.TextSecondary}"
                                            FontSize="13"
                                            VerticalAlignment="Center" />
-                                <TextBox x:Name="VisionApiModelBox"
-                                         Grid.Column="1"
-                                         Height="34"
-                                         Padding="10,0"
-                                         VerticalContentAlignment="Center"
-                                         LostFocus="OnVisionApiConfigLostFocus" />
+                                <ComboBox x:Name="VisionApiModelBox"
+                                          Grid.Column="1"
+                                          Height="34"
+                                          IsEditable="True"
+                                          VerticalContentAlignment="Center"
+                                          PreviewMouseWheel="OnComboBoxPreviewMouseWheel"
+                                          LostFocus="OnVisionApiConfigLostFocus" />
+                                <ui:Button x:Name="FetchModelsButton"
+                                           Grid.Column="2"
+                                           Height="34"
+                                           Width="34"
+                                           Margin="8,0,0,0"
+                                           Padding="0"
+                                           Appearance="Secondary"
+                                           ToolTip="获取模型"
+                                           Click="OnFetchModelsClicked">
+                                    <ui:SymbolIcon Symbol="ArrowDownload24" FontSize="16" />
+                                </ui:Button>
                             </Grid>
                             <Grid Margin="0,10,0,0">
                                 <Grid.ColumnDefinitions>
@@ -687,11 +712,41 @@
                                            FontSize="13"
                                            VerticalAlignment="Center" />
                                 <PasswordBox x:Name="VisionApiKeyBox"
-                                             Grid.Column="1"
-                                             Height="34"
-                                             Padding="10,0"
-                                             VerticalContentAlignment="Center"
-                                             LostFocus="OnVisionApiConfigLostFocus" />
+                                              Grid.Column="1"
+                                              Height="34"
+                                              Padding="10,0"
+                                              VerticalContentAlignment="Center"
+                                              LostFocus="OnVisionApiConfigLostFocus" />
+                            </Grid>
+                            <Grid Margin="0,10,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="100" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel VerticalAlignment="Top" Margin="0,6,0,0">
+                                    <TextBlock Text="识别提示词"
+                                               Foreground="{DynamicResource Theme.TextSecondary}"
+                                               FontSize="13" />
+                                    <ui:Button x:Name="ResetVisionPromptButton"
+                                               Margin="0,6,0,0"
+                                               Padding="6,2"
+                                               FontSize="11"
+                                               Appearance="Transparent"
+                                               Foreground="{DynamicResource Theme.TextMuted}"
+                                               HorizontalAlignment="Left"
+                                               Content="恢复默认"
+                                               ToolTip="恢复推荐的 Markdown 结构化排版提示词"
+                                               Click="OnResetVisionPromptClicked" />
+                                </StackPanel>
+                                <TextBox x:Name="VisionApiPromptBox"
+                                         Grid.Column="1"
+                                         MinHeight="68"
+                                         MaxHeight="120"
+                                         AcceptsReturn="True"
+                                         TextWrapping="Wrap"
+                                         VerticalScrollBarVisibility="Auto"
+                                         Padding="10,6"
+                                         LostFocus="OnVisionApiConfigLostFocus" />
                             </Grid>
                         </StackPanel>
 

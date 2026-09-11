@@ -65,6 +65,51 @@ public sealed class SettingsService
     /// <summary>视觉接口 API Key（可选；仅保存在本地 settings.json，禁止写日志）。</summary>
     public string? VisionApiKey { get; private set; }
 
+    /// <summary>视觉接口识别提示词（Prompt）。</summary>
+    public string VisionApiPrompt { get; private set; } = DefaultVisionApiPrompt;
+
+    /// <summary>按接口地址缓存已拉取的模型列表，切换地址或重新打开设置时复用。</summary>
+    public Dictionary<string, List<string>> VisionApiCachedModels { get; private set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    public IReadOnlyList<string> GetCachedModelsForUrl(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return Array.Empty<string>();
+        }
+
+        string key = NormalizeVisionApiUrlKey(url);
+        return VisionApiCachedModels.TryGetValue(key, out var list) && list != null
+            ? list
+            : Array.Empty<string>();
+    }
+
+    public void SetCachedModelsForUrl(string? url, IEnumerable<string> models)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return;
+        }
+
+        string key = NormalizeVisionApiUrlKey(url);
+        var list = models.Where(m => !string.IsNullOrWhiteSpace(m)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (list.Count == 0)
+        {
+            return;
+        }
+
+        VisionApiCachedModels[key] = list;
+        Save();
+    }
+
+    private static string NormalizeVisionApiUrlKey(string url) => url.Trim().TrimEnd('/');
+
+    public const string DefaultVisionApiPrompt =
+        "请精确识别图片中的全部文字与内容，严格保留原始版面结构：\n" +
+        "1. 表格内容必须提取并整理为标准的 Markdown 表格；\n" +
+        "2. 并列的卡片、表单或统计数据，请保持对应关系，以“标签: 数值”的键值对形式呈现；\n" +
+        "3. 保留标题和层级关系，不要输出多余的解释或问候，直接输出排版结果。";
+
     private const string DefaultVisionApiUrl = "https://api.openai.com/v1/chat/completions";
     private const string DefaultVisionApiModel = "gpt-4o-mini";
     private const string DefaultOllamaUrl = "http://localhost:11434/api/generate";
@@ -157,6 +202,15 @@ public sealed class SettingsService
             }
 
             ApplyVisionApiFromDto(dto, dto.OcrEngine);
+            if (!string.IsNullOrWhiteSpace(dto.VisionApiPrompt))
+            {
+                VisionApiPrompt = dto.VisionApiPrompt.Trim();
+            }
+
+            if (dto.VisionApiCachedModels != null)
+            {
+                VisionApiCachedModels = new Dictionary<string, List<string>>(dto.VisionApiCachedModels, StringComparer.OrdinalIgnoreCase);
+            }
 
             TextOnlyCapture = dto.TextOnlyCapture ?? false;
             CapturePaused = dto.CapturePaused ?? false;
@@ -481,14 +535,15 @@ public sealed class SettingsService
     /// 更新视觉接口配置并持久化（apiKey 为空表示清空）。
     /// 地址为完整 endpoint；API Key 仅存本地 settings.json，禁止写入日志。
     /// </summary>
-    public void SetVisionApiConfig(string baseUrl, string model, string? apiKey)
+    public void SetVisionApiConfig(string baseUrl, string model, string? apiKey, string? prompt = null)
     {
         string nextUrl = string.IsNullOrWhiteSpace(baseUrl)
             ? VisionApiUrl
             : MigrateVisionEndpoint(baseUrl);
         string nextModel = string.IsNullOrWhiteSpace(model) ? VisionApiModel : model.Trim();
         string? nextKey = string.IsNullOrWhiteSpace(apiKey) ? null : apiKey.Trim();
-        if (VisionApiUrl == nextUrl && VisionApiModel == nextModel && VisionApiKey == nextKey)
+        string nextPrompt = string.IsNullOrWhiteSpace(prompt) ? VisionApiPrompt : prompt.Trim();
+        if (VisionApiUrl == nextUrl && VisionApiModel == nextModel && VisionApiKey == nextKey && VisionApiPrompt == nextPrompt)
         {
             return;
         }
@@ -496,6 +551,20 @@ public sealed class SettingsService
         VisionApiUrl = nextUrl;
         VisionApiModel = nextModel;
         VisionApiKey = nextKey;
+        VisionApiPrompt = nextPrompt;
+        Save();
+    }
+
+    /// <summary>更新视觉接口识别提示词并持久化。</summary>
+    public void SetVisionApiPrompt(string prompt)
+    {
+        string nextPrompt = string.IsNullOrWhiteSpace(prompt) ? DefaultVisionApiPrompt : prompt.Trim();
+        if (VisionApiPrompt == nextPrompt)
+        {
+            return;
+        }
+
+        VisionApiPrompt = nextPrompt;
         Save();
     }
 
@@ -680,6 +749,8 @@ public sealed class SettingsService
                 VisionApiUrl = VisionApiUrl,
                 VisionApiModel = VisionApiModel,
                 VisionApiKey = VisionApiKey,
+                VisionApiPrompt = VisionApiPrompt,
+                VisionApiCachedModels = VisionApiCachedModels.Count > 0 ? VisionApiCachedModels : null,
                 MaxHistoryItems = MaxHistoryItems,
                 TextOnlyCapture = TextOnlyCapture,
                 CapturePaused = CapturePaused,
@@ -728,6 +799,8 @@ public sealed class SettingsData
     public string? VisionApiUrl { get; set; }
     public string? VisionApiModel { get; set; }
     public string? VisionApiKey { get; set; }
+    public string? VisionApiPrompt { get; set; }
+    public Dictionary<string, List<string>>? VisionApiCachedModels { get; set; }
     /// <summary>旧字段，仅读取以迁移到 VisionApi*。</summary>
     public string? OllamaBaseUrl { get; set; }
     public string? OllamaModel { get; set; }

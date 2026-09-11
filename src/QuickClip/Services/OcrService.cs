@@ -364,7 +364,7 @@ public sealed class OcrService
         var request = new
         {
             model = _settings.VisionApiModel,
-            prompt = "请识别图片中的全部文字，仅返回识别出的文字内容。",
+            prompt = GetEffectiveVisionPrompt(),
             images = new[] { ToBase64(imagePath) },
             stream = false
         };
@@ -395,7 +395,7 @@ public sealed class OcrService
                     role = "user",
                     content = new object[]
                     {
-                        new { type = "text", text = "请识别图片中的全部文字，仅返回识别出的文字内容。" },
+                        new { type = "text", text = GetEffectiveVisionPrompt() },
                         new { type = "image_url", image_url = new { url = $"data:image/jpeg;base64,{ToJpegBase64(imagePath)}" } }
                     }
                 }
@@ -554,4 +554,196 @@ public sealed class OcrService
 
     /// <summary>去掉首尾空白与末尾 /，原样作为请求地址（不追加任何路径）。</summary>
     private static string NormalizeEndpoint(string url) => url.Trim().TrimEnd('/');
+
+    private string GetEffectiveVisionPrompt() =>
+        string.IsNullOrWhiteSpace(_settings.VisionApiPrompt)
+            ? SettingsService.DefaultVisionApiPrompt
+            : _settings.VisionApiPrompt.Trim();
+
+    /// <summary>
+    /// 从接口地址获取支持的模型列表（兼容 Ollama /api/tags 与 OpenAI 兼容 /models）。
+    /// 自动将具备视觉能力（如 vl, vision, 4o, omni, flash 等）的模型置顶排在前面。
+    /// </summary>
+    public async Task<IReadOnlyList<string>> FetchAvailableModelsAsync(string? urlOverride = null, string? keyOverride = null)
+    {
+        string rawUrl = (urlOverride ?? _settings.VisionApiUrl).Trim();
+        if (string.IsNullOrWhiteSpace(rawUrl))
+        {
+            throw new InvalidOperationException("请先填写接口地址。");
+        }
+
+        string? key = keyOverride != null
+            ? (string.IsNullOrWhiteSpace(keyOverride) ? null : keyOverride.Trim())
+            : _settings.VisionApiKey;
+
+        bool isOllama = IsOllamaNativeEndpoint(rawUrl) || rawUrl.Contains(":11434");
+        return isOllama
+            ? await FetchOllamaModelsAsync(rawUrl, key)
+            : await FetchOpenAiModelsAsync(rawUrl, key);
+    }
+
+    private static async Task<IReadOnlyList<string>> FetchOllamaModelsAsync(string rawUrl, string? apiKey)
+    {
+        string baseUrl = rawUrl.Trim().TrimEnd('/');
+        int apiIndex = baseUrl.IndexOf("/api", StringComparison.OrdinalIgnoreCase);
+        if (apiIndex >= 0)
+        {
+            baseUrl = baseUrl[..apiIndex];
+        }
+
+        string tagsUrl = baseUrl + "/api/tags";
+        using var request = new HttpRequestMessage(HttpMethod.Get, tagsUrl);
+        if (!string.IsNullOrWhiteSpace(apiKey))
+        {
+            request.Headers.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
+        }
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        HttpResponseMessage response;
+        try
+        {
+            response = await Http.SendAsync(request, cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            throw new HttpRequestException("连接 Ollama 接口超时 (15s)，请检查服务是否已启动。");
+        }
+
+        await EnsureSuccessWithBodyAsync(response);
+
+        string json = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(json);
+        var models = new List<string>();
+
+        if (doc.RootElement.TryGetProperty("models", out JsonElement modelsEl) &&
+            modelsEl.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in modelsEl.EnumerateArray())
+            {
+                if (item.TryGetProperty("name", out JsonElement nameEl))
+                {
+                    string? name = nameEl.GetString();
+                    if (!string.IsNullOrWhiteSpace(name))
+                    {
+                        models.Add(name.Trim());
+                    }
+                }
+            }
+        }
+
+        if (models.Count == 0)
+        {
+            throw new InvalidOperationException("Ollama 接口已连通，但本地尚未安装任何模型（列表为空）。");
+        }
+
+        return SortModels(models);
+    }
+
+    private static async Task<IReadOnlyList<string>> FetchOpenAiModelsAsync(string rawUrl, string? apiKey)
+    {
+        string modelsUrl = ResolveOpenAiModelsUrl(rawUrl);
+        using var request = new HttpRequestMessage(HttpMethod.Get, modelsUrl);
+        if (!string.IsNullOrWhiteSpace(apiKey))
+        {
+            request.Headers.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
+        }
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        HttpResponseMessage response;
+        try
+        {
+            response = await Http.SendAsync(request, cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            throw new HttpRequestException("连接模型接口超时 (15s)，请检查网络或地址是否正确。");
+        }
+
+        await EnsureSuccessWithBodyAsync(response);
+
+        string json = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(json);
+        var models = new List<string>();
+
+        if (doc.RootElement.TryGetProperty("data", out JsonElement dataEl) &&
+            dataEl.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in dataEl.EnumerateArray())
+            {
+                if (item.TryGetProperty("id", out JsonElement idEl))
+                {
+                    string? id = idEl.GetString();
+                    if (!string.IsNullOrWhiteSpace(id))
+                    {
+                        models.Add(id.Trim());
+                    }
+                }
+            }
+        }
+
+        if (models.Count == 0)
+        {
+            throw new InvalidOperationException("接口已连通，但未返回任何模型列表。");
+        }
+
+        return SortModels(models);
+    }
+
+    internal static string ResolveOpenAiModelsUrl(string endpoint)
+    {
+        string trimmed = endpoint.Trim().TrimEnd('/');
+        if (trimmed.EndsWith("/models", StringComparison.OrdinalIgnoreCase))
+        {
+            return trimmed;
+        }
+
+        if (trimmed.EndsWith("/chat/completions", StringComparison.OrdinalIgnoreCase))
+        {
+            return trimmed[..^"/chat/completions".Length] + "/models";
+        }
+
+        if (trimmed.EndsWith("/completions", StringComparison.OrdinalIgnoreCase))
+        {
+            return trimmed[..^"/completions".Length] + "/models";
+        }
+
+        if (trimmed.EndsWith("/v1", StringComparison.OrdinalIgnoreCase))
+        {
+            return trimmed + "/models";
+        }
+
+        return trimmed + "/v1/models";
+    }
+
+    private static IReadOnlyList<string> SortModels(IEnumerable<string> models)
+    {
+        return models
+            .Where(m => !string.IsNullOrWhiteSpace(m))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(m => IsLikelyVisionModel(m))
+            .ThenBy(m => m, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static bool IsLikelyVisionModel(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return false;
+        }
+
+        string lower = name.ToLowerInvariant();
+        return lower.Contains("vl") ||
+               lower.Contains("vision") ||
+               lower.Contains("4o") ||
+               lower.Contains("omni") ||
+               lower.Contains("flash") ||
+               lower.Contains("llava") ||
+               lower.Contains("minicpm") ||
+               lower.Contains("gemini") ||
+               lower.Contains("claude") ||
+               lower.Contains("image");
+    }
 }

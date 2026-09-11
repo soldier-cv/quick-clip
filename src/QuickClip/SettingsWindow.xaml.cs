@@ -183,9 +183,11 @@ public partial class SettingsWindow : Window
             VisionApiUrlBox.Text = s.VisionApiUrl;
             VisionApiModelBox.Text = s.VisionApiModel;
             VisionApiKeyBox.Password = s.VisionApiKey ?? string.Empty;
+            VisionApiPromptBox.Text = s.VisionApiPrompt;
             OcrCustomDirBox.Text = s.OcrCustomDir;
             ApplyOcrEnginePanels(s.OcrEngine);
             RefreshLocalOcrPanel();
+            RefreshCachedModelsForCurrentUrl();
 
             RefreshSysClipboardStatus();
         }
@@ -752,7 +754,119 @@ public partial class SettingsWindow : Window
         _services.Settings.SetVisionApiConfig(
             VisionApiUrlBox.Text,
             VisionApiModelBox.Text,
-            VisionApiKeyBox.Password);
+            VisionApiKeyBox.Password,
+            VisionApiPromptBox.Text);
+        RefreshCachedModelsForCurrentUrl();
+    }
+
+    private void OnVisionApiUrlTextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_suppressUiEvents)
+        {
+            return;
+        }
+
+        RefreshCachedModelsForCurrentUrl();
+    }
+
+    private void RefreshCachedModelsForCurrentUrl()
+    {
+        string url = VisionApiUrlBox.Text.Trim();
+        var cached = _services.Settings.GetCachedModelsForUrl(url);
+        if (cached.Count > 0)
+        {
+            VisionApiModelBox.ItemsSource = cached;
+        }
+    }
+
+    private void OnFillSampleUrlClicked(object sender, RoutedEventArgs e)
+    {
+        ApplySampleUrl("https://api.openai.com/v1/chat/completions", "api.openai.com");
+    }
+
+    private void ApplySampleUrl(string url, string selectToken)
+    {
+        VisionApiUrlBox.Text = url;
+        VisionApiUrlBox.Focus();
+        int idx = url.IndexOf(selectToken, StringComparison.Ordinal);
+        if (idx >= 0)
+        {
+            VisionApiUrlBox.Select(idx, selectToken.Length);
+        }
+        else
+        {
+            VisionApiUrlBox.CaretIndex = url.Length;
+        }
+
+        _services.Settings.SetVisionApiConfig(
+            VisionApiUrlBox.Text,
+            VisionApiModelBox.Text,
+            VisionApiKeyBox.Password,
+            VisionApiPromptBox.Text);
+        RefreshCachedModelsForCurrentUrl();
+    }
+
+    private void OnResetVisionPromptClicked(object sender, RoutedEventArgs e)
+    {
+        VisionApiPromptBox.Text = SettingsService.DefaultVisionApiPrompt;
+        _services.Settings.SetVisionApiPrompt(SettingsService.DefaultVisionApiPrompt);
+    }
+
+    private async void OnFetchModelsClicked(object sender, RoutedEventArgs e)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        string url = VisionApiUrlBox.Text.Trim();
+        string key = VisionApiKeyBox.Password.Trim();
+        string currentModel = VisionApiModelBox.Text.Trim();
+
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            OcrTestStatus.Text = "请先在上方输入接口地址。";
+            OcrTestPanel.Visibility = Visibility.Visible;
+            return;
+        }
+
+        _busy = true;
+        FetchModelsButton.IsEnabled = false;
+        OcrTestPanel.Visibility = Visibility.Visible;
+        OcrTestStatus.Text = "正在从接口拉取模型列表…";
+
+        try
+        {
+            var models = await _services.Ocr.FetchAvailableModelsAsync(url, key);
+            VisionApiModelBox.ItemsSource = models;
+            _services.Settings.SetCachedModelsForUrl(url, models);
+
+            if (!string.IsNullOrWhiteSpace(currentModel))
+            {
+                VisionApiModelBox.Text = currentModel;
+            }
+            else if (models.Count > 0)
+            {
+                VisionApiModelBox.SelectedIndex = 0;
+            }
+
+            _services.Settings.SetVisionApiConfig(
+                VisionApiUrlBox.Text,
+                VisionApiModelBox.Text,
+                VisionApiKeyBox.Password,
+                VisionApiPromptBox.Text);
+
+            OcrTestStatus.Text = $"成功获取 {models.Count} 个模型，已更新下拉列表（优先展示视觉模型）。";
+        }
+        catch (Exception ex)
+        {
+            OcrTestStatus.Text = "获取模型列表失败：" + ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+            FetchModelsButton.IsEnabled = true;
+        }
     }
 
     private async void OnOcrTestClicked(object sender, RoutedEventArgs e)
@@ -790,7 +904,8 @@ public partial class SettingsWindow : Window
             _services.Settings.SetVisionApiConfig(
                 VisionApiUrlBox.Text,
                 VisionApiModelBox.Text,
-                VisionApiKeyBox.Password);
+                VisionApiKeyBox.Password,
+                VisionApiPromptBox.Text);
         }
     }
 

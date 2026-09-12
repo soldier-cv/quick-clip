@@ -121,6 +121,15 @@ public partial class MainWindow : FluentWindow
 
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
+        if (msg == QuickClip.Native.NativeMethods.WM_ACTIVATE)
+        {
+            int wa = (int)(wParam.ToInt64() & 0xFFFF);
+            if (wa != QuickClip.Native.NativeMethods.WA_INACTIVE && lParam != IntPtr.Zero)
+            {
+                _services.Paste.RememberTargetWindow(lParam);
+            }
+        }
+
         if (msg == (int)WmShowQuickClip)
         {
             ShowWindow();
@@ -323,8 +332,8 @@ public partial class MainWindow : FluentWindow
             return;
         }
 
-        DebugLog.Log($"ToggleWindow 触发, IsVisible={IsVisible}");
-        if (IsVisible)
+        DebugLog.Log($"ToggleWindow 触发, IsVisible={IsVisible}, IsActive={IsActive}");
+        if (IsVisible && IsActive)
         {
             HideWindow();
         }

@@ -47,7 +47,7 @@
                     <ui:Button x:Name="PinWindowButton"
                                Appearance="Transparent"
                                Padding="4,2"
-                               Margin="0,0,2,0"
+                               Margin="0,0,6,0"
                                CornerRadius="6"
                                ToolTip="窗口置顶（前端固定），失焦不隐藏"
                                Click="OnPinWindowClicked">

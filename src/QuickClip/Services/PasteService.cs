@@ -30,10 +30,26 @@ public sealed class PasteService
     /// <summary>粘贴/复制失败原因（剪贴板被占用、目标窗口未激活、内容缺失等），供托盘气泡提示。</summary>
     public event Action<string>? PasteFailed;
 
-    /// <summary>记录唤起 QuickClip 之前的前台窗口，作为粘贴目标。</summary>
-    public void RememberTargetWindow()
+    /// <summary>记录唤起 QuickClip 之前的前台窗口，作为粘贴目标。自动过滤属于 QuickClip 进程自身的窗口。</summary>
+    public void RememberTargetWindow(IntPtr candidate = default)
     {
-        _lastTargetWindow = NativeMethods.GetForegroundWindow();
+        IntPtr hwnd = candidate != IntPtr.Zero && NativeMethods.IsWindow(candidate)
+            ? candidate
+            : NativeMethods.GetForegroundWindow();
+
+        if (hwnd == IntPtr.Zero || !NativeMethods.IsWindow(hwnd))
+        {
+            return;
+        }
+
+        NativeMethods.GetWindowThreadProcessId(hwnd, out uint pid);
+        if (pid == (uint)Environment.ProcessId)
+        {
+            return;
+        }
+
+        _lastTargetWindow = hwnd;
+        DebugLog.Log($"记录粘贴目标窗口: {hwnd}, pid={pid}");
     }
 
     /// <summary>该序列号是否属于本服务最近一次成功写入（用于忽略自身回写）。</summary>
@@ -100,34 +116,48 @@ public sealed class PasteService
 
     /// <summary>
     /// 等待目标窗口成为前台后再发送 Ctrl+V；固定 35ms 缓冲在重型聊天软件下偶发不足，轮询兜底。
-    /// 目标窗口最终仍未成为前台时**不再盲发** Ctrl+V（否则会粘到别的窗口），返回 false。
+    /// 目标窗口最终仍未成为前台或属于自身进程时**不再盲发** Ctrl+V（否则会粘到自身或其他窗口），返回 false。
     /// </summary>
     private bool SimulatePaste()
     {
         IntPtr target = _lastTargetWindow;
-        if (target != IntPtr.Zero && NativeMethods.IsWindow(target))
+        if (target == IntPtr.Zero || !NativeMethods.IsWindow(target))
         {
-            NativeMethods.SetForegroundWindow(target);
-
-            // 前台切换通常瞬时完成（QuickClip 已隐藏），首次检查即命中、无额外延迟；
-            // 仅当 SetForegroundWindow 被前台锁延迟生效时轮询等待，避免 Ctrl+V 落到错误窗口。
-            var deadline = DateTime.UtcNow + TimeSpan.FromMilliseconds(600);
-            while (DateTime.UtcNow < deadline)
-            {
-                if (NativeMethods.GetForegroundWindow() == target)
-                {
-                    break;
-                }
-
-                System.Threading.Thread.Sleep(20);
-            }
-
-            if (NativeMethods.GetForegroundWindow() != target)
-            {
-                DebugLog.Log($"粘贴取消：目标窗口 {target} 未成为前台");
-                return false;
-            }
+            DebugLog.Log("粘贴取消：未记录有效的外部目标窗口");
+            return false;
         }
+
+        NativeMethods.GetWindowThreadProcessId(target, out uint pid);
+        if (pid == (uint)Environment.ProcessId)
+        {
+            DebugLog.Log($"粘贴取消：目标窗口 {target} 属于自身进程");
+            return false;
+        }
+
+        // 使用 ForceForeground 穿透前台锁（尤其在置顶且面板不隐藏时）
+        NativeMethods.ForceForeground(target);
+
+        // 前台切换通常瞬时完成（若 QuickClip 已隐藏则立即可达；若置顶则通过 ForceForeground 激活）；
+        // 轮询等待确认前台窗口切换到位，避免 Ctrl+V 落到错误窗口。
+        var deadline = DateTime.UtcNow + TimeSpan.FromMilliseconds(600);
+        while (DateTime.UtcNow < deadline)
+        {
+            if (NativeMethods.GetForegroundWindow() == target)
+            {
+                break;
+            }
+
+            System.Threading.Thread.Sleep(20);
+        }
+
+        if (NativeMethods.GetForegroundWindow() != target)
+        {
+            DebugLog.Log($"粘贴取消：目标窗口 {target} 未成为前台");
+            return false;
+        }
+
+        // 留出 25ms 缓冲确保目标窗口获得键盘焦点并响应 WM_SETFOCUS
+        System.Threading.Thread.Sleep(25);
 
         NativeMethods.SendCtrlV();
         return true;

@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.IO;
 using System.Runtime.CompilerServices;
+using System.Windows;
 using System.Windows.Media.Imaging;
 using QuickClip.Models;
 using QuickClip.Services;
@@ -85,9 +86,68 @@ public sealed class ClipboardItemViewModel : INotifyPropertyChanged
 
     public bool IsText => Item.ContentType is ClipboardContentType.Text or ClipboardContentType.Link;
 
-    public bool IsLink => Item.ContentType == ClipboardContentType.Link;
-
     public bool IsFile => Item.ContentType == ClipboardContentType.File;
+
+    /// <summary>图片/文本/链接条目支持贴图置顶。</summary>
+    public bool ShowStickyAction => IsText || IsImage;
+
+    /// <summary>是否支持文本翻译。</summary>
+    public bool ShowTranslateAction => IsText && !string.IsNullOrWhiteSpace(Item.TextContent);
+
+    private bool _isTranslating;
+    public bool IsTranslating
+    {
+        get => _isTranslating;
+        set
+        {
+            if (_isTranslating == value) return;
+            _isTranslating = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(IsTranslateEnabled));
+            OnPropertyChanged(nameof(TranslateDrawerVisibility));
+        }
+    }
+
+    public bool IsTranslateEnabled => !_isTranslating;
+
+    private bool _isTranslated;
+    public bool IsTranslated
+    {
+        get => _isTranslated;
+        set
+        {
+            if (_isTranslated == value) return;
+            _isTranslated = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(TranslateDrawerVisibility));
+        }
+    }
+
+    public Visibility TranslateDrawerVisibility => (_isTranslated || _isTranslating) ? Visibility.Visible : Visibility.Collapsed;
+
+    private string _translatedText = string.Empty;
+    public string TranslatedText
+    {
+        get => _translatedText;
+        set
+        {
+            if (_translatedText == value) return;
+            _translatedText = value;
+            OnPropertyChanged();
+        }
+    }
+
+    private string _translationEngineInfo = string.Empty;
+    public string TranslationEngineInfo
+    {
+        get => _translationEngineInfo;
+        set
+        {
+            if (_translationEngineInfo == value) return;
+            _translationEngineInfo = value;
+            OnPropertyChanged();
+        }
+    }
 
     public SymbolRegular TypeIcon => Item.ContentType switch
     {

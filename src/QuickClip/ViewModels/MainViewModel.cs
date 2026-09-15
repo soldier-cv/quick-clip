@@ -116,6 +116,72 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
+    /// <summary>当前选中的主栏目：0 = 剪贴历史，1 = 常用短语。</summary>
+    private int _selectedMainTab;
+    public int SelectedMainTab
+    {
+        get => _selectedMainTab;
+        set
+        {
+            if (_selectedMainTab == value) return;
+            _selectedMainTab = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(IsHistoryTabActive));
+            OnPropertyChanged(nameof(IsSnippetsTabActive));
+            OnPropertyChanged(nameof(HistoryVisibility));
+            OnPropertyChanged(nameof(SnippetsVisibility));
+            if (value == 1)
+            {
+                _ = RefreshSnippetsAsync();
+            }
+        }
+    }
+
+    public bool IsHistoryTabActive => SelectedMainTab == 0;
+    public bool IsSnippetsTabActive => SelectedMainTab == 1;
+
+    public Visibility HistoryVisibility => IsHistoryTabActive ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility SnippetsVisibility => IsSnippetsTabActive ? Visibility.Visible : Visibility.Collapsed;
+
+    /// <summary>常用短语集合。</summary>
+    public ObservableCollection<SnippetItem> Snippets { get; } = new();
+
+    /// <summary>常用短语分类集合。</summary>
+    public ObservableCollection<string> SnippetCategories { get; } = new();
+
+    private string _selectedSnippetCategory = "全部";
+    public string SelectedSnippetCategory
+    {
+        get => _selectedSnippetCategory;
+        set
+        {
+            if (_selectedSnippetCategory == value) return;
+            _selectedSnippetCategory = value;
+            OnPropertyChanged();
+            _ = RefreshSnippetsAsync();
+        }
+    }
+
+    private SnippetItem? _selectedSnippet;
+    public SnippetItem? SelectedSnippet
+    {
+        get => _selectedSnippet;
+        set
+        {
+            if (_selectedSnippet == value) return;
+            _selectedSnippet = value;
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>收集栈状态与文本。</summary>
+    public bool IsStackActive => _services.StackPaste.IsActive;
+    public int StackCount => _services.StackPaste.Count;
+    public string StackButtonText => IsStackActive ? $"收集栈 ({StackCount}) 已开启" : "收集栈";
+    public string StackButtonTooltip => IsStackActive
+        ? "连续粘贴栈已开启：按 Ctrl+V 逐项粘贴，点击此处关闭"
+        : "连续粘贴栈模式（开启后按 Ctrl+V 逐项粘贴，可随时再次点击关闭）";
+
     /// <summary>二维码 PNG 就绪（窗口展示覆盖层）。</summary>
     public event Action<byte[]>? QrImageReady;
 
@@ -125,6 +191,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private CancellationTokenSource? _itemAddedDebounce;
     private readonly HashSet<long> _ocrBusyIds = new();
     private readonly HashSet<long> _deletingIds = new();
+
+    /// <summary>收集栈状态变化订阅（保存引用以便 Dispose 时解除）。</summary>
+    private readonly Action<bool, int> _stackStateChangedHandler;
 
     /// <summary>刷新代际：并发刷新时只有最新一次的结果可以落到 UI（避免旧搜索结果覆盖新结果）。</summary>
     private int _refreshGeneration;
@@ -139,6 +208,23 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         _services = services;
         _services.Pipeline.ItemAdded += OnItemAdded;
+        _stackStateChangedHandler = (active, count) =>
+        {
+            var dispatcher = System.Windows.Application.Current?.Dispatcher;
+            if (dispatcher == null || dispatcher.HasShutdownStarted)
+            {
+                return;
+            }
+
+            dispatcher.BeginInvoke(() =>
+            {
+                OnPropertyChanged(nameof(IsStackActive));
+                OnPropertyChanged(nameof(StackCount));
+                OnPropertyChanged(nameof(StackButtonText));
+                OnPropertyChanged(nameof(StackButtonTooltip));
+            });
+        };
+        _services.StackPaste.StateChanged += _stackStateChangedHandler;
         _ = RefreshThenRepairAsync();
     }
 
@@ -621,9 +707,193 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         });
     }
 
+    #region 常用短语 (Snippets)
+
+    public async Task RefreshSnippetsAsync()
+    {
+        try
+        {
+            var categories = await _services.Database.GetSnippetCategoriesAsync();
+            // 仅在分类集合确实变化时重建，避免 Clear+重填 把 ComboBox 的当前选中项冲掉
+            if (!categories.SequenceEqual(SnippetCategories))
+            {
+                SnippetCategories.Clear();
+                foreach (var cat in categories)
+                {
+                    SnippetCategories.Add(cat);
+                }
+            }
+
+            // 当前筛选分类已不存在（如末条被删），回退到「全部」；直接改字段避免再次触发刷新
+            if (!SnippetCategories.Contains(_selectedSnippetCategory))
+            {
+                _selectedSnippetCategory = "全部";
+                OnPropertyChanged(nameof(SelectedSnippetCategory));
+            }
+
+            // 常用短语复用剪贴历史的搜索框不可见，避免用历史搜索词误过滤短语列表
+            var list = await _services.Database.GetSnippetsAsync(_selectedSnippetCategory, null);
+
+            Snippets.Clear();
+            foreach (var snip in list)
+            {
+                Snippets.Add(snip);
+            }
+        }
+        catch (Exception ex)
+        {
+            DebugLog.LogException("刷新常用短语失败", ex);
+        }
+    }
+
+    public Task PasteSnippetAsync(SnippetItem snippet, bool plainOnly = false)
+    {
+        if (snippet == null) return Task.CompletedTask;
+
+        string text = ResolveSnippetText(snippet);
+        _services.Paste.RememberTargetWindow();
+        _services.Paste.PasteText(text, plainOnly);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>解析短语动态占位符；{clipboard} 以当前系统剪贴板文本填充。</summary>
+    public string ResolveSnippetText(SnippetItem snippet)
+    {
+        if (snippet == null) return string.Empty;
+
+        string? currentClip = null;
+        try
+        {
+            if (System.Windows.Clipboard.ContainsText())
+            {
+                currentClip = System.Windows.Clipboard.GetText();
+            }
+        }
+        catch
+        {
+            // 忽略剪贴板占用
+        }
+
+        return snippet.ResolveContent(currentClip);
+    }
+
+    public async Task AddSnippetAsync(SnippetItem item)
+    {
+        await _services.Database.AddSnippetAsync(item);
+        await RefreshSnippetsAsync();
+    }
+
+    public async Task UpdateSnippetAsync(SnippetItem item)
+    {
+        await _services.Database.UpdateSnippetAsync(item);
+        await RefreshSnippetsAsync();
+    }
+
+    public async Task DeleteSnippetAsync(SnippetItem item)
+    {
+        if (item == null) return;
+        await _services.Database.DeleteSnippetAsync(item.Id);
+        await RefreshSnippetsAsync();
+    }
+
+    #endregion
+
+    #region 桌面贴图 (Sticky)
+
+    public bool PinItemToDesktop(ClipboardItemViewModel? vm)
+    {
+        if (vm == null) return false;
+        return _services.Sticky.PinItem(vm.Item);
+    }
+
+    public bool PinCurrentClipboardToDesktop()
+    {
+        return _services.Sticky.PinFromCurrentClipboard();
+    }
+
+    #endregion
+
+    #region 文本翻译 (Translation)
+
+    public async Task ToggleTranslateItemAsync(ClipboardItemViewModel vm)
+    {
+        if (vm == null || string.IsNullOrWhiteSpace(vm.Item.TextContent)) return;
+
+        if (vm.IsTranslated)
+        {
+            vm.IsTranslated = false;
+            return;
+        }
+
+        if (vm.IsTranslating)
+        {
+            return;
+        }
+
+        vm.TranslatedText = string.Empty;
+        vm.TranslationEngineInfo = string.Empty;
+        vm.IsTranslating = true;
+        try
+        {
+            var res = await _services.Translation.TranslateAsync(vm.Item.TextContent);
+            vm.IsTranslating = false;
+            if (res.Success)
+            {
+                vm.TranslatedText = res.TranslatedText;
+                vm.TranslationEngineInfo = res.Engine;
+                vm.IsTranslated = true;
+            }
+            else
+            {
+                vm.TranslatedText = $"翻译失败: {res.ErrorMessage}";
+                vm.TranslationEngineInfo = "失败";
+                vm.IsTranslated = true;
+            }
+        }
+        catch (Exception ex)
+        {
+            vm.IsTranslating = false;
+            vm.TranslatedText = $"翻译异常: {ex.Message}";
+            vm.IsTranslated = true;
+        }
+    }
+
+    public async Task<string> TranslateRawTextAsync(string text)
+    {
+        var res = await _services.Translation.TranslateAsync(text);
+        return res.Success ? res.TranslatedText : $"翻译失败: {res.ErrorMessage}";
+    }
+
+    #endregion
+
+    #region 收集栈 (Stack Paste)
+
+    public void ToggleStackMode()
+    {
+        _services.StackPaste.Toggle();
+    }
+
+    public void SplitLinesToStack()
+    {
+        _services.StackPaste.SplitClipboardLines();
+    }
+
+    public void PushItemToStack(ClipboardItemViewModel vm)
+    {
+        if (vm == null) return;
+        if (!_services.StackPaste.IsActive)
+        {
+            _services.StackPaste.Start();
+        }
+        _services.StackPaste.Push(vm.Item);
+    }
+
+    #endregion
+
     public void Dispose()
     {
         _services.Pipeline.ItemAdded -= OnItemAdded;
+        _services.StackPaste.StateChanged -= _stackStateChangedHandler;
         _searchDebounce?.Cancel();
     }
 

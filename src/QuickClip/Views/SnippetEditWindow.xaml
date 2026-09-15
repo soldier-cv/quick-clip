@@ -1,0 +1,89 @@
+<ui:FluentWindow x:Class="QuickClip.Views.SnippetEditWindow"
+                  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+                  Title="编辑常用短语"
+                  Width="420" Height="460"
+                  WindowStartupLocation="CenterOwner"
+                  ResizeMode="NoResize"
+                  ExtendsContentIntoTitleBar="True"
+                  WindowBackdropType="None"
+                  Background="{DynamicResource Theme.Panel}"
+                  BorderBrush="{DynamicResource Theme.Border}"
+                  BorderThickness="1"
+                  KeyDown="OnWindowKeyDown">
+
+    <Grid Background="{DynamicResource Theme.Panel}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- 标题栏 -->
+        <ui:TitleBar Grid.Row="0"
+                     Title="常用短语设置"
+                     ShowMinimize="False"
+                     ShowMaximize="False"
+                     ShowClose="True" />
+
+        <StackPanel Grid.Row="1" Margin="20,10,20,10">
+            <!-- 标题 -->
+            <TextBlock Text="短语标题" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource Theme.Text}" Margin="0,0,0,6" />
+            <ui:TextBox x:Name="TitleBox"
+                        Height="34"
+                        PlaceholderText="例如：客服落款、常用代码、公司税号"
+                        Background="{DynamicResource Theme.Search}"
+                        BorderBrush="{DynamicResource Theme.Border}"
+                        Foreground="{DynamicResource Theme.Text}"
+                        Margin="0,0,0,12" />
+
+            <!-- 分类 -->
+            <TextBlock Text="分类" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource Theme.Text}" Margin="0,0,0,6" />
+            <ComboBox x:Name="CategoryCombo"
+                      IsEditable="True"
+                      Height="34"
+                      Background="{DynamicResource Theme.Search}"
+                      BorderBrush="{DynamicResource Theme.Border}"
+                      Foreground="{DynamicResource Theme.Text}"
+                      Margin="0,0,0,12">
+                <ComboBoxItem Content="通用" />
+                <ComboBoxItem Content="代码" />
+                <ComboBoxItem Content="办公" />
+                <ComboBoxItem Content="回复" />
+                <ComboBoxItem Content="账号" />
+            </ComboBox>
+
+            <!-- 正文内容 -->
+            <Grid Margin="0,0,0,6">
+                <TextBlock Text="短语内容" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource Theme.Text}" VerticalAlignment="Center" />
+                <TextBlock Text="支持占位符: {date} {time} {clipboard}"
+                           FontSize="11"
+                           Foreground="{DynamicResource Theme.TextSecondary}"
+                           HorizontalAlignment="Right"
+                           VerticalAlignment="Center" />
+            </Grid>
+            <TextBox x:Name="ContentBox"
+                     Height="140"
+                     AcceptsReturn="True"
+                     TextWrapping="Wrap"
+                     VerticalScrollBarVisibility="Auto"
+                     Padding="8"
+                     FontSize="12"
+                     FontFamily="Consolas, Microsoft YaHei UI"
+                     Background="{DynamicResource Theme.Search}"
+                     BorderBrush="{DynamicResource Theme.Border}"
+                     BorderThickness="1"
+                     Foreground="{DynamicResource Theme.Text}"
+                     CaretBrush="{DynamicResource Theme.Text}" />
+        </StackPanel>
+
+        <!-- 底部按钮 -->
+        <Border Grid.Row="2" Background="{DynamicResource Theme.Search}" BorderBrush="{DynamicResource Theme.Border}" BorderThickness="0,1,0,0" Padding="20,12">
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <ui:Button Appearance="Secondary" Content="取消" Width="76" Margin="0,0,10,0" Click="OnCancelClicked" />
+                <ui:Button Appearance="Primary" Content="保存" Width="76" Click="OnSaveClicked" />
+            </StackPanel>
+        </Border>
+    </Grid>
+</ui:FluentWindow>

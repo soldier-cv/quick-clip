@@ -1,5 +1,6 @@
 using System.IO;
 using System.Windows.Threading;
+using QuickClip.Native;
 
 namespace QuickClip.Services;
 
@@ -21,6 +22,9 @@ public sealed class AppServices : IDisposable
     public ClipboardPipeline Pipeline { get; }
     public TrayIconService Tray { get; }
     public UpdateService Update { get; }
+    public StickyService Sticky { get; }
+    public StackPasteService StackPaste { get; }
+    public TranslationService Translation { get; }
 
     /// <summary>系统剪贴板历史窗口兜底守卫（钩子失效时接管管理员窗口下漏出的系统 Win+V）。</summary>
     public SystemClipboardGuard ClipboardGuard { get; }
@@ -47,9 +51,55 @@ public sealed class AppServices : IDisposable
         Tray = new TrayIconService();
         ClipboardGuard = new SystemClipboardGuard(Dispatcher.CurrentDispatcher);
         Update = new UpdateService();
+        Sticky = new StickyService();
+        StackPaste = new StackPasteService(Paste);
+        Translation = new TranslationService(Settings);
+
+        // 收集栈模式下，新捕获的条目自动压入栈
+        Pipeline.ItemAdded += item =>
+        {
+            if (StackPaste.IsActive)
+            {
+                StackPaste.Push(item);
+            }
+        };
+
+        // 收集栈模式下拦截物理 Ctrl+V 出栈模拟粘贴与 Esc 退出
+        // 注意：焦点在 QuickClip 自身窗口时一律放行，避免劫持面板内的正常 Ctrl+V / Esc（隐藏面板）
+        Hotkey.InterceptCtrlV = () =>
+        {
+            if (!StackPaste.IsActive || StackPaste.Count == 0 || IsOwnProcessForeground())
+            {
+                return false;
+            }
+            return StackPaste.PopAndPaste();
+        };
+
+        Hotkey.InterceptEscape = () =>
+        {
+            if (!StackPaste.IsActive || IsOwnProcessForeground())
+            {
+                return false;
+            }
+            StackPaste.Stop();
+            return true;
+        };
 
         // 冷启动优先热键/监听；清理延后到 8 分钟，避免与首屏争抢
         _cleanupTimer = new System.Threading.Timer(CleanupTick, null, TimeSpan.FromMinutes(8), TimeSpan.FromMinutes(60));
+    }
+
+    /// <summary>当前前台窗口是否属于 QuickClip 自身进程。</summary>
+    private static bool IsOwnProcessForeground()
+    {
+        IntPtr fg = NativeMethods.GetForegroundWindow();
+        if (fg == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        NativeMethods.GetWindowThreadProcessId(fg, out uint pid);
+        return pid == (uint)Environment.ProcessId;
     }
 
     private bool _appliedAutoStart;
@@ -286,6 +336,9 @@ public sealed class AppServices : IDisposable
         ClipboardGuard.Dispose();
         Tray.Dispose();
         Update.Dispose();
+        StackPaste.Dispose();
+        Sticky.CloseAll();
+        Translation.Dispose();
         OcrPacks.Dispose();
         Database.Dispose();
 

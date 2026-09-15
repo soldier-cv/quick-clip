@@ -586,6 +586,18 @@ public partial class MainWindow : FluentWindow
             return;
         }
 
+        // 收集栈开关：放在用户可配置快捷键之后，避免抢占用户自定义绑定
+        if (settings.StackModeHotkey.Matches(key, modifiers))
+        {
+            if (!typing && !e.IsRepeat)
+            {
+                _viewModel.ToggleStackMode();
+            }
+
+            e.Handled = true;
+            return;
+        }
+
         // 1~9 / 小键盘：固定快速粘贴
         if (modifiers == ModifierKeys.None && !typing)
         {
@@ -1642,6 +1654,294 @@ public partial class MainWindow : FluentWindow
         }
 
         _services.Tray.ShowBalloonTip("QuickClip", message);
+    }
+
+    // ---------- 收集栈、常用短语与翻译动作 ----------
+
+    private void OnStackModeClicked(object sender, RoutedEventArgs e)
+    {
+        _viewModel.ToggleStackMode();
+    }
+
+    private void OnPinClipboardToDesktopClicked(object sender, RoutedEventArgs e)
+    {
+        if (!_viewModel.PinCurrentClipboardToDesktop())
+        {
+            _viewModel.StatusText = "当前剪贴板没有可贴图的内容";
+        }
+    }
+
+    private void OnHistoryTabClicked(object sender, RoutedEventArgs e)
+    {
+        _viewModel.SelectedMainTab = 0;
+    }
+
+    private void OnSnippetsTabClicked(object sender, RoutedEventArgs e)
+    {
+        _viewModel.SelectedMainTab = 1;
+    }
+
+    private void OnCardStickyClicked(object sender, RoutedEventArgs e)
+    {
+        if (GetCardViewModel(sender) is { } vm)
+        {
+            _viewModel.SelectedItem = vm;
+            if (!_viewModel.PinItemToDesktop(vm))
+            {
+                _viewModel.StatusText = "该条目没有可贴图的内容";
+            }
+        }
+    }
+
+    private async void OnCardTranslateClicked(object sender, RoutedEventArgs e)
+    {
+        if (GetCardViewModel(sender) is { } vm)
+        {
+            _viewModel.SelectedItem = vm;
+            await _viewModel.ToggleTranslateItemAsync(vm);
+        }
+    }
+
+    private async void OnCopyTranslationClicked(object sender, RoutedEventArgs e)
+    {
+        if (GetCardViewModel(sender) is { } vm && !string.IsNullOrWhiteSpace(vm.TranslatedText))
+        {
+            await _services.Paste.CopyTextAsync(vm.TranslatedText, plainOnly: true);
+            _viewModel.StatusText = "已复制译文";
+        }
+    }
+
+    private void OnPasteTranslationClicked(object sender, RoutedEventArgs e)
+    {
+        if (GetCardViewModel(sender) is { } vm && !string.IsNullOrWhiteSpace(vm.TranslatedText))
+        {
+            bool pinned = _services.Settings.WindowAlwaysOnTop;
+            if (!pinned)
+            {
+                HideWindow();
+            }
+
+            _services.Paste.RememberTargetWindow();
+            _services.Paste.PasteText(vm.TranslatedText, plainOnly: false);
+        }
+    }
+
+    private void OnCollapseTranslationClicked(object sender, RoutedEventArgs e)
+    {
+        if (GetCardViewModel(sender) is { } vm)
+        {
+            vm.IsTranslated = false;
+        }
+    }
+
+    private void OnMenuPasteClicked(object sender, RoutedEventArgs e)
+    {
+        if (ResolveMenuTarget(sender) != null)
+        {
+            PasteSelected(plainOnly: false);
+        }
+    }
+
+    private void OnMenuPastePlainClicked(object sender, RoutedEventArgs e)
+    {
+        if (ResolveMenuTarget(sender) != null)
+        {
+            PasteSelected(plainOnly: true);
+        }
+    }
+
+    private void OnMenuCopyClicked(object sender, RoutedEventArgs e)
+    {
+        if (ResolveMenuTarget(sender) != null)
+        {
+            _ = _viewModel.CopySelectedToClipboard();
+        }
+    }
+
+    private void OnMenuSaveAsSnippetClicked(object sender, RoutedEventArgs e)
+    {
+        if (ResolveMenuTarget(sender) is not { } vm || string.IsNullOrWhiteSpace(vm.Item.TextContent))
+        {
+            return;
+        }
+
+        string raw = vm.Item.TextContent.Trim();
+        string title = raw.Length > 20 ? raw.Substring(0, 20) + "…" : raw;
+        title = title.Replace("\r", " ").Replace("\n", " ");
+        var snippet = new Models.SnippetItem
+        {
+            Title = title,
+            Category = "常用",
+            Content = raw
+        };
+
+        var dialog = new Views.SnippetEditWindow(snippet, this);
+        bool confirmed = ShowOwnedModal(() => dialog.ShowDialog() == true);
+        if (confirmed)
+        {
+            _ = _viewModel.AddSnippetAsync(dialog.ResultItem);
+            _viewModel.StatusText = "已保存为常用短语";
+        }
+    }
+
+    private void OnMenuStickyClicked(object sender, RoutedEventArgs e)
+    {
+        if (ResolveMenuTarget(sender) is { ShowStickyAction: true } vm)
+        {
+            _viewModel.PinItemToDesktop(vm);
+        }
+    }
+
+    private void OnMenuPushStackClicked(object sender, RoutedEventArgs e)
+    {
+        if (ResolveMenuTarget(sender) is { } vm)
+        {
+            _viewModel.PushItemToStack(vm);
+            _viewModel.StatusText = $"已压入收集栈 (当前共 {_viewModel.StackCount} 项)";
+        }
+    }
+
+    private async void OnMenuTranslateClicked(object sender, RoutedEventArgs e)
+    {
+        if (ResolveMenuTarget(sender) is { ShowTranslateAction: true } vm)
+        {
+            await _viewModel.ToggleTranslateItemAsync(vm);
+        }
+    }
+
+    private async void OnMenuPinClicked(object sender, RoutedEventArgs e)
+    {
+        if (ResolveMenuTarget(sender) is { } vm)
+        {
+            await _viewModel.TogglePinSelectedAsync(vm);
+        }
+    }
+
+    private void OnMenuDeleteClicked(object sender, RoutedEventArgs e)
+    {
+        if (ResolveMenuTarget(sender) != null)
+        {
+            _ = _viewModel.DeleteSelectedAsync();
+        }
+    }
+
+    /// <summary>右键菜单动作前先选中被右键的卡片，避免误操作到上一次选中项。</summary>
+    private ClipboardItemViewModel? ResolveMenuTarget(object sender)
+    {
+        var vm = GetCardViewModel(sender);
+        if (vm != null)
+        {
+            _viewModel.SelectedItem = vm;
+            ItemList.ScrollIntoView(vm);
+        }
+
+        return vm ?? _viewModel.SelectedItem;
+    }
+
+    private void OnAddSnippetClicked(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Views.SnippetEditWindow(null, this);
+        bool confirmed = ShowOwnedModal(() => dialog.ShowDialog() == true);
+        if (confirmed)
+        {
+            _ = _viewModel.AddSnippetAsync(dialog.ResultItem);
+            _viewModel.StatusText = "已添加常用短语";
+        }
+    }
+
+    private void OnEditSnippetClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: Models.SnippetItem snippet })
+        {
+            var dialog = new Views.SnippetEditWindow(snippet, this);
+            bool confirmed = ShowOwnedModal(() => dialog.ShowDialog() == true);
+            if (confirmed)
+            {
+                _ = _viewModel.UpdateSnippetAsync(dialog.ResultItem);
+                _viewModel.StatusText = "已更新常用短语";
+            }
+        }
+    }
+
+    private void OnDeleteSnippetClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: Models.SnippetItem snippet })
+        {
+            _ = _viewModel.DeleteSnippetAsync(snippet);
+            _viewModel.StatusText = "已删除常用短语";
+        }
+    }
+
+    private void OnPasteSnippetDirectClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: Models.SnippetItem snippet })
+        {
+            bool pinned = _services.Settings.WindowAlwaysOnTop;
+            if (!pinned)
+            {
+                HideWindow();
+            }
+
+            _ = _viewModel.PasteSnippetAsync(snippet, plainOnly: false);
+        }
+    }
+
+    private async void OnCopySnippetDirectClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: Models.SnippetItem snippet })
+        {
+            string text = _viewModel.ResolveSnippetText(snippet);
+            await _services.Paste.CopyTextAsync(text, plainOnly: true);
+            _viewModel.StatusText = "已复制短语内容";
+        }
+    }
+
+    private void OnSnippetListDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        // 双击到「粘贴/复制/编辑/删除」按钮上时，交给按钮的 Click，避免误触发粘贴
+        if (e.OriginalSource is DependencyObject source &&
+            FindAncestor<System.Windows.Controls.Button>(source) != null)
+        {
+            return;
+        }
+
+        if (SnippetList.SelectedItem is Models.SnippetItem snippet)
+        {
+            bool pinned = _services.Settings.WindowAlwaysOnTop;
+            if (!pinned)
+            {
+                HideWindow();
+            }
+
+            _ = _viewModel.PasteSnippetAsync(snippet, plainOnly: false);
+        }
+    }
+
+    private async void OnTranslateOcrClicked(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(OcrText.Text))
+        {
+            return;
+        }
+
+        OcrTitle.Text = "正在翻译…";
+        try
+        {
+            var res = await _services.Translation.TranslateAsync(OcrText.Text);
+            if (res.Success)
+            {
+                OcrText.Text = OcrText.Text + "\r\n\r\n--- 翻译结果 (" + res.Engine + ") ---\r\n" + res.TranslatedText;
+                OcrTitle.Text = "识别与翻译完成";
+            }
+            else
+            {
+                OcrTitle.Text = "翻译失败: " + res.ErrorMessage;
+            }
+        }
+        catch (Exception ex)
+        {
+            OcrTitle.Text = "翻译异常: " + ex.Message;
+        }
     }
 }
 

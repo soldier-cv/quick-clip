@@ -107,6 +107,17 @@ public sealed class DatabaseService : IDisposable
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 );
                 CREATE INDEX IF NOT EXISTS idx_created_at ON clipboard_items(created_at);
+
+                CREATE TABLE IF NOT EXISTS snippets (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    category TEXT NOT NULL DEFAULT '通用',
+                    title TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    content_type TEXT NOT NULL DEFAULT 'text',
+                    sort_order INTEGER DEFAULT 0,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE INDEX IF NOT EXISTS idx_snippets_category ON snippets(category);
                 """;
             cmd.ExecuteNonQuery();
         }
@@ -480,6 +491,198 @@ public sealed class DatabaseService : IDisposable
             _gate.Release();
         }
     }
+
+    #region 常用短语 (Snippets)
+
+    /// <summary>获取常用短语分类列表。</summary>
+    public async Task<List<string>> GetSnippetCategoriesAsync()
+    {
+        await _gate.WaitAsync();
+        try
+        {
+            // 首次访问时先落默认短语，保证分类筛选与列表数据一致
+            await EnsureDefaultSnippetsNoLockAsync();
+
+            var categories = new List<string> { "全部" };
+            using var cmd = _connection.CreateCommand();
+            cmd.CommandText = "SELECT DISTINCT category FROM snippets ORDER BY category;";
+            using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                if (!reader.IsDBNull(0))
+                {
+                    string cat = reader.GetString(0);
+                    if (!string.IsNullOrWhiteSpace(cat) && !categories.Contains(cat))
+                    {
+                        categories.Add(cat);
+                    }
+                }
+            }
+            return categories;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <summary>根据分类和搜索关键词获取常用短语列表。</summary>
+    public async Task<List<SnippetItem>> GetSnippetsAsync(string? category = null, string? keyword = null)
+    {
+        await _gate.WaitAsync();
+        try
+        {
+            // 如果为空，先插入默认的示例常用短语
+            await EnsureDefaultSnippetsNoLockAsync();
+
+            using var cmd = _connection.CreateCommand();
+            var conditions = new List<string>();
+
+            if (!string.IsNullOrWhiteSpace(category) && category != "全部")
+            {
+                conditions.Add("category = @category");
+                cmd.Parameters.AddWithValue("@category", category);
+            }
+
+            if (!string.IsNullOrWhiteSpace(keyword))
+            {
+                conditions.Add("(title LIKE @kw OR content LIKE @kw)");
+                cmd.Parameters.AddWithValue("@kw", $"%{keyword.Trim()}%");
+            }
+
+            string whereClause = conditions.Count > 0 ? "WHERE " + string.Join(" AND ", conditions) : "";
+            cmd.CommandText = $"SELECT id, category, title, content, content_type, sort_order, created_at FROM snippets {whereClause} ORDER BY sort_order ASC, id DESC;";
+
+            var list = new List<SnippetItem>();
+            using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                list.Add(new SnippetItem
+                {
+                    Id = reader.GetInt64(0),
+                    Category = reader.IsDBNull(1) ? "通用" : reader.GetString(1),
+                    Title = reader.IsDBNull(2) ? string.Empty : reader.GetString(2),
+                    Content = reader.IsDBNull(3) ? string.Empty : reader.GetString(3),
+                    ContentType = reader.IsDBNull(4) ? "text" : reader.GetString(4),
+                    SortOrder = reader.IsDBNull(5) ? 0 : reader.GetInt32(5),
+                    CreatedAt = reader.IsDBNull(6) ? DateTime.Now : ParseDate(reader.GetString(6))
+                });
+            }
+            return list;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    private async Task EnsureDefaultSnippetsNoLockAsync()
+    {
+        using var checkCmd = _connection.CreateCommand();
+        checkCmd.CommandText = "SELECT COUNT(*) FROM snippets;";
+        var countObj = await checkCmd.ExecuteScalarAsync();
+        if (countObj is long count && count > 0)
+        {
+            return;
+        }
+
+        var defaultSnippets = new[]
+        {
+            ("通用", "当前时间戳", "{datetime}", 1),
+            ("通用", "当前日期", "{date}", 2),
+            ("回复", "确认收到模板", "您好，已收到关于【{clipboard}】的反馈，正在处理中，感谢支持！", 3),
+            ("办公", "邮件落款签名", "祝好！\n\n--\nQuickClip 用户\n{date}", 4)
+        };
+
+        foreach (var (cat, title, content, order) in defaultSnippets)
+        {
+            using var insertCmd = _connection.CreateCommand();
+            insertCmd.CommandText = """
+                INSERT INTO snippets (category, title, content, content_type, sort_order, created_at)
+                VALUES (@cat, @title, @content, 'text', @order, CURRENT_TIMESTAMP);
+                """;
+            insertCmd.Parameters.AddWithValue("@cat", cat);
+            insertCmd.Parameters.AddWithValue("@title", title);
+            insertCmd.Parameters.AddWithValue("@content", content);
+            insertCmd.Parameters.AddWithValue("@order", order);
+            await insertCmd.ExecuteNonQueryAsync();
+        }
+    }
+
+    /// <summary>新增常用短语。</summary>
+    public async Task<long> AddSnippetAsync(SnippetItem item)
+    {
+        await _gate.WaitAsync();
+        try
+        {
+            using var cmd = _connection.CreateCommand();
+            cmd.CommandText = """
+                INSERT INTO snippets (category, title, content, content_type, sort_order, created_at)
+                VALUES (@cat, @title, @content, @type, @order, CURRENT_TIMESTAMP);
+                SELECT last_insert_rowid();
+                """;
+            cmd.Parameters.AddWithValue("@cat", string.IsNullOrWhiteSpace(item.Category) ? "通用" : item.Category.Trim());
+            cmd.Parameters.AddWithValue("@title", item.Title.Trim());
+            cmd.Parameters.AddWithValue("@content", item.Content);
+            cmd.Parameters.AddWithValue("@type", item.ContentType ?? "text");
+            cmd.Parameters.AddWithValue("@order", item.SortOrder);
+
+            var idObj = await cmd.ExecuteScalarAsync();
+            long newId = idObj is long id ? id : 0;
+            item.Id = newId;
+            return newId;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <summary>更新常用短语。</summary>
+    public async Task UpdateSnippetAsync(SnippetItem item)
+    {
+        await _gate.WaitAsync();
+        try
+        {
+            using var cmd = _connection.CreateCommand();
+            cmd.CommandText = """
+                UPDATE snippets
+                SET category = @cat, title = @title, content = @content, content_type = @type, sort_order = @order
+                WHERE id = @id;
+                """;
+            cmd.Parameters.AddWithValue("@id", item.Id);
+            cmd.Parameters.AddWithValue("@cat", string.IsNullOrWhiteSpace(item.Category) ? "通用" : item.Category.Trim());
+            cmd.Parameters.AddWithValue("@title", item.Title.Trim());
+            cmd.Parameters.AddWithValue("@content", item.Content);
+            cmd.Parameters.AddWithValue("@type", item.ContentType ?? "text");
+            cmd.Parameters.AddWithValue("@order", item.SortOrder);
+
+            await cmd.ExecuteNonQueryAsync();
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <summary>删除常用短语。</summary>
+    public async Task DeleteSnippetAsync(long id)
+    {
+        await _gate.WaitAsync();
+        try
+        {
+            using var cmd = _connection.CreateCommand();
+            cmd.CommandText = "DELETE FROM snippets WHERE id = @id;";
+            cmd.Parameters.AddWithValue("@id", id);
+            await cmd.ExecuteNonQueryAsync();
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    #endregion
 
     public void Dispose() => _connection.Dispose();
 

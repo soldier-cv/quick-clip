@@ -155,6 +155,8 @@ public sealed class SettingsService
     public HotkeyBinding HidePanelHotkey { get; private set; } = HotkeyBinding.HidePanelDefault;
     public HotkeyBinding MoveUpHotkey { get; private set; } = HotkeyBinding.MoveUpDefault;
     public HotkeyBinding MoveDownHotkey { get; private set; } = HotkeyBinding.MoveDownDefault;
+    public HotkeyBinding StackModeHotkey { get; private set; } = new(ModifierKeys.Control | ModifierKeys.Shift, Key.S);
+    public string TranslationTargetLanguage { get; private set; } = "zh";
 
     public SettingsService(string settingsPath)
     {
@@ -217,6 +219,7 @@ public sealed class SettingsService
             AutoCheckUpdates = dto.AutoCheckUpdates ?? true;
             LastUpdateCheckUtc = ParseUtc(dto.LastUpdateCheckUtc);
             MaxHistoryItems = ClampMaxHistory(dto.MaxHistoryItems ?? DefaultMaxHistoryItems);
+            TranslationTargetLanguage = string.IsNullOrWhiteSpace(dto.TranslationTargetLanguage) ? "zh" : dto.TranslationTargetLanguage.Trim();
 
             ApplyPanelHotkeys(dto.PanelHotkeys);
 
@@ -756,6 +759,7 @@ public sealed class SettingsService
                 CapturePaused = CapturePaused,
                 AutoCheckUpdates = AutoCheckUpdates,
                 LastUpdateCheckUtc = LastUpdateCheckUtc?.ToUniversalTime().ToString("o"),
+                TranslationTargetLanguage = TranslationTargetLanguage,
                 PanelHotkeys = new PanelHotkeysData
                 {
                     PasteSelected = HotkeyData.FromBinding(PasteSelectedHotkey),
@@ -812,6 +816,7 @@ public sealed class SettingsData
     public bool? CapturePaused { get; set; }
     public bool? AutoCheckUpdates { get; set; }
     public string? LastUpdateCheckUtc { get; set; }
+    public string? TranslationTargetLanguage { get; set; }
     public PanelHotkeysData? PanelHotkeys { get; set; }
 }
 

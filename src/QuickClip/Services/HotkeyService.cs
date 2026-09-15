@@ -79,6 +79,12 @@ public sealed class HotkeyService : IDisposable
     /// <summary>钩子安装失败时触发（提示用户可能无法接管 Win+V）。</summary>
     public event Action<string>? HotkeyInstallFailed;
 
+    /// <summary>收集栈等特殊模式下拦截物理 Ctrl+V 的外部委托。返回 true 表示已处理并吞掉该按键。</summary>
+    public Func<bool>? InterceptCtrlV { get; set; }
+
+    /// <summary>收集栈等特殊模式下拦截 Esc 键的外部委托。返回 true 表示已处理并吞掉该按键。</summary>
+    public Func<bool>? InterceptEscape { get; set; }
+
     public HotkeyService()
     {
         // 保持委托引用，防止被 GC 回收
@@ -514,7 +520,24 @@ public sealed class HotkeyService : IDisposable
                 bool shiftDown = NativeMethods.IsKeyDown(NativeMethods.VK_SHIFT);
                 bool altDown = NativeMethods.IsKeyDown(NativeMethods.VK_MENU);
 
-                DebugLog.LogDetail($"HookCallback: vk={hook.vkCode} msg={msg} injected={isInjected} win={winHeld} ctrl={ctrlDown} shift={shiftDown}");
+                // ---------- 收集栈模式（或其它自定义模式）优先拦截物理 Ctrl+V 与 Esc ----------
+                if (isKeyDown && !winHeld)
+                {
+                    if (hook.vkCode == NativeMethods.VK_V && ctrlDown && !shiftDown && !altDown && InterceptCtrlV != null)
+                    {
+                        if (InterceptCtrlV.Invoke())
+                        {
+                            return new IntPtr(1);
+                        }
+                    }
+                    else if (hook.vkCode == NativeMethods.VK_ESCAPE && !ctrlDown && !shiftDown && !altDown && InterceptEscape != null)
+                    {
+                        if (InterceptEscape.Invoke())
+                        {
+                            return new IntPtr(1);
+                        }
+                    }
+                }
 
                 // ---------- Win+V 兜底拦截（处于和弦重放/多键并发状态时） ----------
                 if (hook.vkCode == NativeMethods.VK_V && winHeld)

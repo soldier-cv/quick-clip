@@ -68,6 +68,12 @@ public sealed class UpdateService : IDisposable
     private const string LatestReleaseApi = $"https://api.github.com/repos/{RepoOwner}/{RepoName}/releases/latest";
     private const string ReleasesPageUrl = $"https://github.com/{RepoOwner}/{RepoName}/releases";
     private const string LatestReleasePageUrl = $"{ReleasesPageUrl}/latest";
+
+    // Gitee 镜像通道（国内优先）
+    private const string GiteeOwner = "huaxudong";
+    private const string GiteeRepo = "quick-clip";
+    private const string GiteeLatestReleaseApi = $"https://gitee.com/api/v5/repos/{GiteeOwner}/{GiteeRepo}/releases/latest";
+    private const string GiteeReleasesPageUrl = $"https://gitee.com/{GiteeOwner}/{GiteeRepo}/releases";
     internal const string InstalledMarkerFileName = "QuickClip.installed";
     private const string AutoApplyStampFileName = "auto-apply.stamp";
     private static readonly TimeSpan AutoApplyDeferral = TimeSpan.FromHours(24);
@@ -222,11 +228,21 @@ public sealed class UpdateService : IDisposable
     }
 
     /// <summary>
-    /// 检查 GitHub Releases 是否有更新版本。
-    /// 先走 api.github.com；403/超时后再用 Releases/latest 页面回退（国内 API 常被拒）。
+    /// 检查是否有更新版本。
+    /// 策略：Gitee API 优先（国内毫秒级直连）；失败时自动降级到 GitHub API 与 GitHub Releases 页面回退。
     /// </summary>
     public async Task<UpdateCheckResult> CheckForUpdateAsync()
     {
+        // 1. 优先尝试 Gitee API（国内无障碍、速度极快）
+        var gitee = await TryCheckViaGiteeApiAsync();
+        if (gitee.Status != UpdateCheckStatus.Failed)
+        {
+            return gitee;
+        }
+
+        DebugLog.Log($"Gitee 检查更新未成功，降级尝试 GitHub API: {gitee.Message}");
+
+        // 2. 备选尝试 GitHub API
         var api = await TryCheckViaApiAsync();
         if (api.Status != UpdateCheckStatus.Failed)
         {
@@ -234,6 +250,8 @@ public sealed class UpdateService : IDisposable
         }
 
         DebugLog.Log($"GitHub API 不可用，回退 Releases 页面: {api.Message}");
+
+        // 3. 备选尝试 GitHub Releases 页面解析回退
         var page = await TryCheckViaLatestPageAsync();
         if (page.Status != UpdateCheckStatus.Failed)
         {
@@ -241,7 +259,44 @@ public sealed class UpdateService : IDisposable
         }
 
         return UpdateCheckResult.Fail(
-            $"检查更新失败：{api.Message}。页面回退也失败。可手动访问 {ReleasesPageUrl}");
+            $"检查更新失败（已尝试 Gitee 与 GitHub）：{gitee.Message} / {api.Message}。可手动访问 {GiteeReleasesPageUrl} 或 {ReleasesPageUrl}");
+    }
+
+    private async Task<UpdateCheckResult> TryCheckViaGiteeApiAsync()
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, GiteeLatestReleaseApi);
+            request.Headers.TryAddWithoutValidation("User-Agent", $"QuickClip/{CurrentVersion}");
+            request.Headers.TryAddWithoutValidation("Accept", "application/json");
+
+            using var cts = new CancellationTokenSource(ApiTimeout);
+            using var response = await _http.SendAsync(request, cts.Token);
+            if (!response.IsSuccessStatusCode)
+            {
+                int code = (int)response.StatusCode;
+                DebugLog.Log($"检查 Gitee 更新 API 失败: HTTP {code}");
+                return UpdateCheckResult.Fail($"Gitee HTTP {code}");
+            }
+
+            var dto = await response.Content.ReadFromJsonAsync<GitHubReleaseDto>();
+            if (dto == null || string.IsNullOrEmpty(dto.TagName))
+            {
+                return UpdateCheckResult.Fail("无法解析 Gitee API 响应");
+            }
+
+            return FinishCheck(BuildReleaseInfo(dto), "Gitee API");
+        }
+        catch (Exception ex) when (ex is TaskCanceledException or TimeoutException or OperationCanceledException)
+        {
+            DebugLog.LogException("检查 Gitee 更新 API 超时", ex);
+            return UpdateCheckResult.Fail("连接 Gitee API 超时");
+        }
+        catch (Exception ex)
+        {
+            DebugLog.LogException("检查 Gitee 更新 API 异常", ex);
+            return UpdateCheckResult.Fail(ex.Message);
+        }
     }
 
     private async Task<UpdateCheckResult> TryCheckViaApiAsync()
@@ -922,7 +977,9 @@ public sealed class UpdateService : IDisposable
                || host.EndsWith(".github.com", StringComparison.OrdinalIgnoreCase)
                || host.Equals("objects.githubusercontent.com", StringComparison.OrdinalIgnoreCase)
                || host.Equals("release-assets.githubusercontent.com", StringComparison.OrdinalIgnoreCase)
-               || host.EndsWith(".githubusercontent.com", StringComparison.OrdinalIgnoreCase);
+               || host.EndsWith(".githubusercontent.com", StringComparison.OrdinalIgnoreCase)
+               || host.Equals("gitee.com", StringComparison.OrdinalIgnoreCase)
+               || host.EndsWith(".gitee.com", StringComparison.OrdinalIgnoreCase);
     }
 
     private static HttpClient CreateHttpClient()

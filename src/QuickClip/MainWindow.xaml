@@ -19,7 +19,6 @@
                  BorderBrush="{DynamicResource Theme.Border}"
                  BorderThickness="1"
                  KeyDown="OnWindowKeyDown"
-                 PreviewKeyDown="OnWindowPreviewKeyDown"
                  SourceInitialized="OnSourceInitialized"
                  Closing="OnWindowClosing"
                  Activated="OnWindowActivated"
@@ -73,17 +72,6 @@
                                        Foreground="{DynamicResource Theme.Text}"
                                        VerticalAlignment="Center" />
                         </StackPanel>
-                    </ui:Button>
-                    <ui:Button x:Name="StickyButton"
-                               Appearance="Transparent"
-                               Padding="4,2"
-                               Margin="0,0,6,0"
-                               CornerRadius="6"
-                               ToolTip="贴图置顶：将当前剪贴板内容钉在桌面"
-                               Click="OnPinClipboardToDesktopClicked">
-                        <ui:SymbolIcon Symbol="PictureInPicture24"
-                                       FontSize="15"
-                                       Foreground="{DynamicResource Theme.TextSecondary}" />
                     </ui:Button>
                     <ui:Button x:Name="PinWindowButton"
                                Appearance="Transparent"
@@ -194,7 +182,8 @@
                         Background="{DynamicResource Theme.Search}"
                         BorderBrush="{DynamicResource Theme.Border}"
                         BorderThickness="1"
-                        Foreground="{DynamicResource Theme.Text}" />
+                        Foreground="{DynamicResource Theme.Text}"
+                        PreviewKeyDown="SearchBox_PreviewKeyDown" />
 
             <ComboBox Grid.Column="1"
                       Width="92"
@@ -635,7 +624,7 @@
                                                    Padding="5"
                                                    Margin="2,0"
                                                    CornerRadius="6"
-                                                   ToolTip="贴图置顶到桌面"
+                                                   ToolTip="贴图置顶"
                                                    Visibility="{Binding ShowStickyAction, Converter={StaticResource BoolToVis}}"
                                                    Click="OnCardStickyClicked">
                                             <ui:SymbolIcon Symbol="PictureInPicture24" FontSize="15" />

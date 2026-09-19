@@ -93,7 +93,18 @@ public partial class App : System.Windows.Application
             }
             else
             {
-                DebugLog.Log("开机自启动：保持后台静默运行");
+                DebugLog.Log("开机自启动：保持后台静默运行，安排空闲静默预热");
+                // 延迟 1.5 秒（避开系统开机启动高峰、等待数据库异步加载与托盘就绪），在 UI 线程空闲时静默预热
+                _ = Task.Delay(1500).ContinueWith(_ =>
+                {
+                    var dispatcher = window.Dispatcher;
+                    if (dispatcher is { HasShutdownStarted: false })
+                    {
+                        dispatcher.BeginInvoke(
+                            System.Windows.Threading.DispatcherPriority.ApplicationIdle,
+                            new Action(() => window.WarmUp()));
+                    }
+                });
             }
         }
         catch (Exception ex)

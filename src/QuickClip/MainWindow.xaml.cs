@@ -32,6 +32,12 @@ public partial class MainWindow : FluentWindow
     /// <summary>删除按钮节流：双击/连点时的第二次点击不应再作用于（可能已复用的）卡片。</summary>
     private long _lastDeleteClickTicks;
 
+    /// <summary>主窗口是否已完成静默预热或首次显示。</summary>
+    private bool _isWarmedUp;
+
+    /// <summary>刚唤起主窗口的时间戳（TickCount64），在短时间内忽略 Toggle 隐藏，避免用户因等待冷启动快速连按而刚弹出又被关掉。</summary>
+    private long _suppressToggleHideUntilTicks;
+
     /// <summary>视图模型（设置窗口切换数据库后需要刷新列表）。</summary>
     public MainViewModel ViewModel => _viewModel;
 
@@ -335,6 +341,13 @@ public partial class MainWindow : FluentWindow
         DebugLog.Log($"ToggleWindow 触发, IsVisible={IsVisible}, IsActive={IsActive}");
         if (IsVisible && IsActive)
         {
+            // 防连击误关：在刚唤起的 450ms 保护期内，忽略 Toggle 隐藏，避免用户因等待冷启动连按而刚弹出又被关掉
+            if (Environment.TickCount64 < _suppressToggleHideUntilTicks)
+            {
+                DebugLog.Log("忽略刚唤起保护期内的 Toggle 隐藏请求");
+                return;
+            }
+
             HideWindow();
         }
         else
@@ -343,8 +356,58 @@ public partial class MainWindow : FluentWindow
         }
     }
 
+    /// <summary>
+    /// 开机自启动静默预热：在屏幕可见区域外触发一次布局测量与渲染管线初始化，
+    /// 提前完成 XAML 视觉树构建、数据模板解析与 JIT 编译，
+    /// 消除用户首次按 Win+V 时的冷启动延迟。
+    /// </summary>
+    public void WarmUp()
+    {
+        if (_isWarmedUp || IsVisible)
+        {
+            return;
+        }
+
+        _isWarmedUp = true;
+        try
+        {
+            DebugLog.Log("开始执行主窗口静默预热");
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+
+            double oldLeft = Left;
+            double oldTop = Top;
+            bool oldShowActivated = ShowActivated;
+
+            // 移到屏幕可视区域之外极远处，且不抢夺前台焦点
+            ShowActivated = false;
+            Left = -32000;
+            Top = -32000;
+
+            Show();
+            UpdateLayout();
+
+            Hide();
+
+            // 还原属性与位置
+            ShowActivated = oldShowActivated;
+            Left = oldLeft;
+            Top = oldTop;
+            PositionWindow();
+
+            sw.Stop();
+            DebugLog.Log($"主窗口静默预热完成，耗时 {sw.ElapsedMilliseconds} ms");
+        }
+        catch (Exception ex)
+        {
+            DebugLog.LogException("主窗口静默预热异常", ex);
+        }
+    }
+
     private void ShowWindow()
     {
+        _suppressToggleHideUntilTicks = Environment.TickCount64 + 450;
+        _isWarmedUp = true;
+
         // 记录唤起前的目标窗口，用于粘贴回填
         _services.Paste.RememberTargetWindow();
         PositionWindow();
@@ -571,15 +634,9 @@ public partial class MainWindow : FluentWindow
             return;
         }
 
-        // 方向键在搜索框聚焦时仍需可用（Win+V → 输入关键词 → 上下键选择 → Enter 粘贴）
+        // 方向键（当焦点不在搜索框时，由窗口级 KeyDown 处理；焦点在搜索框时由 SearchBox_PreviewKeyDown 优先处理）
         if (settings.MoveDownHotkey.Matches(key, modifiers))
         {
-            // 焦点在搜索框时由 PreviewKeyDown 提前处理，避免重复移动
-            if (IsSearchFocused())
-            {
-                return;
-            }
-
             MoveSelection(1);
             e.Handled = true;
             return;
@@ -587,23 +644,29 @@ public partial class MainWindow : FluentWindow
 
         if (settings.MoveUpHotkey.Matches(key, modifiers))
         {
-            // 焦点在搜索框时由 PreviewKeyDown 提前处理，避免重复移动
-            if (IsSearchFocused())
-            {
-                return;
-            }
-
             MoveSelection(-1);
             e.Handled = true;
             return;
         }
 
-        // 收集栈开关：放在用户可配置快捷键之后，避免抢占用户自定义绑定
-        if (settings.StackModeHotkey.Matches(key, modifiers))
+        // 开启收集栈
+        if (settings.StartStackHotkey.Matches(key, modifiers))
         {
             if (!typing && !e.IsRepeat)
             {
-                _viewModel.ToggleStackMode();
+                _viewModel.StartStackMode();
+            }
+
+            e.Handled = true;
+            return;
+        }
+
+        // 关闭收集栈
+        if (settings.StopStackHotkey.Matches(key, modifiers))
+        {
+            if (!typing && !e.IsRepeat)
+            {
+                _viewModel.StopStackMode();
             }
 
             e.Handled = true;
@@ -626,20 +689,16 @@ public partial class MainWindow : FluentWindow
         }
     }
 
-    private static bool IsSearchFocused() => Keyboard.FocusedElement is System.Windows.Controls.TextBox;
+    private bool IsSearchFocused() => SearchBox.IsKeyboardFocusWithin;
 
     /// <summary>
     /// 焦点在搜索框时，TextBox 会在 KeyDown 冒泡到窗口前把 ↑/↓ 吞掉（内部标记 Handled），
-    /// 导致窗口 KeyDown 收不到方向键、列表选中无法移动。这里在 PreviewKeyDown 隧道阶段
-    /// （先于控件处理）拦截方向键移动列表选中；普通字符不匹配，仍正常输入搜索框。
+    /// 导致窗口 KeyDown 收不到方向键、列表选中无法移动。这里直接在 SearchBox 自身的 PreviewKeyDown
+    /// 隧道阶段（先于控件内部处理）拦截方向键并移动列表选中；普通字符不匹配，仍正常输入搜索框。
+    /// 直接挂载在 SearchBox 上，确保绝不影响 OCR 识别多行文本框等其他控件的上下光标移动。
     /// </summary>
-    private void OnWindowPreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    private void SearchBox_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
-        if (!IsSearchFocused())
-        {
-            return;
-        }
-
         Key key = e.Key == Key.System ? e.SystemKey : e.Key;
         key = Models.HotkeyBinding.NormalizeKey(key);
         var modifiers = Keyboard.Modifiers &

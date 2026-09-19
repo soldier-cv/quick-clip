@@ -57,11 +57,16 @@
             <!-- 正文内容 -->
             <Grid Margin="0,0,0,6">
                 <TextBlock Text="短语内容" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource Theme.Text}" VerticalAlignment="Center" />
-                <TextBlock Text="支持占位符: {date} {time} {clipboard}"
-                           FontSize="11"
-                           Foreground="{DynamicResource Theme.TextSecondary}"
+                <TextBlock FontSize="11"
+                           Foreground="{DynamicResource Theme.Accent}"
                            HorizontalAlignment="Right"
-                           VerticalAlignment="Center" />
+                           VerticalAlignment="Center"
+                           Cursor="Hand">
+                    <Run Text="支持动态占位符 ℹ" />
+                    <TextBlock.ToolTip>
+                        <ToolTip Content="支持的占位符（不区分大小写）：&#x0a;• {date} : 当前日期 (如 2026-09-19)&#x0a;• {time} : 当前时间 (如 12:30:00)&#x0a;• {datetime} : 完整日期时间 (yyyy-MM-dd HH:mm:ss)&#x0a;• {year} / {month} / {day} : 年 / 月 / 日&#x0a;• {weekday} / {week} : 星期几 / 周几 (如 星期六 / 周六)&#x0a;• {timestamp} / {timestamp_ms} : 秒级 / 毫秒级时间戳&#x0a;• {guid} / {uuid} : 标准唯一标识符 (含横杠)&#x0a;• {guid_n} : 32位无横杠唯一标识符&#x0a;• {clipboard} : 当前剪贴板内容&#x0a;• {username} : 当前操作系统用户名&#x0a;• {computername} : 当前计算机名&#x0a;• {random4} / {random6} : 4位 / 6位随机验证数字" />
+                    </TextBlock.ToolTip>
+                </TextBlock>
             </Grid>
             <TextBox x:Name="ContentBox"
                      Height="140"

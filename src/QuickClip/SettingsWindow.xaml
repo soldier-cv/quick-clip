@@ -344,6 +344,68 @@
                                        Click="OnResetHotkeyClicked" />
                         </Grid>
 
+                        <!-- 开启收集栈 -->
+                        <Grid Margin="16,4,16,4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="168" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="开启收集栈"
+                                       Foreground="{DynamicResource Theme.Text}"
+                                       FontSize="13"
+                                       VerticalAlignment="Center" />
+                            <TextBox x:Name="StartStackBox"
+                                     Grid.Column="1"
+                                     Height="34"
+                                     Padding="10,0"
+                                     IsReadOnly="True"
+                                     VerticalContentAlignment="Center"
+                                     CaretBrush="Transparent"
+                                     Tag="StartStack"
+                                     PreviewKeyDown="HotkeyBox_PreviewKeyDown"
+                                     GotFocus="HotkeyBox_GotFocus" />
+                            <ui:Button Grid.Column="2"
+                                       Margin="8,0,0,0"
+                                       Appearance="Secondary"
+                                       Height="34"
+                                       Padding="12,0"
+                                       Content="默认"
+                                       Tag="StartStack"
+                                       Click="OnResetHotkeyClicked" />
+                        </Grid>
+
+                        <!-- 关闭收集栈 -->
+                        <Grid Margin="16,4,16,4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="168" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="关闭收集栈"
+                                       Foreground="{DynamicResource Theme.Text}"
+                                       FontSize="13"
+                                       VerticalAlignment="Center" />
+                            <TextBox x:Name="StopStackBox"
+                                     Grid.Column="1"
+                                     Height="34"
+                                     Padding="10,0"
+                                     IsReadOnly="True"
+                                     VerticalContentAlignment="Center"
+                                     CaretBrush="Transparent"
+                                     Tag="StopStack"
+                                     PreviewKeyDown="HotkeyBox_PreviewKeyDown"
+                                     GotFocus="HotkeyBox_GotFocus" />
+                            <ui:Button Grid.Column="2"
+                                       Margin="8,0,0,0"
+                                       Appearance="Secondary"
+                                       Height="34"
+                                       Padding="12,0"
+                                       Content="默认"
+                                       Tag="StopStack"
+                                       Click="OnResetHotkeyClicked" />
+                        </Grid>
+
                         <!-- 仅在捕获快捷键出错 / 成功改绑时显示 -->
                         <TextBlock x:Name="HotkeyHintText"
                                    Margin="16,6,16,14"

@@ -22,6 +22,8 @@ public sealed record HotkeyBinding(ModifierKeys Modifiers, Key Key)
     public static HotkeyBinding HidePanelDefault => new(ModifierKeys.None, Key.Escape);
     public static HotkeyBinding MoveUpDefault => new(ModifierKeys.None, Key.Up);
     public static HotkeyBinding MoveDownDefault => new(ModifierKeys.None, Key.Down);
+    public static HotkeyBinding StartStackDefault => new(ModifierKeys.Control | ModifierKeys.Shift, Key.S);
+    public static HotkeyBinding StopStackDefault => new(ModifierKeys.Control | ModifierKeys.Shift, Key.X);
 
     /// <summary>是否具备可注册性（至少一个修饰键且主键有效）——仅全局 RegisterHotKey 使用。</summary>
     public bool IsValid => Modifiers != ModifierKeys.None && Key != Key.None;
@@ -111,5 +113,7 @@ public enum PanelHotkeyAction
     DeleteSelected,
     HidePanel,
     MoveUp,
-    MoveDown
+    MoveDown,
+    StartStack,
+    StopStack
 }

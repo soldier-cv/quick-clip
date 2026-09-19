@@ -155,7 +155,9 @@ public sealed class SettingsService
     public HotkeyBinding HidePanelHotkey { get; private set; } = HotkeyBinding.HidePanelDefault;
     public HotkeyBinding MoveUpHotkey { get; private set; } = HotkeyBinding.MoveUpDefault;
     public HotkeyBinding MoveDownHotkey { get; private set; } = HotkeyBinding.MoveDownDefault;
-    public HotkeyBinding StackModeHotkey { get; private set; } = new(ModifierKeys.Control | ModifierKeys.Shift, Key.S);
+    public HotkeyBinding StartStackHotkey { get; private set; } = HotkeyBinding.StartStackDefault;
+    public HotkeyBinding StopStackHotkey { get; private set; } = HotkeyBinding.StopStackDefault;
+    public HotkeyBinding StackModeHotkey => StartStackHotkey;
     public string TranslationTargetLanguage { get; private set; } = "zh";
 
     public SettingsService(string settingsPath)
@@ -374,6 +376,10 @@ public sealed class SettingsService
             MoveUpHotkey = up;
         if (data.MoveDown?.ToBinding() is { HasKey: true } down)
             MoveDownHotkey = down;
+        if (data.StartStack?.ToBinding() is { HasKey: true } startStack)
+            StartStackHotkey = startStack;
+        if (data.StopStack?.ToBinding() is { HasKey: true } stopStack)
+            StopStackHotkey = stopStack;
     }
 
     /// <summary>启用/禁用全局纯文本粘贴（组合固定 Ctrl+Shift+V）。</summary>
@@ -447,6 +453,12 @@ public sealed class SettingsService
             case PanelHotkeyAction.MoveDown:
                 MoveDownHotkey = binding;
                 break;
+            case PanelHotkeyAction.StartStack:
+                StartStackHotkey = binding;
+                break;
+            case PanelHotkeyAction.StopStack:
+                StopStackHotkey = binding;
+                break;
         }
 
         Save();
@@ -463,6 +475,8 @@ public sealed class SettingsService
         HidePanelHotkey = HotkeyBinding.HidePanelDefault;
         MoveUpHotkey = HotkeyBinding.MoveUpDefault;
         MoveDownHotkey = HotkeyBinding.MoveDownDefault;
+        StartStackHotkey = HotkeyBinding.StartStackDefault;
+        StopStackHotkey = HotkeyBinding.StopStackDefault;
         Save();
     }
 
@@ -476,6 +490,8 @@ public sealed class SettingsService
         PanelHotkeyAction.HidePanel => HidePanelHotkey,
         PanelHotkeyAction.MoveUp => MoveUpHotkey,
         PanelHotkeyAction.MoveDown => MoveDownHotkey,
+        PanelHotkeyAction.StartStack => StartStackHotkey,
+        PanelHotkeyAction.StopStack => StopStackHotkey,
         _ => HotkeyBinding.PasteSelectedDefault
     };
 
@@ -489,6 +505,8 @@ public sealed class SettingsService
         PanelHotkeyAction.HidePanel => HotkeyBinding.HidePanelDefault,
         PanelHotkeyAction.MoveUp => HotkeyBinding.MoveUpDefault,
         PanelHotkeyAction.MoveDown => HotkeyBinding.MoveDownDefault,
+        PanelHotkeyAction.StartStack => HotkeyBinding.StartStackDefault,
+        PanelHotkeyAction.StopStack => HotkeyBinding.StopStackDefault,
         _ => HotkeyBinding.PasteSelectedDefault
     };
 
@@ -769,7 +787,9 @@ public sealed class SettingsService
                     DeleteSelected = HotkeyData.FromBinding(DeleteSelectedHotkey),
                     HidePanel = HotkeyData.FromBinding(HidePanelHotkey),
                     MoveUp = HotkeyData.FromBinding(MoveUpHotkey),
-                    MoveDown = HotkeyData.FromBinding(MoveDownHotkey)
+                    MoveDown = HotkeyData.FromBinding(MoveDownHotkey),
+                    StartStack = HotkeyData.FromBinding(StartStackHotkey),
+                    StopStack = HotkeyData.FromBinding(StopStackHotkey)
                 }
             };
             File.WriteAllText(_settingsPath, JsonSerializer.Serialize(dto, JsonOptions));
@@ -831,6 +851,8 @@ public sealed class PanelHotkeysData
     public HotkeyData? HidePanel { get; set; }
     public HotkeyData? MoveUp { get; set; }
     public HotkeyData? MoveDown { get; set; }
+    public HotkeyData? StartStack { get; set; }
+    public HotkeyData? StopStack { get; set; }
 }
 
 /// <summary>热键的 JSON 表示（人类可读的字符串形式）。</summary>

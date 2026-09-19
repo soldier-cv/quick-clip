@@ -163,6 +163,8 @@ public partial class SettingsWindow : Window
             PasteSelectedBox.Text = s.PasteSelectedHotkey.ToString();
             PasteSelectedPlainBox.Text = s.PasteSelectedPlainHotkey.ToString();
             TogglePinBox.Text = s.TogglePinHotkey.ToString();
+            StartStackBox.Text = s.StartStackHotkey.ToString();
+            StopStackBox.Text = s.StopStackHotkey.ToString();
 
             SelectThemeInBox(s.Theme);
 
@@ -1231,6 +1233,8 @@ public partial class SettingsWindow : Window
         "HidePanel" => "隐藏面板",
         "MoveUp" => "选中上一项",
         "MoveDown" => "选中下一项",
+        "StartStack" => "开启收集栈",
+        "StopStack" => "关闭收集栈",
         _ => "快捷键"
     };
 
@@ -1244,6 +1248,8 @@ public partial class SettingsWindow : Window
         PanelHotkeyAction.HidePanel => "隐藏面板",
         PanelHotkeyAction.MoveUp => "选中上一项",
         PanelHotkeyAction.MoveDown => "选中下一项",
+        PanelHotkeyAction.StartStack => "开启收集栈",
+        PanelHotkeyAction.StopStack => "关闭收集栈",
         _ => action.ToString()
     };
 }

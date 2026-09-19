@@ -88,8 +88,8 @@ public sealed class ClipboardItemViewModel : INotifyPropertyChanged
 
     public bool IsFile => Item.ContentType == ClipboardContentType.File;
 
-    /// <summary>图片/文本/链接条目支持贴图置顶。</summary>
-    public bool ShowStickyAction => IsText || IsImage;
+    /// <summary>仅针对截图/图片提供贴图置顶动作。</summary>
+    public bool ShowStickyAction => IsImage;
 
     /// <summary>是否支持文本翻译。</summary>
     public bool ShowTranslateAction => IsText && !string.IsNullOrWhiteSpace(Item.TextContent);

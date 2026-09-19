@@ -177,10 +177,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     /// <summary>收集栈状态与文本。</summary>
     public bool IsStackActive => _services.StackPaste.IsActive;
     public int StackCount => _services.StackPaste.Count;
-    public string StackButtonText => IsStackActive ? $"收集栈 ({StackCount}) 已开启" : "收集栈";
+    public string StackButtonText => IsStackActive ? $"收集栈 ({StackCount})" : "收集栈";
     public string StackButtonTooltip => IsStackActive
-        ? "连续粘贴栈已开启：按 Ctrl+V 逐项粘贴，点击此处关闭"
-        : "连续粘贴栈模式（开启后按 Ctrl+V 逐项粘贴，可随时再次点击关闭）";
+        ? $"已开启收集栈 ({StackCount})，点击关闭"
+        : "开启收集栈";
 
     /// <summary>二维码 PNG 就绪（窗口展示覆盖层）。</summary>
     public event Action<byte[]>? QrImageReady;
@@ -867,6 +867,16 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     #endregion
 
     #region 收集栈 (Stack Paste)
+
+    public void StartStackMode()
+    {
+        _services.StackPaste.Start();
+    }
+
+    public void StopStackMode()
+    {
+        _services.StackPaste.Stop();
+    }
 
     public void ToggleStackMode()
     {

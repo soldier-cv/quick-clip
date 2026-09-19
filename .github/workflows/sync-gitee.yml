@@ -1,0 +1,54 @@
+name: Sync to Gitee
+
+on:
+  push:
+    branches:
+      - master
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+concurrency:
+  group: sync-gitee
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push to Gitee
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+        run: |
+          # 禁用终端交互式密码提示，防止凭证异常时卡死
+          export GIT_TERMINAL_PROMPT=0
+
+          if [ -z "$GITEE_TOKEN" ]; then
+            echo "::error::未检测到 GITEE_TOKEN Secret，请在 GitHub 仓库 Settings -> Secrets and variables -> Actions 中配置 GITEE_TOKEN。"
+            exit 1
+          fi
+
+          if [ "${{ github.repository }}" != "soldier-cv/quick-clip" ]; then
+            echo "非主仓库，跳过 Gitee 镜像推送。"
+            exit 0
+          fi
+
+          echo "配置 Gitee 远端仓库..."
+          git remote add gitee "https://huaxudong:${GITEE_TOKEN}@gitee.com/huaxudong/quick-clip.git"
+
+          echo "对齐 master 分支..."
+          git fetch origin master
+          git checkout -B master origin/master
+
+          echo "推送 master 分支到 Gitee..."
+          git push -u gitee master:master --force
+
+          echo "推送所有 Tags 到 Gitee..."
+          git push gitee --tags --force
+
+          echo "✅ Gitee 镜像全量同步完成！"

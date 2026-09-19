@@ -100,10 +100,121 @@ jobs:
           draft: false
           prerelease: false
           body: |
+            ## 🌟 特别致谢
+            衷心感谢开源社区所有贡献者、Star 支持者以及向身边朋友推荐 QuickClip 的伙伴们！你们的每一份反馈、测试与推广，都是 QuickClip 追求极致纯净与极速体验的最大动力。
+
             ## 下载
 
             | 文件 | 说明 |
             | --- | --- |
             | `QuickClip-Setup-win-x64.exe` | 安装版（体积小，需 [.NET 8 桌面运行时 x64](https://aka.ms/dotnet/8.0/windowsdesktop-runtime-win-x64.exe)） |
 
+            国内用户可在 [Gitee 镜像 Releases](https://gitee.com/huaxudong/quick-clip/releases) 页面高速下载。
             详细变更见 [CHANGELOG.md](https://github.com/soldier-cv/quick-clip/blob/master/CHANGELOG.md)。
+
+      - name: Sync Release to Gitee
+        if: startsWith(github.ref, 'refs/tags/') && github.repository == 'soldier-cv/quick-clip'
+        continue-on-error: true
+        shell: pwsh
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+        run: |
+          if (-not $env:GITEE_TOKEN) {
+            Write-Host "::warning::未检测到 GITEE_TOKEN Secret，跳过 Gitee Release 上传。如需启用国内镜像发布，请在 GitHub 仓库中配置 GITEE_TOKEN。"
+            exit 0
+          }
+
+          $tag = "${{ github.ref_name }}"
+          $owner = "huaxudong"
+          $repo = "quick-clip"
+          $token = $env:GITEE_TOKEN
+          $setupExe = (Resolve-Path "publish/setup/QuickClip-Setup-win-x64.exe").Path
+
+          Write-Host "正在准备同步 Release 到 Gitee ($owner/$repo, Tag: $tag)..."
+
+          # 确保 tag 已经存在于 Gitee 仓库
+          try {
+            git remote add gitee "https://huaxudong:$token@gitee.com/$owner/$repo.git"
+          } catch {}
+          try {
+            git push gitee "HEAD:refs/tags/$tag" --force
+            Write-Host "Tag $tag 推送至 Gitee 成功"
+          } catch {
+            Write-Host "推送到 Gitee Tag 提示: $_"
+          }
+
+          $releasesUrl = "https://gitee.com/api/v5/repos/$owner/$repo/releases"
+          $headers = @{ "Authorization" = "token $token" }
+          $createPayload = @{
+            access_token     = $token
+            tag_name         = $tag
+            target_commitish = "master"
+            name             = "QuickClip $tag"
+            body             = "Windows 极速、纯净的本地剪贴板管理工具。国内用户高速下载安装包。"
+            prerelease       = $false
+          } | ConvertTo-Json
+
+          $releaseId = $null
+
+          # 1. 尝试直接创建 Gitee Release（URL query param + Header 双重鉴权）
+          try {
+            $createUrl = "$releasesUrl`?access_token=$token"
+            Write-Host "正在向 Gitee 发送创建 Release 请求: $createUrl"
+            $resp = Invoke-RestMethod -Uri $createUrl -Method Post -Body $createPayload -ContentType "application/json; charset=utf-8" -Headers $headers
+            $releaseId = $resp.id
+            Write-Host "Gitee 创建 Release 成功，ID: $releaseId"
+          } catch {
+            $errDetail = if ($_.ErrorDetails) { $_.ErrorDetails.Message } else { $_.Exception.Message }
+            Write-Host "Gitee 创建 Release 响应: $errDetail"
+          }
+
+          # 2. 如果已存在或创建未直接返回 id，则尝试查询已有的 tag release
+          if (-not $releaseId) {
+            try {
+              $queryUrl = "$releasesUrl/tags/$tag`?access_token=$token"
+              Write-Host "正在查询已有 Release: $queryUrl"
+              $existing = Invoke-RestMethod -Uri $queryUrl -Method Get -Headers $headers
+              $releaseId = $existing.id
+              Write-Host "找到已有 Gitee Release ID: $releaseId"
+            } catch {
+              $errDetail = if ($_.ErrorDetails) { $_.ErrorDetails.Message } else { $_.Exception.Message }
+              Write-Host "查询已有 Gitee Release 响应: $errDetail"
+            }
+          }
+
+          # 3. 如果成功获取到 Release ID，上传安装包附件
+          if ($releaseId -and (Test-Path $setupExe)) {
+            $fileName = [System.IO.Path]::GetFileName($setupExe)
+            $attachUrl = "https://gitee.com/api/v5/repos/$owner/$repo/releases/$releaseId/attach_files"
+
+            # 检查并清理同名旧附件（防止 400 冲突）
+            try {
+              Write-Host "检查 Release (ID: $releaseId) 是否已存在同名附件 $fileName ..."
+              $existingAttaches = Invoke-RestMethod -Uri "$attachUrl`?access_token=$token" -Method Get -Headers $headers
+              foreach ($att in @($existingAttaches)) {
+                if ($att.name -eq $fileName) {
+                  Write-Host "发现已有同名附件 (ID: $($att.id))，正在清理以便重新上传..."
+                  Invoke-RestMethod -Uri "$attachUrl/$($att.id)`?access_token=$token" -Method Delete -Headers $headers
+                  Write-Host "旧附件删除成功"
+                }
+              }
+            } catch {
+              $errDetail = if ($_.ErrorDetails) { $_.ErrorDetails.Message } else { $_.Exception.Message }
+              Write-Host "检查/清理已有附件提示: $errDetail"
+            }
+
+            Write-Host "正在上传安装包至 Gitee Release (ID: $releaseId): $setupExe ..."
+            $uploadUrl = "$attachUrl`?access_token=$token"
+            $curlArgs = @(
+              "-s", "-S",
+              "-X", "POST",
+              $uploadUrl,
+              "-F", "access_token=$token",
+              "-F", "file=@$setupExe"
+            )
+            & curl.exe @curlArgs
+            Write-Host "`nGitee Release 安装包上传完毕！"
+          } else {
+            Write-Warning "未能获取到有效的 Gitee Release ID (releaseId=$releaseId, setupExeExists=$(Test-Path $setupExe))，跳过附件上传。"
+          }
+

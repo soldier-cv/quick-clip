@@ -19,6 +19,7 @@
                  BorderBrush="{DynamicResource Theme.Border}"
                  BorderThickness="1"
                  KeyDown="OnWindowKeyDown"
+                 PreviewKeyDown="OnWindowPreviewKeyDown"
                  SourceInitialized="OnSourceInitialized"
                  Closing="OnWindowClosing"
                  Activated="OnWindowActivated"

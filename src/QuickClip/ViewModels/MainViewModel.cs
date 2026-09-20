@@ -735,9 +735,15 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             var list = await _services.Database.GetSnippetsAsync(_selectedSnippetCategory, null);
 
             Snippets.Clear();
-            foreach (var snip in list)
+            for (int i = 0; i < list.Count; i++)
             {
+                var snip = list[i];
+                snip.DisplayIndex = i < 9 ? (i + 1).ToString() : string.Empty;
                 Snippets.Add(snip);
+            }
+            if (Snippets.Count > 0 && SelectedSnippet == null)
+            {
+                SelectedSnippet = Snippets[0];
             }
         }
         catch (Exception ex)

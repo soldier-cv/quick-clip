@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
 using KeyEventArgs = System.Windows.Input.KeyEventArgs;
 using MessageBox = System.Windows.MessageBox;
@@ -15,6 +16,7 @@ public partial class SnippetEditWindow : FluentWindow
     private readonly SnippetItem _target;
     private readonly bool _isEdit;
 
+    public event Action<SnippetItem>? Saved;
     public SnippetItem ResultItem => _target;
 
     public SnippetEditWindow(SnippetItem? existing = null, Window? owner = null)
@@ -30,7 +32,8 @@ public partial class SnippetEditWindow : FluentWindow
 
         Title = _isEdit ? "编辑常用短语" : "新增常用短语";
         TitleBox.Text = _target.Title;
-        CategoryCombo.Text = string.IsNullOrWhiteSpace(_target.Category) ? "通用" : _target.Category;
+        string currentCategory = string.IsNullOrWhiteSpace(_target.Category) ? "通用" : _target.Category;
+        SelectOrAddCategory(currentCategory);
         ContentBox.Text = _target.Content;
 
         Loaded += (s, e) =>
@@ -46,10 +49,34 @@ public partial class SnippetEditWindow : FluentWindow
         };
     }
 
+    private void SelectOrAddCategory(string cat)
+    {
+        foreach (var item in CategoryCombo.Items)
+        {
+            if (item is ComboBoxItem cbi && string.Equals(cbi.Content?.ToString(), cat, StringComparison.OrdinalIgnoreCase))
+            {
+                CategoryCombo.SelectedItem = cbi;
+                return;
+            }
+        }
+        var newItem = new ComboBoxItem { Content = cat };
+        CategoryCombo.Items.Add(newItem);
+        CategoryCombo.SelectedItem = newItem;
+    }
+
+    private string GetSelectedCategory()
+    {
+        if (CategoryCombo.SelectedItem is ComboBoxItem cbi && cbi.Content is string s && !string.IsNullOrWhiteSpace(s))
+        {
+            return s;
+        }
+        return "通用";
+    }
+
     private void OnSaveClicked(object sender, RoutedEventArgs e)
     {
         string title = TitleBox.Text.Trim();
-        string category = CategoryCombo.Text.Trim();
+        string category = GetSelectedCategory();
         string content = ContentBox.Text;
 
         if (string.IsNullOrWhiteSpace(title))
@@ -67,16 +94,32 @@ public partial class SnippetEditWindow : FluentWindow
         }
 
         _target.Title = title;
-        _target.Category = string.IsNullOrWhiteSpace(category) ? "通用" : category;
+        _target.Category = category;
         _target.Content = content;
 
-        DialogResult = true;
+        Saved?.Invoke(_target);
         Close();
+    }
+
+    private void OnPlaceholderBadgeClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: string placeholder })
+        {
+            int caret = ContentBox.CaretIndex;
+            string current = ContentBox.Text ?? string.Empty;
+            if (caret < 0 || caret > current.Length)
+            {
+                caret = current.Length;
+            }
+
+            ContentBox.Text = current.Insert(caret, placeholder);
+            ContentBox.CaretIndex = caret + placeholder.Length;
+            ContentBox.Focus();
+        }
     }
 
     private void OnCancelClicked(object sender, RoutedEventArgs e)
     {
-        DialogResult = false;
         Close();
     }
 
@@ -84,7 +127,6 @@ public partial class SnippetEditWindow : FluentWindow
     {
         if (e.Key == Key.Escape)
         {
-            DialogResult = false;
             Close();
             e.Handled = true;
         }

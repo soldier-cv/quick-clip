@@ -9,90 +9,147 @@
         Topmost="True"
         ShowInTaskbar="False"
         ShowActivated="False"
-        Width="320" Height="100"
+        Width="484" Height="92"
         WindowStartupLocation="Manual"
         KeyDown="OnWindowKeyDown"
-        MouseLeftButtonDown="OnMouseLeftButtonDown">
+        MouseLeftButtonDown="OnMouseLeftButtonDown"
+        MouseEnter="OnHudMouseEnter"
+        MouseLeave="OnHudMouseLeave">
 
-    <Grid Margin="8">
-        <Border Background="{DynamicResource Theme.Panel}"
+    <Grid Margin="12">
+        <Border x:Name="MainBorder"
+                Background="{DynamicResource Theme.Panel}"
                 BorderBrush="{DynamicResource Theme.Border}"
                 BorderThickness="1"
                 CornerRadius="10">
             <Border.Effect>
-                <DropShadowEffect BlurRadius="12" ShadowDepth="3" Direction="270" Color="#000000" Opacity="0.3" />
+                <DropShadowEffect BlurRadius="16" ShadowDepth="3" Direction="270" Color="#000000" Opacity="0.28" />
             </Border.Effect>
 
-            <Grid Margin="12,8">
+            <Grid x:Name="ContentGrid" Margin="14,9">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
-                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
-                <!-- 顶部状态行 -->
+                <!-- 顶部状态行与操作按钮 -->
                 <Grid Grid.Row="0">
-                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                        <ui:SymbolIcon Symbol="Layer24" FontSize="14" Foreground="{DynamicResource Theme.Accent}" Margin="0,0,6,0" />
-                        <TextBlock Text="收集栈 (连贴模式)" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource Theme.Text}" />
-                        <Border Margin="8,0,0,0" Padding="6,1" Background="{DynamicResource Theme.Search}" CornerRadius="4">
+                    <StackPanel Orientation="Horizontal"
+                                VerticalAlignment="Center"
+                                Cursor="SizeAll"
+                                ToolTip="拖拽移动浮窗位置">
+                        <ui:SymbolIcon x:Name="HudHeaderIcon" Symbol="Layer24" FontSize="15" Foreground="{DynamicResource Theme.Accent}" Margin="0,0,6,0" />
+                        <TextBlock x:Name="HudTitleText" Text="收集栈" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource Theme.Text}" />
+                        <Border Margin="8,0,0,0" Padding="6,2" Background="{DynamicResource Theme.Search}" CornerRadius="4">
                             <TextBlock x:Name="CountBadge" FontSize="11" Foreground="{DynamicResource Theme.TextSecondary}" Text="0 项" />
                         </Border>
                     </StackPanel>
 
-                    <ui:Button Appearance="Transparent"
-                               Padding="4,2"
-                               HorizontalAlignment="Right"
-                               VerticalAlignment="Center"
-                               CornerRadius="4"
-                               ToolTip="退出收集栈 (Esc)"
-                               Click="OnExitClicked">
-                        <ui:SymbolIcon Symbol="Dismiss24" FontSize="13" Foreground="{DynamicResource Theme.TextSecondary}" />
-                    </ui:Button>
-                </Grid>
-
-                <!-- 下一项出栈预览 -->
-                <TextBlock x:Name="NextItemPreview"
-                           Grid.Row="1"
-                           Margin="0,4,0,0"
-                           FontSize="12"
-                           TextTrimming="CharacterEllipsis"
-                           Foreground="{DynamicResource Theme.TextSecondary}"
-                           Text="复制内容将自动排队，Ctrl + V 顺次粘贴" />
-
-                <!-- 底部操作按钮 -->
-                <Grid Grid.Row="2" Margin="0,4,0,0">
-                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
-                        <ui:Button Appearance="Secondary"
-                                   Padding="6,2"
-                                   FontSize="11"
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                        <ui:Button x:Name="SplitButton"
+                                   Appearance="Secondary"
+                                   Padding="8,2"
+                                   Height="24"
+                                   FontSize="11.5"
                                    CornerRadius="4"
+                                   Cursor="Hand"
                                    ToolTip="将当前剪贴板多行文本拆分成多项入栈"
                                    Click="OnSplitLinesClicked">
                             <StackPanel Orientation="Horizontal">
-                                <ui:SymbolIcon Symbol="SplitVertical24" FontSize="12" Margin="0,0,4,0" />
-                                <TextBlock Text="按行拆分" FontSize="11" />
+                                <ui:SymbolIcon Symbol="SplitVertical24" FontSize="12" Margin="0,0,3,0" />
+                                <TextBlock Text="拆分" FontSize="11.5" />
                             </StackPanel>
                         </ui:Button>
 
-                        <ui:Button Appearance="Secondary"
+                        <ui:Button x:Name="ClearButton"
+                                   Appearance="Secondary"
                                    Margin="6,0,0,0"
-                                   Padding="6,2"
-                                   FontSize="11"
+                                   Padding="8,2"
+                                   Height="24"
+                                   FontSize="11.5"
                                    CornerRadius="4"
+                                   Cursor="Hand"
                                    ToolTip="清空栈内全部条目"
                                    Click="OnClearClicked">
-                            <TextBlock Text="清空" FontSize="11" />
+                            <TextBlock Text="清空" FontSize="11.5" />
+                        </ui:Button>
+
+                        <ui:Button x:Name="ExitButton"
+                                   Appearance="Transparent"
+                                   Margin="6,0,0,0"
+                                   Padding="6,2"
+                                   Height="24"
+                                   CornerRadius="4"
+                                   Cursor="Hand"
+                                   ToolTip="退出收集栈"
+                                   Click="OnExitClicked">
+                            <ui:SymbolIcon Symbol="Dismiss24" FontSize="13" Foreground="{DynamicResource Theme.TextSecondary}" />
                         </ui:Button>
                     </StackPanel>
-
-                    <TextBlock Text="按 Esc 退出"
-                               HorizontalAlignment="Right"
-                               VerticalAlignment="Center"
-                               FontSize="11"
-                               Foreground="{DynamicResource Theme.TextSecondary}" />
                 </Grid>
+
+                <!-- 下一项出栈预览与提示 -->
+                <TextBlock x:Name="NextItemPreview"
+                           Grid.Row="1"
+                           Margin="0,5,0,0"
+                           FontSize="12"
+                           TextTrimming="CharacterEllipsis"
+                           VerticalAlignment="Center"
+                           Foreground="{DynamicResource Theme.TextSecondary}"
+                           Text="复制自动入栈，Ctrl+V 顺次粘贴" />
             </Grid>
         </Border>
+
+        <!-- 鼠标悬停展开的栈内条目预览浮层（最多显示 10 项） -->
+        <Popup x:Name="QueuePreviewPopup"
+               PlacementTarget="{Binding ElementName=MainBorder}"
+               Placement="Top"
+               VerticalOffset="-6"
+               AllowsTransparency="True"
+               PopupAnimation="Fade"
+               StaysOpen="True">
+            <Border x:Name="PopupBorder"
+                    Background="{DynamicResource Theme.Panel}"
+                    BorderBrush="{DynamicResource Theme.Border}"
+                    BorderThickness="1"
+                    CornerRadius="10"
+                    Padding="12,10"
+                    MinWidth="460"
+                    MaxWidth="520"
+                    MouseEnter="OnPopupMouseEnter"
+                    MouseLeave="OnPopupMouseLeave">
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="16" ShadowDepth="3" Direction="270" Color="#000000" Opacity="0.3" />
+                </Border.Effect>
+
+                <StackPanel>
+                    <Grid Margin="0,0,0,6">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <ui:SymbolIcon Symbol="DocumentBulletList24" FontSize="14" Foreground="{DynamicResource Theme.Accent}" Margin="0,0,6,0" />
+                            <TextBlock Text="待出栈队列清单" FontSize="12.5" FontWeight="SemiBold" Foreground="{DynamicResource Theme.Text}" />
+                        </StackPanel>
+                        <TextBlock x:Name="PopupCountText"
+                                   HorizontalAlignment="Right"
+                                   VerticalAlignment="Center"
+                                   FontSize="11"
+                                   Foreground="{DynamicResource Theme.TextSecondary}"
+                                   Text="共 0 项" />
+                    </Grid>
+
+                    <Rectangle Height="1" Fill="#12FFFFFF" Margin="0,0,0,6" />
+
+                    <!-- 队列列表容器 -->
+                    <StackPanel x:Name="QueueItemsPanel" />
+
+                    <!-- 超过 10 条时的提示 -->
+                    <TextBlock x:Name="PopupMoreText"
+                               FontSize="11"
+                               Foreground="{DynamicResource Theme.TextMuted}"
+                               Margin="0,4,0,0"
+                               HorizontalAlignment="Center"
+                               Visibility="Collapsed" />
+                </StackPanel>
+            </Border>
+        </Popup>
     </Grid>
 </Window>

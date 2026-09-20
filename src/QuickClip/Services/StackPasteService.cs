@@ -14,7 +14,9 @@ namespace QuickClip.Services;
 public sealed class StackPasteService : IDisposable
 {
     private readonly PasteService _pasteService;
-    private readonly Queue<ClipboardItem> _queue = new();
+    private readonly ToastService? _toastService;
+    private readonly SettingsService? _settings;
+    private readonly List<ClipboardItem> _items = new();
     private readonly object _lock = new();
     private StackHudWindow? _hud;
     private volatile bool _isActive;
@@ -27,16 +29,57 @@ public sealed class StackPasteService : IDisposable
         {
             lock (_lock)
             {
-                return _queue.Count;
+                return _items.Count;
             }
         }
     }
 
     public event Action<bool, int>? StateChanged;
 
-    public StackPasteService(PasteService pasteService)
+    public StackPasteService(PasteService pasteService, ToastService? toastService = null, SettingsService? settings = null)
     {
         _pasteService = pasteService;
+        _toastService = toastService;
+        _settings = settings;
+
+        if (_settings != null)
+        {
+            _settings.Changed += OnSettingsChanged;
+        }
+    }
+
+    private void OnSettingsChanged()
+    {
+        RunOnUi(() =>
+        {
+            if (_hud != null && _settings != null)
+            {
+                _hud.ApplySize(_settings.ToastSize);
+            }
+        });
+    }
+
+    /// <summary>获取栈内当前排队的前 N 个条目文本快照（供悬停预览）。</summary>
+    public List<string> GetSnapshot(int maxCount = 10)
+    {
+        lock (_lock)
+        {
+            return _items
+                .Take(maxCount)
+                .Select(item =>
+                {
+                    if (item.ContentType == ClipboardContentType.Image)
+                    {
+                        return "[图片]";
+                    }
+                    if (item.ContentType == ClipboardContentType.File)
+                    {
+                        return $"[文件] {item.TextContent}";
+                    }
+                    return item.TextContent?.Replace("\r", " ").Replace("\n", " ").Trim() ?? "(空文本)";
+                })
+                .ToList();
+        }
     }
 
     /// <summary>启动收集栈模式。</summary>
@@ -44,6 +87,7 @@ public sealed class StackPasteService : IDisposable
     {
         if (IsActive)
         {
+            RunOnUi(() => _hud?.Show());
             return;
         }
 
@@ -53,9 +97,14 @@ public sealed class StackPasteService : IDisposable
             if (_hud == null)
             {
                 _hud = new StackHudWindow();
+                if (_settings != null)
+                {
+                    _hud.ApplySize(_settings.ToastSize);
+                }
+                _hud.QueueSnapshotProvider = () => GetSnapshot(10);
                 _hud.SplitLinesRequested += SplitClipboardLines;
                 _hud.ClearRequested += Clear;
-                _hud.ExitRequested += Stop;
+                _hud.ExitRequested += () => Stop();
                 _hud.Closed += (s, e) =>
                 {
                     _hud = null;
@@ -66,15 +115,20 @@ public sealed class StackPasteService : IDisposable
                     }
                 };
             }
+            else if (_settings != null)
+            {
+                _hud.ApplySize(_settings.ToastSize);
+            }
             _hud.Show();
             UpdateHud();
         });
 
         NotifyStateChanged();
+        // 开启收集栈时悬浮窗本身浮现即为最直接的反馈，不额外发 Toast 避免右下角重叠遮挡
     }
 
     /// <summary>退出收集栈模式并清空栈。</summary>
-    public void Stop()
+    public void Stop(bool isAutoExit = false)
     {
         if (!IsActive)
         {
@@ -84,12 +138,18 @@ public sealed class StackPasteService : IDisposable
         _isActive = false;
         lock (_lock)
         {
-            _queue.Clear();
+            _items.Clear();
         }
 
         RunOnUi(() => _hud?.Hide());
 
         NotifyStateChanged();
+
+        // 仅在全部粘贴完毕自动退出时轻量提示；用户主动关闭浮窗时无需多余弹窗干扰
+        if (isAutoExit)
+        {
+            _toastService?.Show("收集栈已全部粘贴完毕", durationSeconds: 1.2);
+        }
     }
 
     /// <summary>切换收集栈启用/停用状态。</summary>
@@ -110,10 +170,11 @@ public sealed class StackPasteService : IDisposable
     {
         lock (_lock)
         {
-            _queue.Clear();
+            _items.Clear();
         }
         UpdateHud();
         NotifyStateChanged();
+        _hud?.ShowTransientFeedback("已清空收集栈", 1.0);
     }
 
     /// <summary>将条目压入收集栈。</summary>
@@ -126,7 +187,7 @@ public sealed class StackPasteService : IDisposable
 
         lock (_lock)
         {
-            _queue.Enqueue(item);
+            _items.Add(item);
         }
 
         UpdateHud();
@@ -151,23 +212,31 @@ public sealed class StackPasteService : IDisposable
 
         if (string.IsNullOrWhiteSpace(text))
         {
+            _hud?.ShowTransientFeedback("剪贴板无可拆分文本", 1.2);
             return;
         }
 
         string[] lines = text.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.RemoveEmptyEntries);
         if (lines.Length == 0)
         {
+            _hud?.ShowTransientFeedback("剪贴板无可拆分文本", 1.2);
             return;
         }
 
         lock (_lock)
         {
+            // 若栈内最后一项正是刚复制的整段多行文本，将其移除，仅保留拆分后的各行结果
+            if (_items.Count > 0 && string.Equals(_items[^1].TextContent?.Trim(), text.Trim(), StringComparison.Ordinal))
+            {
+                _items.RemoveAt(_items.Count - 1);
+            }
+
             foreach (string raw in lines)
             {
                 string line = raw.Trim();
                 if (!string.IsNullOrEmpty(line))
                 {
-                    _queue.Enqueue(new ClipboardItem
+                    _items.Add(new ClipboardItem
                     {
                         ContentType = ClipboardContentType.Text,
                         TextContent = line,
@@ -186,6 +255,9 @@ public sealed class StackPasteService : IDisposable
             UpdateHud();
             NotifyStateChanged();
         }
+
+        // 就地在浮窗内微反馈，绝不弹 Toast 遮挡视线或打断操作
+        _hud?.ShowTransientFeedback($"✓ 已拆分入栈 ({lines.Length} 项)", 1.2);
     }
 
     /// <summary>
@@ -199,10 +271,11 @@ public sealed class StackPasteService : IDisposable
 
         lock (_lock)
         {
-            if (_queue.Count > 0)
+            if (_items.Count > 0)
             {
-                item = _queue.Dequeue();
-                remaining = _queue.Count;
+                item = _items[0];
+                _items.RemoveAt(0);
+                remaining = _items.Count;
             }
         }
 
@@ -234,7 +307,7 @@ public sealed class StackPasteService : IDisposable
         if (remaining == 0)
         {
             // 全部粘贴完毕，自动退出收集栈模式
-            Stop();
+            Stop(isAutoExit: true);
         }
 
         return true;
@@ -247,10 +320,10 @@ public sealed class StackPasteService : IDisposable
 
         lock (_lock)
         {
-            count = _queue.Count;
-            if (_queue.Count > 0)
+            count = _items.Count;
+            if (_items.Count > 0)
             {
-                nextPreview = _queue.Peek().TextContent;
+                nextPreview = _items[0].TextContent;
             }
         }
 

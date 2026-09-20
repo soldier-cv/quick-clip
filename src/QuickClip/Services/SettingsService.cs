@@ -38,8 +38,21 @@ public sealed class SettingsService
     /// <summary>外观主题（默认 Terminal）。</summary>
     public AppTheme Theme { get; private set; } = AppTheme.Terminal;
 
+    /// <summary>Toast 提示卡片尺寸（默认 Medium 标准）。</summary>
+    public ToastSize ToastSize { get; private set; } = ToastSize.Medium;
+
+    public void SetToastSize(ToastSize size)
+    {
+        if (ToastSize == size) return;
+        ToastSize = size;
+        Save();
+    }
+
     /// <summary>主窗口是否前端置顶（固定在最前，失焦不自动隐藏）。仅由 Ctrl+P / 图钉切换，设置页不再暴露。</summary>
     public bool WindowAlwaysOnTop { get; private set; }
+
+    /// <summary>连续粘贴模式：按 Enter 粘贴后保持面板激活，并自动选至下一项，方便连续粘贴多条内容。</summary>
+    public bool ContinuousPasteMode { get; private set; }
 
     /// <summary>
     /// 剪贴板历史数据库位置（null 表示默认本地库）。
@@ -56,20 +69,103 @@ public sealed class SettingsService
     /// <summary>自定义离线模型目录（仅 OcrLocalPack=Custom）。</summary>
     public string OcrCustomDir { get; private set; } = string.Empty;
 
-    /// <summary>视觉接口完整请求 URL（Ollama 原生或 OpenAI 兼容，须含路径）。</summary>
-    public string VisionApiUrl { get; private set; } = DefaultVisionApiUrl;
+    // ---------- 模型配置（支持多组配置项 / OpenAI 兼容协议 / Ollama） ----------
 
-    /// <summary>视觉模型名（需支持看图）。</summary>
-    public string VisionApiModel { get; private set; } = DefaultVisionApiModel;
+    /// <summary>多组模型配置项列表。</summary>
+    public List<AiProfile> AiProfiles { get; private set; } = new();
 
-    /// <summary>视觉接口 API Key（可选；仅保存在本地 settings.json，禁止写日志）。</summary>
-    public string? VisionApiKey { get; private set; }
+    /// <summary>OCR 识别当前绑定的模型配置 ID。</summary>
+    public string? OcrProfileId { get; private set; }
 
-    /// <summary>视觉接口识别提示词（Prompt）。</summary>
-    public string VisionApiPrompt { get; private set; } = DefaultVisionApiPrompt;
+    /// <summary>文本翻译当前绑定的模型配置 ID。</summary>
+    public string? TranslationProfileId { get; private set; }
 
-    /// <summary>按接口地址缓存已拉取的模型列表，切换地址或重新打开设置时复用。</summary>
-    public Dictionary<string, List<string>> VisionApiCachedModels { get; private set; } = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>获取 OCR 绑定的模型配置（无匹配时回退首个配置或默认配置）。</summary>
+    public AiProfile GetOcrProfile()
+    {
+        return GetProfile(OcrProfileId) ?? AiProfiles.FirstOrDefault() ?? new AiProfile();
+    }
+
+    /// <summary>获取文本翻译绑定的模型配置（无匹配时回退首个配置或默认配置）。</summary>
+    public AiProfile GetTranslationProfile()
+    {
+        return GetProfile(TranslationProfileId) ?? AiProfiles.FirstOrDefault() ?? new AiProfile();
+    }
+
+    /// <summary>根据 ID 获取指定模型配置。</summary>
+    public AiProfile? GetProfile(string? id)
+    {
+        if (string.IsNullOrWhiteSpace(id))
+        {
+            return null;
+        }
+
+        return AiProfiles.FirstOrDefault(p => string.Equals(p.Id, id, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>添加新模型配置并持久化。</summary>
+    public void AddAiProfile(AiProfile profile)
+    {
+        if (profile == null) return;
+        AiProfiles.Add(profile);
+        Save();
+    }
+
+    /// <summary>更新已有模型配置并持久化。</summary>
+    public void UpdateAiProfile(AiProfile profile)
+    {
+        if (profile == null) return;
+        int idx = AiProfiles.FindIndex(p => string.Equals(p.Id, profile.Id, StringComparison.OrdinalIgnoreCase));
+        if (idx >= 0)
+        {
+            AiProfiles[idx] = profile;
+            Save();
+        }
+    }
+
+    /// <summary>删除指定模型配置（至少保留一组）。</summary>
+    public void DeleteAiProfile(string profileId)
+    {
+        if (AiProfiles.Count <= 1) return;
+        int removed = AiProfiles.RemoveAll(p => string.Equals(p.Id, profileId, StringComparison.OrdinalIgnoreCase));
+        if (removed > 0)
+        {
+            if (string.Equals(OcrProfileId, profileId, StringComparison.OrdinalIgnoreCase))
+            {
+                OcrProfileId = AiProfiles[0].Id;
+            }
+            if (string.Equals(TranslationProfileId, profileId, StringComparison.OrdinalIgnoreCase))
+            {
+                TranslationProfileId = AiProfiles[0].Id;
+            }
+            Save();
+        }
+    }
+
+    /// <summary>更新 OCR 绑定的模型配置 ID 并持久化。</summary>
+    public void SetOcrProfileId(string? profileId)
+    {
+        if (OcrProfileId == profileId) return;
+        OcrProfileId = profileId;
+        Save();
+    }
+
+    /// <summary>更新文本翻译绑定的模型配置 ID 并持久化。</summary>
+    public void SetTranslationProfileId(string? profileId)
+    {
+        if (TranslationProfileId == profileId) return;
+        TranslationProfileId = profileId;
+        Save();
+    }
+
+    // 向下兼容别名与全局委托
+    public string AiApiUrl => GetTranslationProfile().ApiUrl;
+    public string? AiApiKey => GetTranslationProfile().ApiKey;
+    public Dictionary<string, List<string>> AiCachedModels { get; private set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    public string VisionApiUrl => GetOcrProfile().ApiUrl;
+    public string? VisionApiKey => GetOcrProfile().ApiKey;
+    public Dictionary<string, List<string>> VisionApiCachedModels => AiCachedModels;
 
     public IReadOnlyList<string> GetCachedModelsForUrl(string? url)
     {
@@ -79,7 +175,7 @@ public sealed class SettingsService
         }
 
         string key = NormalizeVisionApiUrlKey(url);
-        return VisionApiCachedModels.TryGetValue(key, out var list) && list != null
+        return AiCachedModels.TryGetValue(key, out var list) && list != null
             ? list
             : Array.Empty<string>();
     }
@@ -98,20 +194,55 @@ public sealed class SettingsService
             return;
         }
 
-        VisionApiCachedModels[key] = list;
+        AiCachedModels[key] = list;
         Save();
     }
 
     private static string NormalizeVisionApiUrlKey(string url) => url.Trim().TrimEnd('/');
 
-    public const string DefaultVisionApiPrompt =
+    // ---------- OCR 识别专属配置 ----------
+
+    /// <summary>OCR 识别所使用的 AI 视觉模型名（需支持图片输入）。</summary>
+    public string OcrVisionModel { get; private set; } = DefaultOcrVisionModel;
+
+    /// <summary>OCR 视觉接口识别提示词（Prompt）。</summary>
+    public string OcrPrompt { get; private set; } = DefaultOcrPrompt;
+
+    // 向下兼容别名
+    public string VisionApiModel => OcrVisionModel;
+    public string VisionApiPrompt => OcrPrompt;
+
+    public const string DefaultOcrPrompt =
         "请精确识别图片中的全部文字与内容，严格保留原始版面结构：\n" +
         "1. 表格内容必须提取并整理为标准的 Markdown 表格；\n" +
         "2. 并列的卡片、表单或统计数据，请保持对应关系，以“标签: 数值”的键值对形式呈现；\n" +
         "3. 保留标题和层级关系，不要输出多余的解释或问候，直接输出排版结果。";
 
-    private const string DefaultVisionApiUrl = "https://api.openai.com/v1/chat/completions";
-    private const string DefaultVisionApiModel = "gpt-4o-mini";
+    public const string DefaultVisionApiPrompt = DefaultOcrPrompt;
+
+    // ---------- 文本翻译专属配置 ----------
+
+    /// <summary>文本翻译引擎（微软公共通道 / Google公共通道 / AI 大模型翻译）。</summary>
+    public TranslationEngineType TranslationEngine { get; private set; } = TranslationEngineType.Bing;
+
+    /// <summary>文本翻译所使用的 AI 模型名。</summary>
+    public string TranslationModel { get; private set; } = DefaultTranslationModel;
+
+    /// <summary>文本翻译提示词（支持 {target_lang} 占位符）。</summary>
+    public string TranslationPrompt { get; private set; } = DefaultTranslationPrompt;
+
+    public const string DefaultTranslationPrompt =
+        "你是一位精通多国语言的专业翻译官。请将用户提供的文本准确翻译为目标语言：{target_lang}。\n" +
+        "要求：\n" +
+        "1. 翻译风格地道自然、通顺优雅，符合目标语言的表达习惯；\n" +
+        "2. 严格保留原文的段落格式、排版结构、代码块、Markdown 格式及特殊符号；\n" +
+        "3. 仅输出翻译后的文本内容，不要包含任何额外的问候、解释或标注。";
+
+    private const string DefaultAiApiUrl = "https://api.openai.com/v1/chat/completions";
+    private const string DefaultOcrVisionModel = "gpt-4o-mini";
+    private const string DefaultTranslationModel = "gpt-4o-mini";
+    private const string DefaultVisionApiUrl = DefaultAiApiUrl;
+    private const string DefaultVisionApiModel = DefaultOcrVisionModel;
     private const string DefaultOllamaUrl = "http://localhost:11434/api/generate";
     private const string DefaultOllamaModel = "llava";
 
@@ -187,7 +318,12 @@ public sealed class SettingsService
             AutoStart = dto.AutoStart ?? false;
             TakeOverSystemClipboard = dto.TakeOverSystemClipboard ?? true;
             WindowAlwaysOnTop = dto.WindowAlwaysOnTop ?? false;
+            ContinuousPasteMode = dto.ContinuousPasteMode ?? false;
             Theme = ParseTheme(dto.Theme);
+            if (dto.ToastSize is { } toastSizeStr && Enum.TryParse<ToastSize>(toastSizeStr, true, out var toastSize))
+            {
+                ToastSize = toastSize;
+            }
             DatabasePath = string.IsNullOrWhiteSpace(dto.DatabasePath) ? null : dto.DatabasePath;
 
             if (dto.OcrEngine is { } engineName)
@@ -205,16 +341,7 @@ public sealed class SettingsService
                 OcrCustomDir = dto.OcrCustomDir.Trim();
             }
 
-            ApplyVisionApiFromDto(dto, dto.OcrEngine);
-            if (!string.IsNullOrWhiteSpace(dto.VisionApiPrompt))
-            {
-                VisionApiPrompt = dto.VisionApiPrompt.Trim();
-            }
-
-            if (dto.VisionApiCachedModels != null)
-            {
-                VisionApiCachedModels = new Dictionary<string, List<string>>(dto.VisionApiCachedModels, StringComparer.OrdinalIgnoreCase);
-            }
+            ApplyAiAndFeatureSettingsFromDto(dto, dto.OcrEngine);
 
             TextOnlyCapture = dto.TextOnlyCapture ?? false;
             CapturePaused = dto.CapturePaused ?? false;
@@ -228,7 +355,7 @@ public sealed class SettingsService
             DebugLog.Log(
                 $"已加载设置: 纯文本粘贴={PlainPasteHotkey}({(PlainPasteEnabled ? "启用" : "禁用")}), " +
                 $"自启动={AutoStart}, 主题={Theme}, 窗口置顶={WindowAlwaysOnTop}, OCR={OcrEngine}/{OcrLocalPack} " +
-                $"vision={DebugLog.DescribeUrl(VisionApiUrl)}");
+                $"AI={DebugLog.DescribeUrl(AiApiUrl)}, OCR模型={OcrVisionModel}, 翻译引擎={TranslationEngine}/{TranslationModel}");
         }
         catch (Exception ex)
         {
@@ -419,6 +546,18 @@ public sealed class SettingsService
         Save();
     }
 
+    /// <summary>更新连续粘贴模式并持久化。</summary>
+    public void SetContinuousPasteMode(bool enabled)
+    {
+        if (ContinuousPasteMode == enabled)
+        {
+            return;
+        }
+
+        ContinuousPasteMode = enabled;
+        Save();
+    }
+
     /// <summary>更新面板内某一快捷键并持久化。</summary>
     public void SetPanelHotkey(PanelHotkeyAction action, HotkeyBinding binding)
     {
@@ -552,42 +691,148 @@ public sealed class SettingsService
         Save();
     }
 
+    // ---------- AI 与特性配置更新方法 ----------
+
+    /// <summary>更新通用模型配置（首个配置项）并持久化。</summary>
+    public void SetAiConfig(string apiUrl, string? apiKey)
+    {
+        var profile = AiProfiles.FirstOrDefault();
+        if (profile == null)
+        {
+            profile = new AiProfile();
+            AiProfiles.Add(profile);
+        }
+
+        string nextUrl = string.IsNullOrWhiteSpace(apiUrl)
+            ? profile.ApiUrl
+            : MigrateVisionEndpoint(apiUrl);
+        string? nextKey = string.IsNullOrWhiteSpace(apiKey) ? null : apiKey.Trim();
+        if (profile.ApiUrl == nextUrl && profile.ApiKey == nextKey)
+        {
+            return;
+        }
+
+        profile.ApiUrl = nextUrl;
+        profile.ApiKey = nextKey;
+        Save();
+    }
+
+    /// <summary>更新 OCR 视觉模型名并持久化。</summary>
+    public void SetOcrVisionModel(string model)
+    {
+        string nextModel = string.IsNullOrWhiteSpace(model) ? DefaultOcrVisionModel : model.Trim();
+        if (OcrVisionModel == nextModel)
+        {
+            return;
+        }
+
+        OcrVisionModel = nextModel;
+        Save();
+    }
+
+    /// <summary>更新 OCR 视觉识别提示词并持久化。</summary>
+    public void SetOcrPrompt(string prompt)
+    {
+        string nextPrompt = string.IsNullOrWhiteSpace(prompt) ? DefaultOcrPrompt : prompt.Trim();
+        if (OcrPrompt == nextPrompt)
+        {
+            return;
+        }
+
+        OcrPrompt = nextPrompt;
+        Save();
+    }
+
+    /// <summary>更新文本翻译引擎并持久化。</summary>
+    public void SetTranslationEngine(TranslationEngineType engine)
+    {
+        if (TranslationEngine == engine)
+        {
+            return;
+        }
+
+        TranslationEngine = engine;
+        Save();
+    }
+
+    /// <summary>更新文本翻译模型名并持久化。</summary>
+    public void SetTranslationModel(string model)
+    {
+        string nextModel = string.IsNullOrWhiteSpace(model) ? DefaultTranslationModel : model.Trim();
+        if (TranslationModel == nextModel)
+        {
+            return;
+        }
+
+        TranslationModel = nextModel;
+        Save();
+    }
+
+    /// <summary>更新文本翻译提示词并持久化。</summary>
+    public void SetTranslationPrompt(string prompt)
+    {
+        string nextPrompt = string.IsNullOrWhiteSpace(prompt) ? DefaultTranslationPrompt : prompt.Trim();
+        if (TranslationPrompt == nextPrompt)
+        {
+            return;
+        }
+
+        TranslationPrompt = nextPrompt;
+        Save();
+    }
+
+    /// <summary>更新文本翻译目标语言并持久化。</summary>
+    public void SetTranslationTargetLanguage(string lang)
+    {
+        string nextLang = string.IsNullOrWhiteSpace(lang) ? "zh" : lang.Trim();
+        if (TranslationTargetLanguage == nextLang)
+        {
+            return;
+        }
+
+        TranslationTargetLanguage = nextLang;
+        Save();
+    }
+
     /// <summary>
-    /// 更新视觉接口配置并持久化（apiKey 为空表示清空）。
-    /// 地址为完整 endpoint；API Key 仅存本地 settings.json，禁止写入日志。
+    /// 旧版视觉接口更新方法：同步更新通用 AI 配置及 OCR 视觉模型和提示词。
     /// </summary>
     public void SetVisionApiConfig(string baseUrl, string model, string? apiKey, string? prompt = null)
     {
+        var profile = GetOcrProfile();
         string nextUrl = string.IsNullOrWhiteSpace(baseUrl)
-            ? VisionApiUrl
+            ? profile.ApiUrl
             : MigrateVisionEndpoint(baseUrl);
-        string nextModel = string.IsNullOrWhiteSpace(model) ? VisionApiModel : model.Trim();
+        string nextModel = string.IsNullOrWhiteSpace(model) ? OcrVisionModel : model.Trim();
         string? nextKey = string.IsNullOrWhiteSpace(apiKey) ? null : apiKey.Trim();
-        string nextPrompt = string.IsNullOrWhiteSpace(prompt) ? VisionApiPrompt : prompt.Trim();
-        if (VisionApiUrl == nextUrl && VisionApiModel == nextModel && VisionApiKey == nextKey && VisionApiPrompt == nextPrompt)
+        string nextPrompt = string.IsNullOrWhiteSpace(prompt) ? OcrPrompt : prompt.Trim();
+
+        bool changed = false;
+        if (profile.ApiUrl != nextUrl || profile.ApiKey != nextKey)
         {
-            return;
+            profile.ApiUrl = nextUrl;
+            profile.ApiKey = nextKey;
+            changed = true;
+        }
+        if (OcrVisionModel != nextModel)
+        {
+            OcrVisionModel = nextModel;
+            changed = true;
+        }
+        if (OcrPrompt != nextPrompt)
+        {
+            OcrPrompt = nextPrompt;
+            changed = true;
         }
 
-        VisionApiUrl = nextUrl;
-        VisionApiModel = nextModel;
-        VisionApiKey = nextKey;
-        VisionApiPrompt = nextPrompt;
-        Save();
-    }
-
-    /// <summary>更新视觉接口识别提示词并持久化。</summary>
-    public void SetVisionApiPrompt(string prompt)
-    {
-        string nextPrompt = string.IsNullOrWhiteSpace(prompt) ? DefaultVisionApiPrompt : prompt.Trim();
-        if (VisionApiPrompt == nextPrompt)
+        if (changed)
         {
-            return;
+            Save();
         }
-
-        VisionApiPrompt = nextPrompt;
-        Save();
     }
+
+    /// <summary>更新视觉接口识别提示词并持久化（兼容旧方法）。</summary>
+    public void SetVisionApiPrompt(string prompt) => SetOcrPrompt(prompt);
 
     /// <summary>旧版 Ollama / OpenAI 枚举合并为 VisionApi。</summary>
     internal static OcrEngineType ParseOcrEngine(string? name)
@@ -610,88 +855,174 @@ public sealed class SettingsService
     }
 
     /// <summary>
-    /// 新字段优先；否则从旧 Ollama/OpenAI 配置迁移。
-    /// 用户同时填过两者时，优先已改过的 OpenAI（含 Key），再回退 Ollama。
+    /// 从 DTO 加载并迁移模型配置列表、OCR/翻译专属模型及关联绑定。
     /// </summary>
-    private void ApplyVisionApiFromDto(SettingsData dto, string? originalEngine)
+    private void ApplyAiAndFeatureSettingsFromDto(SettingsData dto, string? originalEngine)
     {
-        if (!string.IsNullOrWhiteSpace(dto.VisionApiUrl) ||
-            !string.IsNullOrWhiteSpace(dto.VisionApiModel) ||
-            dto.VisionApiKey != null)
+        // 1. 加载多组模型配置或从旧单配置迁移
+        AiProfiles.Clear();
+        if (dto.AiProfiles != null && dto.AiProfiles.Count > 0)
         {
-            if (!string.IsNullOrWhiteSpace(dto.VisionApiUrl))
+            foreach (var p in dto.AiProfiles)
             {
-                VisionApiUrl = MigrateVisionEndpoint(dto.VisionApiUrl);
+                if (string.IsNullOrWhiteSpace(p.ApiUrl)) continue;
+                AiProfiles.Add(new AiProfile
+                {
+                    Id = string.IsNullOrWhiteSpace(p.Id) ? Guid.NewGuid().ToString("N") : p.Id.Trim(),
+                    Name = string.IsNullOrWhiteSpace(p.Name) ? "模型配置" : p.Name.Trim(),
+                    ApiUrl = MigrateVisionEndpoint(p.ApiUrl),
+                    ApiKey = string.IsNullOrWhiteSpace(p.ApiKey) ? null : p.ApiKey.Trim(),
+                    CachedModels = p.CachedModels ?? new List<string>()
+                });
             }
-
-            if (!string.IsNullOrWhiteSpace(dto.VisionApiModel))
-            {
-                VisionApiModel = dto.VisionApiModel.Trim();
-            }
-
-            VisionApiKey = string.IsNullOrWhiteSpace(dto.VisionApiKey) ? null : dto.VisionApiKey.Trim();
-            return;
         }
 
-        bool legacyOllama = originalEngine != null &&
-                            originalEngine.Equals("Ollama", StringComparison.OrdinalIgnoreCase);
-        bool openAiCustom =
-            !string.IsNullOrWhiteSpace(dto.OpenAiApiKey) ||
-            (!string.IsNullOrWhiteSpace(dto.OpenAiBaseUrl) &&
-             !dto.OpenAiBaseUrl.Trim().TrimEnd('/').Equals(DefaultVisionApiUrl, StringComparison.OrdinalIgnoreCase)) ||
-            (!string.IsNullOrWhiteSpace(dto.OpenAiModel) &&
-             !dto.OpenAiModel.Trim().Equals(DefaultVisionApiModel, StringComparison.OrdinalIgnoreCase));
-
-        if (legacyOllama && !openAiCustom)
+        if (AiProfiles.Count == 0)
         {
-            if (!string.IsNullOrWhiteSpace(dto.OllamaBaseUrl))
+            string legacyUrl = DefaultAiApiUrl;
+            string? legacyKey = null;
+
+            if (!string.IsNullOrWhiteSpace(dto.AiApiUrl))
             {
-                VisionApiUrl = MigrateOllamaEndpoint(dto.OllamaBaseUrl);
+                legacyUrl = MigrateVisionEndpoint(dto.AiApiUrl);
+                legacyKey = string.IsNullOrWhiteSpace(dto.AiApiKey) ? null : dto.AiApiKey.Trim();
+            }
+            else if (!string.IsNullOrWhiteSpace(dto.VisionApiUrl) ||
+                     !string.IsNullOrWhiteSpace(dto.VisionApiModel) ||
+                     dto.VisionApiKey != null)
+            {
+                if (!string.IsNullOrWhiteSpace(dto.VisionApiUrl))
+                {
+                    legacyUrl = MigrateVisionEndpoint(dto.VisionApiUrl);
+                }
+                legacyKey = string.IsNullOrWhiteSpace(dto.VisionApiKey) ? null : dto.VisionApiKey.Trim();
             }
             else
             {
-                VisionApiUrl = DefaultOllamaUrl;
+                bool legacyOllama = originalEngine != null &&
+                                    originalEngine.Equals("Ollama", StringComparison.OrdinalIgnoreCase);
+                bool openAiCustom =
+                    !string.IsNullOrWhiteSpace(dto.OpenAiApiKey) ||
+                    (!string.IsNullOrWhiteSpace(dto.OpenAiBaseUrl) &&
+                     !dto.OpenAiBaseUrl.Trim().TrimEnd('/').Equals(DefaultAiApiUrl, StringComparison.OrdinalIgnoreCase)) ||
+                    (!string.IsNullOrWhiteSpace(dto.OpenAiModel) &&
+                     !dto.OpenAiModel.Trim().Equals(DefaultOcrVisionModel, StringComparison.OrdinalIgnoreCase));
+
+                if (legacyOllama && !openAiCustom)
+                {
+                    legacyUrl = !string.IsNullOrWhiteSpace(dto.OllamaBaseUrl)
+                        ? MigrateOllamaEndpoint(dto.OllamaBaseUrl)
+                        : DefaultOllamaUrl;
+                    legacyKey = null;
+                }
+                else if (!string.IsNullOrWhiteSpace(dto.OpenAiBaseUrl) ||
+                         !string.IsNullOrWhiteSpace(dto.OpenAiModel) ||
+                         !string.IsNullOrWhiteSpace(dto.OpenAiApiKey))
+                {
+                    if (!string.IsNullOrWhiteSpace(dto.OpenAiBaseUrl))
+                    {
+                        legacyUrl = MigrateOpenAiEndpoint(dto.OpenAiBaseUrl);
+                    }
+                    legacyKey = string.IsNullOrWhiteSpace(dto.OpenAiApiKey) ? null : dto.OpenAiApiKey.Trim();
+                }
+                else if (!string.IsNullOrWhiteSpace(dto.OllamaBaseUrl))
+                {
+                    legacyUrl = MigrateOllamaEndpoint(dto.OllamaBaseUrl);
+                }
             }
 
-            VisionApiModel = string.IsNullOrWhiteSpace(dto.OllamaModel)
-                ? DefaultOllamaModel
-                : dto.OllamaModel.Trim();
-            VisionApiKey = null;
-            return;
+            var defaultProfile = new AiProfile
+            {
+                Id = "default",
+                Name = "默认配置",
+                ApiUrl = legacyUrl,
+                ApiKey = legacyKey,
+                CachedModels = new List<string>()
+            };
+
+            if (dto.AiCachedModels != null && dto.AiCachedModels.TryGetValue(NormalizeVisionApiUrlKey(legacyUrl), out var cached))
+            {
+                defaultProfile.CachedModels = new List<string>(cached);
+            }
+            else if (dto.VisionApiCachedModels != null && dto.VisionApiCachedModels.TryGetValue(NormalizeVisionApiUrlKey(legacyUrl), out var vCached))
+            {
+                defaultProfile.CachedModels = new List<string>(vCached);
+            }
+
+            AiProfiles.Add(defaultProfile);
         }
 
-        if (!string.IsNullOrWhiteSpace(dto.OpenAiBaseUrl) ||
-            !string.IsNullOrWhiteSpace(dto.OpenAiModel) ||
-            !string.IsNullOrWhiteSpace(dto.OpenAiApiKey))
+        // 2. 缓存字典兼容维护
+        if (dto.AiCachedModels != null)
         {
-            if (!string.IsNullOrWhiteSpace(dto.OpenAiBaseUrl))
-            {
-                VisionApiUrl = MigrateOpenAiEndpoint(dto.OpenAiBaseUrl);
-            }
-
-            if (!string.IsNullOrWhiteSpace(dto.OpenAiModel))
-            {
-                VisionApiModel = dto.OpenAiModel.Trim();
-            }
-
-            VisionApiKey = string.IsNullOrWhiteSpace(dto.OpenAiApiKey) ? null : dto.OpenAiApiKey.Trim();
-            return;
+            AiCachedModels = new Dictionary<string, List<string>>(dto.AiCachedModels, StringComparer.OrdinalIgnoreCase);
+        }
+        else if (dto.VisionApiCachedModels != null)
+        {
+            AiCachedModels = new Dictionary<string, List<string>>(dto.VisionApiCachedModels, StringComparer.OrdinalIgnoreCase);
         }
 
-        if (!string.IsNullOrWhiteSpace(dto.OllamaBaseUrl) || !string.IsNullOrWhiteSpace(dto.OllamaModel))
+        // 绑定 OCR 与 翻译所选配置 ID
+        if (!string.IsNullOrWhiteSpace(dto.OcrProfileId) && GetProfile(dto.OcrProfileId) != null)
         {
-            if (!string.IsNullOrWhiteSpace(dto.OllamaBaseUrl))
-            {
-                VisionApiUrl = MigrateOllamaEndpoint(dto.OllamaBaseUrl);
-            }
-            else
-            {
-                VisionApiUrl = DefaultOllamaUrl;
-            }
+            OcrProfileId = dto.OcrProfileId.Trim();
+        }
+        else
+        {
+            OcrProfileId = AiProfiles[0].Id;
+        }
 
-            VisionApiModel = string.IsNullOrWhiteSpace(dto.OllamaModel)
-                ? DefaultOllamaModel
-                : dto.OllamaModel.Trim();
+        if (!string.IsNullOrWhiteSpace(dto.TranslationProfileId) && GetProfile(dto.TranslationProfileId) != null)
+        {
+            TranslationProfileId = dto.TranslationProfileId.Trim();
+        }
+        else
+        {
+            TranslationProfileId = AiProfiles[0].Id;
+        }
+
+        // 3. OCR 视觉模型与提示词
+        if (!string.IsNullOrWhiteSpace(dto.OcrVisionModel))
+        {
+            OcrVisionModel = dto.OcrVisionModel.Trim();
+        }
+        else if (!string.IsNullOrWhiteSpace(dto.VisionApiModel))
+        {
+            OcrVisionModel = dto.VisionApiModel.Trim();
+        }
+        else if (!string.IsNullOrWhiteSpace(dto.OpenAiModel))
+        {
+            OcrVisionModel = dto.OpenAiModel.Trim();
+        }
+        else if (!string.IsNullOrWhiteSpace(dto.OllamaModel))
+        {
+            OcrVisionModel = dto.OllamaModel.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(dto.OcrPrompt))
+        {
+            OcrPrompt = dto.OcrPrompt.Trim();
+        }
+        else if (!string.IsNullOrWhiteSpace(dto.VisionApiPrompt))
+        {
+            OcrPrompt = dto.VisionApiPrompt.Trim();
+        }
+
+        // 4. 文本翻译配置
+        if (dto.TranslationEngine is { } tEngineStr &&
+            Enum.TryParse<TranslationEngineType>(tEngineStr, true, out var tEngine))
+        {
+            TranslationEngine = tEngine;
+        }
+
+        if (!string.IsNullOrWhiteSpace(dto.TranslationModel))
+        {
+            TranslationModel = dto.TranslationModel.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(dto.TranslationPrompt))
+        {
+            TranslationPrompt = dto.TranslationPrompt.Trim();
         }
     }
 
@@ -762,16 +1093,37 @@ public sealed class SettingsService
                 AutoStart = AutoStart,
                 TakeOverSystemClipboard = TakeOverSystemClipboard,
                 WindowAlwaysOnTop = WindowAlwaysOnTop,
+                ContinuousPasteMode = ContinuousPasteMode,
                 Theme = Theme.ToString(),
+                ToastSize = ToastSize.ToString(),
                 // 不再写入 DatabasePath：设置页已移除自定义路径；旧文件中的字段读入后也不会再回写
                 OcrEngine = OcrEngine.ToString(),
                 OcrLocalPack = OcrLocalPack.ToString(),
                 OcrCustomDir = string.IsNullOrWhiteSpace(OcrCustomDir) ? null : OcrCustomDir,
-                VisionApiUrl = VisionApiUrl,
-                VisionApiModel = VisionApiModel,
-                VisionApiKey = VisionApiKey,
-                VisionApiPrompt = VisionApiPrompt,
-                VisionApiCachedModels = VisionApiCachedModels.Count > 0 ? VisionApiCachedModels : null,
+                AiProfiles = AiProfiles.Select(p => new AiProfileData
+                {
+                    Id = p.Id,
+                    Name = p.Name,
+                    ApiUrl = p.ApiUrl,
+                    ApiKey = p.ApiKey,
+                    CachedModels = p.CachedModels.Count > 0 ? p.CachedModels : null
+                }).ToList(),
+                OcrProfileId = OcrProfileId,
+                TranslationProfileId = TranslationProfileId,
+                AiApiUrl = AiApiUrl,
+                AiApiKey = AiApiKey,
+                AiCachedModels = AiCachedModels.Count > 0 ? AiCachedModels : null,
+                OcrVisionModel = OcrVisionModel,
+                OcrPrompt = OcrPrompt,
+                TranslationEngine = TranslationEngine.ToString(),
+                TranslationModel = TranslationModel,
+                TranslationPrompt = TranslationPrompt,
+                // 向下兼容旧版属性
+                VisionApiUrl = AiApiUrl,
+                VisionApiModel = OcrVisionModel,
+                VisionApiKey = AiApiKey,
+                VisionApiPrompt = OcrPrompt,
+                VisionApiCachedModels = AiCachedModels.Count > 0 ? AiCachedModels : null,
                 MaxHistoryItems = MaxHistoryItems,
                 TextOnlyCapture = TextOnlyCapture,
                 CapturePaused = CapturePaused,
@@ -815,11 +1167,24 @@ public sealed class SettingsData
     public bool? AutoStart { get; set; }
     public bool? TakeOverSystemClipboard { get; set; }
     public bool? WindowAlwaysOnTop { get; set; }
+    public bool? ContinuousPasteMode { get; set; }
     public string? Theme { get; set; }
+    public string? ToastSize { get; set; }
     public string? DatabasePath { get; set; }
     public string? OcrEngine { get; set; }
     public string? OcrLocalPack { get; set; }
     public string? OcrCustomDir { get; set; }
+    public List<AiProfileData>? AiProfiles { get; set; }
+    public string? OcrProfileId { get; set; }
+    public string? TranslationProfileId { get; set; }
+    public string? AiApiUrl { get; set; }
+    public string? AiApiKey { get; set; }
+    public Dictionary<string, List<string>>? AiCachedModels { get; set; }
+    public string? OcrVisionModel { get; set; }
+    public string? OcrPrompt { get; set; }
+    public string? TranslationEngine { get; set; }
+    public string? TranslationModel { get; set; }
+    public string? TranslationPrompt { get; set; }
     public string? VisionApiUrl { get; set; }
     public string? VisionApiModel { get; set; }
     public string? VisionApiKey { get; set; }
@@ -838,6 +1203,16 @@ public sealed class SettingsData
     public string? LastUpdateCheckUtc { get; set; }
     public string? TranslationTargetLanguage { get; set; }
     public PanelHotkeysData? PanelHotkeys { get; set; }
+}
+
+/// <summary>模型配置项的 JSON 结构。</summary>
+public sealed class AiProfileData
+{
+    public string? Id { get; set; }
+    public string? Name { get; set; }
+    public string? ApiUrl { get; set; }
+    public string? ApiKey { get; set; }
+    public List<string>? CachedModels { get; set; }
 }
 
 /// <summary>面板内快捷键的 JSON 结构。</summary>

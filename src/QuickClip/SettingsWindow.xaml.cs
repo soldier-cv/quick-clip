@@ -7,6 +7,8 @@ using System.Windows.Threading;
 using Microsoft.Win32;
 using QuickClip.Models;
 using QuickClip.Services;
+using ComboBox = System.Windows.Controls.ComboBox;
+using TextBox = System.Windows.Controls.TextBox;
 using MediaBrush = System.Windows.Media.Brush;
 
 namespace QuickClip;
@@ -91,6 +93,8 @@ public partial class SettingsWindow : Window
         UpdateLayout();
     }
 
+
+
     /// <summary>
     /// 下拉未展开时，滚轮交给页面滚动，避免悬停 ComboBox 时误改选项。
     /// </summary>
@@ -164,12 +168,12 @@ public partial class SettingsWindow : Window
             PasteSelectedPlainBox.Text = s.PasteSelectedPlainHotkey.ToString();
             TogglePinBox.Text = s.TogglePinHotkey.ToString();
             StartStackBox.Text = s.StartStackHotkey.ToString();
-            StopStackBox.Text = s.StopStackHotkey.ToString();
 
             SelectThemeInBox(s.Theme);
 
             AutoStartCheck.IsChecked = s.AutoStart;
             AutoCheckUpdatesCheck.IsChecked = s.AutoCheckUpdates;
+            ContinuousPasteCheck.IsChecked = s.ContinuousPasteMode;
             TextOnlyCheck.IsChecked = s.TextOnlyCapture;
             ChannelText.Text = "当前渠道：" + UpdateService.ChannelLabel;
             MaxHistoryBox.Text = s.MaxHistoryItems.ToString();
@@ -182,14 +186,23 @@ public partial class SettingsWindow : Window
                 _ => 0
             };
 
-            VisionApiUrlBox.Text = s.VisionApiUrl;
-            VisionApiModelBox.Text = s.VisionApiModel;
-            VisionApiKeyBox.Password = s.VisionApiKey ?? string.Empty;
-            VisionApiPromptBox.Text = s.VisionApiPrompt;
+            SetModelBoxItemsSource(VisionApiModelBox, null, s.OcrVisionModel);
+            VisionApiPromptBox.Text = s.OcrPrompt;
             OcrCustomDirBox.Text = s.OcrCustomDir;
+
+            TranslationEngineBox.SelectedIndex = s.TranslationEngine switch
+            {
+                TranslationEngineType.Google => 1,
+                TranslationEngineType.Ai => 2,
+                _ => 0
+            };
+            SetModelBoxItemsSource(TranslationModelBox, null, s.TranslationModel);
+            TranslationPromptBox.Text = s.TranslationPrompt;
+
             ApplyOcrEnginePanels(s.OcrEngine);
+            ApplyTranslationEnginePanels(s.TranslationEngine);
             RefreshLocalOcrPanel();
-            RefreshCachedModelsForCurrentUrl();
+            RefreshAiProfileBoxes();
 
             RefreshSysClipboardStatus();
         }
@@ -464,6 +477,21 @@ public partial class SettingsWindow : Window
         {
             _ = CheckAndDownloadFromSettingsAsync();
         }
+    }
+
+    private void OnContinuousPasteToggled(object sender, RoutedEventArgs e)
+    {
+        if (_suppressUiEvents)
+        {
+            return;
+        }
+
+        if (ContinuousPasteCheck.IsChecked == _services.Settings.ContinuousPasteMode)
+        {
+            return;
+        }
+
+        _services.Settings.SetContinuousPasteMode(ContinuousPasteCheck.IsChecked == true);
     }
 
     private void OnPendingUpdateChanged(PendingUpdate? _)
@@ -751,34 +779,180 @@ public partial class SettingsWindow : Window
         Dispatcher.BeginInvoke(RefreshScrollExtent, DispatcherPriority.Loaded);
     }
 
-    private void OnVisionApiConfigLostFocus(object sender, RoutedEventArgs e)
+    // ---------- 模型配置（多组配置项管理） ----------
+
+    private void RefreshAiProfileBoxes()
     {
-        _services.Settings.SetVisionApiConfig(
-            VisionApiUrlBox.Text,
-            VisionApiModelBox.Text,
-            VisionApiKeyBox.Password,
-            VisionApiPromptBox.Text);
-        RefreshCachedModelsForCurrentUrl();
+        var profiles = _services.Settings.AiProfiles;
+        if (profiles.Count == 0) return;
+
+        bool prevSuppress = _suppressUiEvents;
+        _suppressUiEvents = true;
+        try
+        {
+            // 1. AiProfileBox
+            string? selectedAiProfileId = (AiProfileBox.SelectedItem as AiProfile)?.Id ?? profiles[0].Id;
+            AiProfileBox.ItemsSource = null;
+            AiProfileBox.ItemsSource = profiles;
+            var activeAiProfile = profiles.FirstOrDefault(p => p.Id == selectedAiProfileId) ?? profiles[0];
+            AiProfileBox.SelectedItem = activeAiProfile;
+            DeleteAiProfileButton.IsEnabled = profiles.Count > 1;
+
+            // 2. OcrProfileBox
+            string? selectedOcrId = _services.Settings.OcrProfileId ?? profiles[0].Id;
+            OcrProfileBox.ItemsSource = null;
+            OcrProfileBox.ItemsSource = profiles;
+            OcrProfileBox.SelectedItem = profiles.FirstOrDefault(p => p.Id == selectedOcrId) ?? profiles[0];
+
+            // 3. TranslationProfileBox
+            string? selectedTransId = _services.Settings.TranslationProfileId ?? profiles[0].Id;
+            TranslationProfileBox.ItemsSource = null;
+            TranslationProfileBox.ItemsSource = profiles;
+            TranslationProfileBox.SelectedItem = profiles.FirstOrDefault(p => p.Id == selectedTransId) ?? profiles[0];
+
+            // 4. 加载当前选中的配置项详情
+            LoadAiProfileToInputs(activeAiProfile);
+
+            // 5. 联动刷新 OCR 与 翻译的模型下拉项
+            RefreshOcrModelsFromSelectedProfile();
+            RefreshTranslationModelsFromSelectedProfile();
+        }
+        finally
+        {
+            _suppressUiEvents = prevSuppress;
+        }
     }
 
-    private void OnVisionApiUrlTextChanged(object sender, TextChangedEventArgs e)
+    private void LoadAiProfileToInputs(AiProfile profile)
     {
-        if (_suppressUiEvents)
-        {
-            return;
-        }
-
-        RefreshCachedModelsForCurrentUrl();
+        AiProfileNameBox.Text = profile.Name;
+        AiApiUrlBox.Text = profile.ApiUrl;
+        AiApiKeyBox.Password = profile.ApiKey ?? string.Empty;
     }
 
-    private void RefreshCachedModelsForCurrentUrl()
+    private void SetModelBoxItemsSource(ComboBox box, IEnumerable<string>? models, string? currentModel)
     {
-        string url = VisionApiUrlBox.Text.Trim();
-        var cached = _services.Settings.GetCachedModelsForUrl(url);
-        if (cached.Count > 0)
+        var list = models?.Where(m => !string.IsNullOrWhiteSpace(m)).Distinct().ToList() ?? new List<string>();
+        if (!string.IsNullOrWhiteSpace(currentModel) && !list.Contains(currentModel))
         {
-            VisionApiModelBox.ItemsSource = cached;
+            list.Insert(0, currentModel);
         }
+        box.ItemsSource = list;
+        box.SelectedItem = currentModel;
+    }
+
+    private void RefreshOcrModelsFromSelectedProfile()
+    {
+        if (OcrProfileBox.SelectedItem is AiProfile profile)
+        {
+            var models = profile.CachedModels.Count > 0
+                ? profile.CachedModels
+                : _services.Settings.GetCachedModelsForUrl(profile.ApiUrl);
+            SetModelBoxItemsSource(VisionApiModelBox, models, _services.Settings.OcrVisionModel);
+        }
+    }
+
+    private void RefreshTranslationModelsFromSelectedProfile()
+    {
+        if (TranslationProfileBox.SelectedItem is AiProfile profile)
+        {
+            var models = profile.CachedModels.Count > 0
+                ? profile.CachedModels
+                : _services.Settings.GetCachedModelsForUrl(profile.ApiUrl);
+            SetModelBoxItemsSource(TranslationModelBox, models, _services.Settings.TranslationModel);
+        }
+    }
+
+    private void OnAiProfileSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressUiEvents) return;
+        if (AiProfileBox.SelectedItem is AiProfile profile)
+        {
+            LoadAiProfileToInputs(profile);
+            AiTestStatus.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private void OnAddAiProfileClicked(object sender, RoutedEventArgs e)
+    {
+        int count = _services.Settings.AiProfiles.Count + 1;
+        var newProfile = new AiProfile
+        {
+            Name = $"配置 {count}",
+            ApiUrl = "https://api.openai.com/v1/chat/completions"
+        };
+        _services.Settings.AddAiProfile(newProfile);
+        RefreshAiProfileBoxes();
+        AiProfileBox.SelectedItem = newProfile;
+        AiProfileNameBox.Focus();
+        AiProfileNameBox.SelectAll();
+    }
+
+    private void OnDeleteAiProfileClicked(object sender, RoutedEventArgs e)
+    {
+        if (_services.Settings.AiProfiles.Count <= 1) return;
+        if (AiProfileBox.SelectedItem is not AiProfile current) return;
+
+        _services.Settings.DeleteAiProfile(current.Id);
+        RefreshAiProfileBoxes();
+    }
+
+    private void OnAiProfileNameTextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_suppressUiEvents) return;
+        if (AiProfileBox.SelectedItem is not AiProfile current) return;
+
+        string newName = AiProfileNameBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(newName))
+        {
+            newName = "未命名配置";
+        }
+
+        if (current.Name != newName)
+        {
+            current.Name = newName;
+            _services.Settings.UpdateAiProfile(current);
+            AiProfileBox.Items.Refresh();
+            OcrProfileBox.Items.Refresh();
+            TranslationProfileBox.Items.Refresh();
+        }
+    }
+
+    private void OnAiProfileNameLostFocus(object sender, RoutedEventArgs e)
+    {
+        if (_suppressUiEvents) return;
+        if (AiProfileBox.SelectedItem is not AiProfile current) return;
+
+        string newName = AiProfileNameBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(newName))
+        {
+            newName = "未命名配置";
+            AiProfileNameBox.Text = newName;
+        }
+
+        if (current.Name != newName)
+        {
+            current.Name = newName;
+            _services.Settings.UpdateAiProfile(current);
+            RefreshAiProfileBoxes();
+        }
+    }
+
+    private void OnAiConfigLostFocus(object sender, RoutedEventArgs e)
+    {
+        if (_suppressUiEvents) return;
+        if (AiProfileBox.SelectedItem is not AiProfile current) return;
+
+        current.ApiUrl = string.IsNullOrWhiteSpace(AiApiUrlBox.Text)
+            ? "https://api.openai.com/v1/chat/completions"
+            : SettingsService.MigrateVisionEndpoint(AiApiUrlBox.Text);
+        current.ApiKey = string.IsNullOrWhiteSpace(AiApiKeyBox.Password) ? null : AiApiKeyBox.Password.Trim();
+        _services.Settings.UpdateAiProfile(current);
+    }
+
+    private void OnAiApiUrlTextChanged(object sender, TextChangedEventArgs e)
+    {
+        // 保持界面顺畅，不强制触发全局刷新
     }
 
     private void OnFillSampleUrlClicked(object sender, RoutedEventArgs e)
@@ -788,81 +962,63 @@ public partial class SettingsWindow : Window
 
     private void ApplySampleUrl(string url, string selectToken)
     {
-        VisionApiUrlBox.Text = url;
-        VisionApiUrlBox.Focus();
+        AiApiUrlBox.Text = url;
+        AiApiUrlBox.Focus();
         int idx = url.IndexOf(selectToken, StringComparison.Ordinal);
         if (idx >= 0)
         {
-            VisionApiUrlBox.Select(idx, selectToken.Length);
+            AiApiUrlBox.Select(idx, selectToken.Length);
         }
         else
         {
-            VisionApiUrlBox.CaretIndex = url.Length;
+            AiApiUrlBox.CaretIndex = url.Length;
         }
 
-        _services.Settings.SetVisionApiConfig(
-            VisionApiUrlBox.Text,
-            VisionApiModelBox.Text,
-            VisionApiKeyBox.Password,
-            VisionApiPromptBox.Text);
-        RefreshCachedModelsForCurrentUrl();
-    }
-
-    private void OnResetVisionPromptClicked(object sender, RoutedEventArgs e)
-    {
-        VisionApiPromptBox.Text = SettingsService.DefaultVisionApiPrompt;
-        _services.Settings.SetVisionApiPrompt(SettingsService.DefaultVisionApiPrompt);
+        if (AiProfileBox.SelectedItem is AiProfile current)
+        {
+            current.ApiUrl = url;
+            current.ApiKey = string.IsNullOrWhiteSpace(AiApiKeyBox.Password) ? null : AiApiKeyBox.Password.Trim();
+            _services.Settings.UpdateAiProfile(current);
+        }
     }
 
     private async void OnFetchModelsClicked(object sender, RoutedEventArgs e)
     {
-        if (_busy)
-        {
-            return;
-        }
+        if (_busy) return;
+        if (AiProfileBox.SelectedItem is not AiProfile current) return;
 
-        string url = VisionApiUrlBox.Text.Trim();
-        string key = VisionApiKeyBox.Password.Trim();
-        string currentModel = VisionApiModelBox.Text.Trim();
+        string url = AiApiUrlBox.Text.Trim();
+        string key = AiApiKeyBox.Password.Trim();
 
         if (string.IsNullOrWhiteSpace(url))
         {
-            OcrTestStatus.Text = "请先在上方输入接口地址。";
-            OcrTestPanel.Visibility = Visibility.Visible;
+            AiTestStatus.Text = "请先在上方输入接口地址。";
+            AiTestStatus.Visibility = Visibility.Visible;
             return;
         }
 
         _busy = true;
         FetchModelsButton.IsEnabled = false;
-        OcrTestPanel.Visibility = Visibility.Visible;
-        OcrTestStatus.Text = "正在从接口拉取模型列表…";
+        AiTestStatus.Visibility = Visibility.Visible;
+        AiTestStatus.Text = "正在从接口拉取模型列表…";
 
         try
         {
             var models = await _services.Ocr.FetchAvailableModelsAsync(url, key);
-            VisionApiModelBox.ItemsSource = models;
+            current.ApiUrl = url;
+            current.ApiKey = string.IsNullOrWhiteSpace(key) ? null : key;
+            current.CachedModels = models.ToList();
+            _services.Settings.UpdateAiProfile(current);
             _services.Settings.SetCachedModelsForUrl(url, models);
 
-            if (!string.IsNullOrWhiteSpace(currentModel))
-            {
-                VisionApiModelBox.Text = currentModel;
-            }
-            else if (models.Count > 0)
-            {
-                VisionApiModelBox.SelectedIndex = 0;
-            }
+            RefreshOcrModelsFromSelectedProfile();
+            RefreshTranslationModelsFromSelectedProfile();
 
-            _services.Settings.SetVisionApiConfig(
-                VisionApiUrlBox.Text,
-                VisionApiModelBox.Text,
-                VisionApiKeyBox.Password,
-                VisionApiPromptBox.Text);
-
-            OcrTestStatus.Text = $"成功获取 {models.Count} 个模型，已更新下拉列表（优先展示视觉模型）。";
+            AiTestStatus.Text = $"已获取 {models.Count} 个模型";
         }
         catch (Exception ex)
         {
-            OcrTestStatus.Text = "获取模型列表失败：" + ex.Message;
+            AiTestStatus.Text = "获取失败：" + ex.Message;
         }
         finally
         {
@@ -871,70 +1027,250 @@ public partial class SettingsWindow : Window
         }
     }
 
-    private async void OnOcrTestClicked(object sender, RoutedEventArgs e)
+    private async void OnAiTestClicked(object sender, RoutedEventArgs e)
     {
-        if (_busy)
-        {
-            return;
-        }
+        if (_busy) return;
+        if (AiProfileBox.SelectedItem is not AiProfile current) return;
 
-        PersistOcrForm();
+        current.ApiUrl = string.IsNullOrWhiteSpace(AiApiUrlBox.Text)
+            ? "https://api.openai.com/v1/chat/completions"
+            : SettingsService.MigrateVisionEndpoint(AiApiUrlBox.Text);
+        current.ApiKey = string.IsNullOrWhiteSpace(AiApiKeyBox.Password) ? null : AiApiKeyBox.Password.Trim();
+        _services.Settings.UpdateAiProfile(current);
+
         _busy = true;
-        OcrTestButton.IsEnabled = false;
-        OcrTestStatus.Text = "正在测试 " + _services.Ocr.ConfiguredEngineTitle + "…";
+        AiTestButton.IsEnabled = false;
+        AiTestStatus.Visibility = Visibility.Visible;
+        AiTestStatus.Text = "正在连接…";
         try
         {
-            OcrTestStatus.Text = await _services.Ocr.ProbeConfiguredEngineAsync();
+            AiTestStatus.Text = await _services.Ocr.ProbeConfiguredEngineAsync();
         }
         finally
         {
             _busy = false;
-            OcrTestButton.IsEnabled = true;
+            AiTestButton.IsEnabled = true;
         }
     }
 
-    private void PersistOcrForm()
+    private void OnOcrProfileSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (OcrEngineBox.SelectedIndex == 1)
+        if (_suppressUiEvents) return;
+        if (OcrProfileBox.SelectedItem is AiProfile profile)
         {
-            _services.Settings.SetOcrCustomDir(OcrCustomDirBox.Text);
-            return;
+            _services.Settings.SetOcrProfileId(profile.Id);
+            RefreshOcrModelsFromSelectedProfile();
         }
+    }
 
-        if (OcrEngineBox.SelectedIndex == 2)
+    private async void OnOcrFetchModelsClicked(object sender, RoutedEventArgs e)
+    {
+        if (_busy) return;
+        var profile = _services.Settings.GetOcrProfile();
+        string url = profile.ApiUrl.Trim();
+        string key = profile.ApiKey?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(url)) return;
+
+        _busy = true;
+        OcrFetchModelsButton.IsEnabled = false;
+        try
         {
-            _services.Settings.SetVisionApiConfig(
-                VisionApiUrlBox.Text,
-                VisionApiModelBox.Text,
-                VisionApiKeyBox.Password,
-                VisionApiPromptBox.Text);
+            var models = await _services.Ocr.FetchAvailableModelsAsync(url, key);
+            profile.CachedModels = models.ToList();
+            _services.Settings.UpdateAiProfile(profile);
+            _services.Settings.SetCachedModelsForUrl(url, models);
+
+            string currentOcrModel = VisionApiModelBox.SelectedItem as string ?? _services.Settings.OcrVisionModel;
+            SetModelBoxItemsSource(VisionApiModelBox, models, currentOcrModel);
+            if (VisionApiModelBox.SelectedItem == null && models.Count > 0)
+            {
+                VisionApiModelBox.SelectedIndex = 0;
+            }
+            if (VisionApiModelBox.SelectedItem is string selectedOcrModel)
+            {
+                _services.Settings.SetOcrVisionModel(selectedOcrModel);
+            }
         }
+        catch (Exception ex)
+        {
+            DebugLog.LogException("OCR 获取模型失败", ex);
+        }
+        finally
+        {
+            _busy = false;
+            OcrFetchModelsButton.IsEnabled = true;
+        }
+    }
+
+    private void OnTranslationProfileSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressUiEvents) return;
+        if (TranslationProfileBox.SelectedItem is AiProfile profile)
+        {
+            _services.Settings.SetTranslationProfileId(profile.Id);
+            RefreshTranslationModelsFromSelectedProfile();
+        }
+    }
+
+    private async void OnTranslationFetchModelsClicked(object sender, RoutedEventArgs e)
+    {
+        if (_busy) return;
+        var profile = _services.Settings.GetTranslationProfile();
+        string url = profile.ApiUrl.Trim();
+        string key = profile.ApiKey?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(url)) return;
+
+        _busy = true;
+        TranslationFetchModelsButton.IsEnabled = false;
+        try
+        {
+            var models = await _services.Ocr.FetchAvailableModelsAsync(url, key);
+            profile.CachedModels = models.ToList();
+            _services.Settings.UpdateAiProfile(profile);
+            _services.Settings.SetCachedModelsForUrl(url, models);
+
+            string currentTransModel = TranslationModelBox.SelectedItem as string ?? _services.Settings.TranslationModel;
+            SetModelBoxItemsSource(TranslationModelBox, models, currentTransModel);
+            if (TranslationModelBox.SelectedItem == null && models.Count > 0)
+            {
+                TranslationModelBox.SelectedIndex = 0;
+            }
+            if (TranslationModelBox.SelectedItem is string selectedTransModel)
+            {
+                _services.Settings.SetTranslationModel(selectedTransModel);
+            }
+        }
+        catch (Exception ex)
+        {
+            DebugLog.LogException("翻译获取模型失败", ex);
+        }
+        finally
+        {
+            _busy = false;
+            TranslationFetchModelsButton.IsEnabled = true;
+        }
+    }
+
+    // ---------- OCR 识别 ----------
+
+    private void OnOcrConfigLostFocus(object sender, RoutedEventArgs e)
+    {
+        if (_suppressUiEvents) return;
+        if (VisionApiModelBox.SelectedItem is string model && !string.IsNullOrWhiteSpace(model))
+        {
+            _services.Settings.SetOcrVisionModel(model);
+        }
+        _services.Settings.SetOcrPrompt(VisionApiPromptBox.Text);
+    }
+
+    private void OnResetVisionPromptClicked(object sender, RoutedEventArgs e)
+    {
+        VisionApiPromptBox.Text = SettingsService.DefaultOcrPrompt;
+        _services.Settings.SetOcrPrompt(SettingsService.DefaultOcrPrompt);
     }
 
     private void ApplyOcrEnginePanels(OcrEngineType engine)
     {
         LocalOcrPanel.Visibility = engine == OcrEngineType.Local ? Visibility.Visible : Visibility.Collapsed;
         VisionApiPanel.Visibility = engine == OcrEngineType.VisionApi ? Visibility.Visible : Visibility.Collapsed;
-        OcrTestPanel.Visibility = engine == OcrEngineType.VisionApi
-            ? Visibility.Visible
-            : Visibility.Collapsed;
         RefreshOcrEngineHint(engine);
     }
 
     private void RefreshOcrEngineHint(OcrEngineType? engine = null)
     {
-        if (OcrEngineHint == null)
-        {
-            return;
-        }
-
+        if (OcrEngineHint == null) return;
         engine ??= _services.Settings.OcrEngine;
         OcrEngineHint.Text = engine switch
         {
-            OcrEngineType.Local => "点选下方模型包即可切换。未就绪时识别会回退系统 OCR。",
-            OcrEngineType.VisionApi => "填写兼容 OpenAI 的接口地址、视觉模型和可选 API Key。",
-            _ => "使用 Windows 自带识别，无需下载模型。"
+            OcrEngineType.Local => "本地离线运行，无需网络。",
+            OcrEngineType.VisionApi => "使用 AI 模型服务识别与排版。",
+            _ => "系统自带引擎，免配置开箱即用。"
         };
+    }
+
+    // ---------- 文本翻译 ----------
+
+    private void OnTranslationEngineChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressUiEvents || !IsLoaded) return;
+        var engine = TranslationEngineBox.SelectedIndex switch
+        {
+            1 => TranslationEngineType.Google,
+            2 => TranslationEngineType.Ai,
+            _ => TranslationEngineType.Bing
+        };
+        ApplyTranslationEnginePanels(engine);
+        if (_services.Settings.TranslationEngine != engine)
+        {
+            _services.Settings.SetTranslationEngine(engine);
+        }
+        Dispatcher.BeginInvoke(RefreshScrollExtent, DispatcherPriority.Loaded);
+    }
+
+    private void ApplyTranslationEnginePanels(TranslationEngineType engine)
+    {
+        AiTranslationPanel.Visibility = engine == TranslationEngineType.Ai ? Visibility.Visible : Visibility.Collapsed;
+        RefreshTranslationEngineHint(engine);
+    }
+
+    private void RefreshTranslationEngineHint(TranslationEngineType? engine = null)
+    {
+        engine ??= _services.Settings.TranslationEngine;
+        if (TranslationEngineHint != null)
+        {
+            TranslationEngineHint.Text = engine switch
+            {
+                TranslationEngineType.Google => "需代理环境 (由 Google 翻译提供)。",
+                TranslationEngineType.Ai => "使用配置的 AI 大模型进行翻译与智能润色。",
+                _ => "由 微软翻译 提供。"
+            };
+        }
+
+        if (TranslationTipIcon != null)
+        {
+            TranslationTipIcon.ToolTip = engine switch
+            {
+                TranslationEngineType.Google => "Google 翻译：无需配置 API Key，需代理环境。",
+                TranslationEngineType.Ai => "AI 模型翻译：使用配置的 AI 模型服务进行翻译与智能润色。",
+                _ => "微软翻译：无需配置 API Key，适合日常单词与短句快速互译。"
+            };
+        }
+    }
+
+    // ---------- 视觉/翻译模型下拉选择与配置保存 ----------
+
+    private void OnVisionApiModelSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressUiEvents) return;
+        if (VisionApiModelBox.SelectedItem is string model && !string.IsNullOrWhiteSpace(model))
+        {
+            _services.Settings.SetOcrVisionModel(model);
+        }
+    }
+
+    private void OnTranslationModelSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressUiEvents) return;
+        if (TranslationModelBox.SelectedItem is string model && !string.IsNullOrWhiteSpace(model))
+        {
+            _services.Settings.SetTranslationModel(model);
+        }
+    }
+
+    private void OnTranslationConfigLostFocus(object sender, RoutedEventArgs e)
+    {
+        if (_suppressUiEvents) return;
+        if (TranslationModelBox.SelectedItem is string model && !string.IsNullOrWhiteSpace(model))
+        {
+            _services.Settings.SetTranslationModel(model);
+        }
+        _services.Settings.SetTranslationPrompt(TranslationPromptBox.Text);
+    }
+
+    private void OnResetTranslationPromptClicked(object sender, RoutedEventArgs e)
+    {
+        TranslationPromptBox.Text = SettingsService.DefaultTranslationPrompt;
+        _services.Settings.SetTranslationPrompt(SettingsService.DefaultTranslationPrompt);
     }
 
     private void OnOcrPackCardClicked(object sender, MouseButtonEventArgs e)
@@ -1233,8 +1569,7 @@ public partial class SettingsWindow : Window
         "HidePanel" => "隐藏面板",
         "MoveUp" => "选中上一项",
         "MoveDown" => "选中下一项",
-        "StartStack" => "开启收集栈",
-        "StopStack" => "关闭收集栈",
+        "StartStack" => "开启/关闭收集栈",
         _ => "快捷键"
     };
 
@@ -1248,8 +1583,7 @@ public partial class SettingsWindow : Window
         PanelHotkeyAction.HidePanel => "隐藏面板",
         PanelHotkeyAction.MoveUp => "选中上一项",
         PanelHotkeyAction.MoveDown => "选中下一项",
-        PanelHotkeyAction.StartStack => "开启收集栈",
-        PanelHotkeyAction.StopStack => "关闭收集栈",
+        PanelHotkeyAction.StartStack => "开启/关闭收集栈",
         _ => action.ToString()
     };
 }

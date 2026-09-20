@@ -23,6 +23,7 @@ public sealed class HotkeyService : IDisposable
 {
     private const int HotkeyIdPlainPaste = 0x5101;
     private const int HotkeyIdWinV = 0x5102;
+    private const int HotkeyIdStartStack = 0x5103;
 
     private readonly object _lock = new();
     private readonly NativeMethods.LowLevelKeyboardProc _proc;
@@ -44,6 +45,7 @@ public sealed class HotkeyService : IDisposable
     // 各热键是否已由 RegisterHotKey 接管（否则钩子回退）
     private volatile bool _winVRegistered;
     private volatile bool _plainPasteRegistered;
+    private volatile bool _startStackRegistered;
 
     /// <summary>
     /// Win+V 是否已成功由系统级 RegisterHotKey 独占接管（若为 false 则当前由低级键盘钩子接管）。
@@ -62,10 +64,12 @@ public sealed class HotkeyService : IDisposable
     // 钩子读取的当前配置快照
     private volatile HotkeyBinding _plainPasteBinding = HotkeyBinding.PlainPasteDefault;
     private volatile bool _plainPasteEnabled = true;
+    private volatile HotkeyBinding _startStackBinding = HotkeyBinding.StartStackDefault;
 
     // 钩子按下标记：过滤系统按键自动重复，避免长按 Win+V / 纯文本组合导致反复触发
     private volatile bool _winVKeyDown;
     private volatile bool _plainPasteKeyDown;
+    private volatile bool _startStackKeyDown;
 
     // 切换请求防抖时间戳（TickCount64），避免钩子与 WM_HOTKEY 极端并发导致双触发
     private long _lastToggleTicks;
@@ -75,6 +79,9 @@ public sealed class HotkeyService : IDisposable
 
     /// <summary>全局纯文本粘贴热键被按下时触发（在 UI 线程回调）。</summary>
     public event Action? PastePlainRequested;
+
+    /// <summary>全局触发开启/关闭收集栈热键时回调（在 UI 线程回调）。</summary>
+    public event Action? ToggleStackRequested;
 
     /// <summary>钩子安装失败时触发（提示用户可能无法接管 Win+V）。</summary>
     public event Action<string>? HotkeyInstallFailed;
@@ -99,6 +106,7 @@ public sealed class HotkeyService : IDisposable
             _uiDispatcher = uiDispatcher;
             _plainPasteBinding = settings.PlainPasteHotkey;
             _plainPasteEnabled = settings.PlainPasteEnabled;
+            _startStackBinding = settings.StartStackHotkey;
 
             // 隐藏消息窗口必须在 UI 线程（STA）创建，WM_HOTKEY 才会投递到 UI 线程
             uiDispatcher.Invoke(() =>
@@ -161,15 +169,18 @@ public sealed class HotkeyService : IDisposable
             lock (_lock)
             {
                 bool unchanged = _plainPasteBinding == settings.PlainPasteHotkey &&
-                                 _plainPasteEnabled == settings.PlainPasteEnabled;
+                                 _plainPasteEnabled == settings.PlainPasteEnabled &&
+                                 _startStackBinding == settings.StartStackHotkey;
                 _plainPasteBinding = settings.PlainPasteHotkey;
                 _plainPasteEnabled = settings.PlainPasteEnabled;
+                _startStackBinding = settings.StartStackHotkey;
 
                 // 热键未变且当前注册仍有效：不要卸载重装（避免后台 Saved 误伤）
                 if (unchanged &&
                     _hwnd != IntPtr.Zero &&
                     _winVRegistered &&
-                    (!_plainPasteEnabled || _plainPasteRegistered))
+                    (!_plainPasteEnabled || _plainPasteRegistered) &&
+                    (!_startStackBinding.IsValid || _startStackRegistered))
                 {
                     DebugLog.LogDetail("热键配置未变，跳过重新注册");
                     return;
@@ -211,6 +222,12 @@ public sealed class HotkeyService : IDisposable
             _plainPasteRegistered = false;
         }
 
+        if (_startStackRegistered)
+        {
+            UnregisterHotKey(HotkeyIdStartStack, "开启/切换收集栈");
+            _startStackRegistered = false;
+        }
+
         // Win+V：系统开启剪切板历史时会注册失败（错误 1409），此时由钩子接管
         _winVRegistered = TryRegisterHotKey(HotkeyBinding.WinV, HotkeyIdWinV, "Win+V");
         if (!_winVRegistered)
@@ -231,6 +248,17 @@ public sealed class HotkeyService : IDisposable
         else
         {
             DebugLog.Log("纯文本粘贴热键未启用");
+        }
+
+        // 收集栈全局开启/关闭热键（按一下开，按一下关）
+        _startStackRegistered = false;
+        if (_startStackBinding.IsValid)
+        {
+            _startStackRegistered = TryRegisterHotKey(_startStackBinding, HotkeyIdStartStack, "开启/关闭收集栈");
+            if (!_startStackRegistered)
+            {
+                DebugLog.Log($"开启收集栈组合 [{_startStackBinding}] 注册失败，改用低级钩子接管");
+            }
         }
     }
 
@@ -290,6 +318,12 @@ public sealed class HotkeyService : IDisposable
                 handled = true;
                 DebugLog.Log("收到 WM_HOTKEY：Win+V 切换");
                 RequestToggle("WM_HOTKEY");
+            }
+            else if (id == HotkeyIdStartStack)
+            {
+                handled = true;
+                DebugLog.Log("收到 WM_HOTKEY：开启/关闭收集栈");
+                _uiDispatcher?.BeginInvoke(() => ToggleStackRequested?.Invoke());
             }
         }
 
@@ -572,7 +606,7 @@ public sealed class HotkeyService : IDisposable
                 if (!_plainPasteRegistered && _plainPasteEnabled &&
                     hook.vkCode == (uint)KeyInterop.VirtualKeyFromKey(_plainPasteBinding.Key))
                 {
-                    if (MatchesPlainPaste(hook.vkCode, ctrlDown, shiftDown, altDown, winHeld))
+                    if (MatchesBinding(_plainPasteBinding, hook.vkCode, ctrlDown, shiftDown, altDown, winHeld))
                     {
                         if (isKeyDown)
                         {
@@ -597,6 +631,35 @@ public sealed class HotkeyService : IDisposable
                         _plainPasteKeyDown = false;
                     }
                 }
+
+                // 收集栈全局开启/切换组合（RegisterHotKey 注册失败时回退）
+                if (!_startStackRegistered && _startStackBinding.IsValid &&
+                    hook.vkCode == (uint)KeyInterop.VirtualKeyFromKey(_startStackBinding.Key))
+                {
+                    if (MatchesBinding(_startStackBinding, hook.vkCode, ctrlDown, shiftDown, altDown, winHeld))
+                    {
+                        if (isKeyDown)
+                        {
+                            if (!_startStackKeyDown)
+                            {
+                                _startStackKeyDown = true;
+                                DebugLog.Log($"捕获开启/切换收集栈组合（钩子回退）: {_startStackBinding}");
+                                _uiDispatcher?.BeginInvoke(() => ToggleStackRequested?.Invoke());
+                            }
+                        }
+                        else
+                        {
+                            _startStackKeyDown = false;
+                        }
+
+                        return new IntPtr(1);
+                    }
+
+                    if (!isKeyDown)
+                    {
+                        _startStackKeyDown = false;
+                    }
+                }
             }
         }
 
@@ -606,9 +669,8 @@ public sealed class HotkeyService : IDisposable
     private static bool IsWinHeld() =>
         NativeMethods.IsKeyDown(NativeMethods.VK_LWIN) || NativeMethods.IsKeyDown(NativeMethods.VK_RWIN);
 
-    private bool MatchesPlainPaste(uint vk, bool ctrl, bool shift, bool alt, bool win)
+    private static bool MatchesBinding(HotkeyBinding binding, uint vk, bool ctrl, bool shift, bool alt, bool win)
     {
-        var binding = _plainPasteBinding;
         if (vk != (uint)KeyInterop.VirtualKeyFromKey(binding.Key))
         {
             return false;
@@ -639,6 +701,12 @@ public sealed class HotkeyService : IDisposable
                 {
                     NativeMethods.UnregisterHotKey(_hwnd, HotkeyIdPlainPaste);
                     _plainPasteRegistered = false;
+                }
+
+                if (_startStackRegistered)
+                {
+                    NativeMethods.UnregisterHotKey(_hwnd, HotkeyIdStartStack);
+                    _startStackRegistered = false;
                 }
             }
 

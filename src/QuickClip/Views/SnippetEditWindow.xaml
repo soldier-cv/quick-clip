@@ -3,8 +3,9 @@
                   xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                   xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
                   Title="编辑常用短语"
-                  Width="420" Height="460"
-                  WindowStartupLocation="CenterOwner"
+                  Width="450" Height="560"
+                  WindowStartupLocation="CenterScreen"
+                  Topmost="True"
                   ResizeMode="NoResize"
                   ExtendsContentIntoTitleBar="True"
                   WindowBackdropType="None"
@@ -12,6 +13,40 @@
                   BorderBrush="{DynamicResource Theme.Border}"
                   BorderThickness="1"
                   KeyDown="OnWindowKeyDown">
+
+    <Window.Resources>
+        <Style x:Key="PlaceholderBadgeButton" TargetType="Button">
+            <Setter Property="Height" Value="22" />
+            <Setter Property="Margin" Value="0,2,6,2" />
+            <Setter Property="Padding" Value="6,1" />
+            <Setter Property="FontSize" Value="10.5" />
+            <Setter Property="FontFamily" Value="Consolas, Microsoft YaHei UI" />
+            <Setter Property="Background" Value="{DynamicResource Theme.Search}" />
+            <Setter Property="Foreground" Value="{DynamicResource Theme.Text}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource Theme.Border}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="4"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="BorderBrush" Value="{DynamicResource Theme.Accent}" />
+                    <Setter Property="Foreground" Value="{DynamicResource Theme.Accent}" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+    </Window.Resources>
 
     <Grid Background="{DynamicResource Theme.Panel}">
         <Grid.RowDefinitions>
@@ -41,8 +76,8 @@
             <!-- 分类 -->
             <TextBlock Text="分类" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource Theme.Text}" Margin="0,0,0,6" />
             <ComboBox x:Name="CategoryCombo"
-                      IsEditable="True"
                       Height="34"
+                      VerticalContentAlignment="Center"
                       Background="{DynamicResource Theme.Search}"
                       BorderBrush="{DynamicResource Theme.Border}"
                       Foreground="{DynamicResource Theme.Text}"
@@ -54,22 +89,49 @@
                 <ComboBoxItem Content="账号" />
             </ComboBox>
 
+            <!-- 动态占位符常驻信息与快捷插入区 -->
+            <Border Margin="0,0,0,8"
+                    Padding="8,6"
+                    Background="{DynamicResource Theme.Card}"
+                    BorderBrush="{DynamicResource Theme.Border}"
+                    BorderThickness="1"
+                    CornerRadius="6">
+                <StackPanel>
+                    <TextBlock Text="点击插入动态占位符（粘贴时自动计算）："
+                               FontSize="11"
+                               Foreground="{DynamicResource Theme.TextSecondary}"
+                               Margin="0,0,0,5" />
+                    <WrapPanel>
+                        <!-- 日期时间类 -->
+                        <Button Tag="{}{date}" Style="{StaticResource PlaceholderBadgeButton}" Content="{}{date} 日期" ToolTip="当前日期&#x0a;示例：2026-09-20" Click="OnPlaceholderBadgeClicked" />
+                        <Button Tag="{}{time}" Style="{StaticResource PlaceholderBadgeButton}" Content="{}{time} 时间" ToolTip="当前时间&#x0a;示例：14:30:00" Click="OnPlaceholderBadgeClicked" />
+                        <Button Tag="{}{datetime}" Style="{StaticResource PlaceholderBadgeButton}" Content="{}{datetime} 日期时间" ToolTip="完整日期时间&#x0a;示例：2026-09-20 14:30:00" Click="OnPlaceholderBadgeClicked" />
+                        <Button Tag="{}{year}" Style="{StaticResource PlaceholderBadgeButton}" Content="{}{year} 年份" ToolTip="当前年份&#x0a;示例：2026" Click="OnPlaceholderBadgeClicked" />
+                        <Button Tag="{}{month}" Style="{StaticResource PlaceholderBadgeButton}" Content="{}{month} 月份" ToolTip="当前月份 (两位)&#x0a;示例：09" Click="OnPlaceholderBadgeClicked" />
+                        <Button Tag="{}{day}" Style="{StaticResource PlaceholderBadgeButton}" Content="{}{day} 日" ToolTip="当前日 (两位)&#x0a;示例：20" Click="OnPlaceholderBadgeClicked" />
+                        <Button Tag="{}{weekday}" Style="{StaticResource PlaceholderBadgeButton}" Content="{}{weekday} 星期" ToolTip="中文星期几&#x0a;示例：星期日" Click="OnPlaceholderBadgeClicked" />
+                        <Button Tag="{}{week}" Style="{StaticResource PlaceholderBadgeButton}" Content="{}{week} 周几" ToolTip="简写周几&#x0a;示例：周日" Click="OnPlaceholderBadgeClicked" />
+                        <Button Tag="{}{timestamp}" Style="{StaticResource PlaceholderBadgeButton}" Content="{}{timestamp} 秒级时间戳" ToolTip="10位 Unix 秒级时间戳&#x0a;示例：1789892550" Click="OnPlaceholderBadgeClicked" />
+                        <Button Tag="{}{timestamp_ms}" Style="{StaticResource PlaceholderBadgeButton}" Content="{}{timestamp_ms} 毫秒时间戳" ToolTip="13位 Unix 毫秒时间戳&#x0a;示例：1789892550123" Click="OnPlaceholderBadgeClicked" />
+
+                        <!-- 系统与环境类 -->
+                        <Button Tag="{}{clipboard}" Style="{StaticResource PlaceholderBadgeButton}" Content="{}{clipboard} 剪贴板" ToolTip="动态读取当前系统剪贴板文本&#x0a;示例：当前剪贴板内容" Click="OnPlaceholderBadgeClicked" />
+                        <Button Tag="{}{user}" Style="{StaticResource PlaceholderBadgeButton}" Content="{}{user} 用户名" ToolTip="当前操作系统用户名&#x0a;示例：Admin" Click="OnPlaceholderBadgeClicked" />
+                        <Button Tag="{}{device}" Style="{StaticResource PlaceholderBadgeButton}" Content="{}{device} 计算机名" ToolTip="当前计算机设备名&#x0a;示例：DESKTOP-PC" Click="OnPlaceholderBadgeClicked" />
+
+                        <!-- 唯一标识与随机数类 -->
+                        <Button Tag="{}{guid}" Style="{StaticResource PlaceholderBadgeButton}" Content="{}{guid} 唯一ID" ToolTip="全新标准 GUID (含横杠)&#x0a;示例：c9a646d3-9c61-4cb7-bf86-64b55c1f0ff3" Click="OnPlaceholderBadgeClicked" />
+                        <Button Tag="{}{guid_n}" Style="{StaticResource PlaceholderBadgeButton}" Content="{}{guid_n} 32位ID" ToolTip="32位无横杠唯一ID&#x0a;示例：c9a646d39c614cb7bf8664b55c1f0ff3" Click="OnPlaceholderBadgeClicked" />
+                        <Button Tag="{}{random4}" Style="{StaticResource PlaceholderBadgeButton}" Content="{}{random4} 4位随机数" ToolTip="4位随机数字&#x0a;示例：5821" Click="OnPlaceholderBadgeClicked" />
+                        <Button Tag="{}{random6}" Style="{StaticResource PlaceholderBadgeButton}" Content="{}{random6} 6位随机数" ToolTip="6位随机数字&#x0a;示例：839201" Click="OnPlaceholderBadgeClicked" />
+                    </WrapPanel>
+                </StackPanel>
+            </Border>
+
             <!-- 正文内容 -->
-            <Grid Margin="0,0,0,6">
-                <TextBlock Text="短语内容" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource Theme.Text}" VerticalAlignment="Center" />
-                <TextBlock FontSize="11"
-                           Foreground="{DynamicResource Theme.Accent}"
-                           HorizontalAlignment="Right"
-                           VerticalAlignment="Center"
-                           Cursor="Hand">
-                    <Run Text="支持动态占位符 ℹ" />
-                    <TextBlock.ToolTip>
-                        <ToolTip Content="支持的占位符（不区分大小写）：&#x0a;• {date} : 当前日期 (如 2026-09-19)&#x0a;• {time} : 当前时间 (如 12:30:00)&#x0a;• {datetime} : 完整日期时间 (yyyy-MM-dd HH:mm:ss)&#x0a;• {year} / {month} / {day} : 年 / 月 / 日&#x0a;• {weekday} / {week} : 星期几 / 周几 (如 星期六 / 周六)&#x0a;• {timestamp} / {timestamp_ms} : 秒级 / 毫秒级时间戳&#x0a;• {guid} / {uuid} : 标准唯一标识符 (含横杠)&#x0a;• {guid_n} : 32位无横杠唯一标识符&#x0a;• {clipboard} : 当前剪贴板内容&#x0a;• {username} : 当前操作系统用户名&#x0a;• {computername} : 当前计算机名&#x0a;• {random4} / {random6} : 4位 / 6位随机验证数字" />
-                    </TextBlock.ToolTip>
-                </TextBlock>
-            </Grid>
+            <TextBlock Text="短语内容" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource Theme.Text}" Margin="0,0,0,6" />
             <TextBox x:Name="ContentBox"
-                     Height="140"
+                     Height="120"
                      AcceptsReturn="True"
                      TextWrapping="Wrap"
                      VerticalScrollBarVisibility="Auto"
@@ -87,7 +149,13 @@
         <Border Grid.Row="2" Background="{DynamicResource Theme.Search}" BorderBrush="{DynamicResource Theme.Border}" BorderThickness="0,1,0,0" Padding="20,12">
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                 <ui:Button Appearance="Secondary" Content="取消" Width="76" Margin="0,0,10,0" Click="OnCancelClicked" />
-                <ui:Button Appearance="Primary" Content="保存" Width="76" Click="OnSaveClicked" />
+                <ui:Button Content="保存"
+                           Width="76"
+                           Background="{DynamicResource Theme.Accent}"
+                           Foreground="#FFFFFF"
+                           BorderThickness="0"
+                           FontWeight="SemiBold"
+                           Click="OnSaveClicked" />
             </StackPanel>
         </Border>
     </Grid>

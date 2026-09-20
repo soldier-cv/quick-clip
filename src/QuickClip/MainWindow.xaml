@@ -119,19 +119,41 @@
                                HorizontalAlignment="Stretch"
                                HorizontalContentAlignment="Center"
                                CornerRadius="6"
+                               Cursor="Hand"
                                Click="OnHistoryTabClicked">
                         <ui:Button.Style>
                             <Style TargetType="ui:Button" BasedOn="{StaticResource {x:Type ui:Button}}">
-                                <Setter Property="Appearance" Value="Transparent" />
+                                <Setter Property="Background" Value="Transparent" />
+                                <Setter Property="Foreground" Value="{DynamicResource Theme.TextSecondary}" />
+                                <Setter Property="BorderThickness" Value="1" />
+                                <Setter Property="BorderBrush" Value="Transparent" />
                                 <Style.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter Property="Background" Value="{DynamicResource Theme.CardHover}" />
+                                        <Setter Property="Foreground" Value="{DynamicResource Theme.Text}" />
+                                        <Setter Property="BorderBrush" Value="{DynamicResource Theme.BorderStrong}" />
+                                    </Trigger>
                                     <DataTrigger Binding="{Binding IsHistoryTabActive}" Value="True">
-                                        <Setter Property="Appearance" Value="Primary" />
+                                        <Setter Property="Background" Value="{DynamicResource Theme.CardSelected}" />
+                                        <Setter Property="BorderBrush" Value="{DynamicResource Theme.Accent}" />
+                                        <Setter Property="Foreground" Value="{DynamicResource Theme.Text}" />
                                     </DataTrigger>
                                 </Style.Triggers>
                             </Style>
                         </ui:Button.Style>
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                            <ui:SymbolIcon Symbol="History24" FontSize="14" Margin="0,0,6,0" />
+                            <ui:SymbolIcon Symbol="History24" FontSize="14" Margin="0,0,6,0">
+                                <ui:SymbolIcon.Style>
+                                    <Style TargetType="ui:SymbolIcon">
+                                        <Setter Property="Foreground" Value="{DynamicResource Theme.TextSecondary}" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsHistoryTabActive}" Value="True">
+                                                <Setter Property="Foreground" Value="{DynamicResource Theme.Accent}" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </ui:SymbolIcon.Style>
+                            </ui:SymbolIcon>
                             <TextBlock Text="剪贴历史" FontSize="12" FontWeight="SemiBold" />
                         </StackPanel>
                     </ui:Button>
@@ -143,19 +165,41 @@
                                HorizontalAlignment="Stretch"
                                HorizontalContentAlignment="Center"
                                CornerRadius="6"
+                               Cursor="Hand"
                                Click="OnSnippetsTabClicked">
                         <ui:Button.Style>
                             <Style TargetType="ui:Button" BasedOn="{StaticResource {x:Type ui:Button}}">
-                                <Setter Property="Appearance" Value="Transparent" />
+                                <Setter Property="Background" Value="Transparent" />
+                                <Setter Property="Foreground" Value="{DynamicResource Theme.TextSecondary}" />
+                                <Setter Property="BorderThickness" Value="1" />
+                                <Setter Property="BorderBrush" Value="Transparent" />
                                 <Style.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter Property="Background" Value="{DynamicResource Theme.CardHover}" />
+                                        <Setter Property="Foreground" Value="{DynamicResource Theme.Text}" />
+                                        <Setter Property="BorderBrush" Value="{DynamicResource Theme.BorderStrong}" />
+                                    </Trigger>
                                     <DataTrigger Binding="{Binding IsSnippetsTabActive}" Value="True">
-                                        <Setter Property="Appearance" Value="Primary" />
+                                        <Setter Property="Background" Value="{DynamicResource Theme.CardSelected}" />
+                                        <Setter Property="BorderBrush" Value="{DynamicResource Theme.Accent}" />
+                                        <Setter Property="Foreground" Value="{DynamicResource Theme.Text}" />
                                     </DataTrigger>
                                 </Style.Triggers>
                             </Style>
                         </ui:Button.Style>
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                            <ui:SymbolIcon Symbol="Bookmark24" FontSize="14" Margin="0,0,6,0" />
+                            <ui:SymbolIcon Symbol="Bookmark24" FontSize="14" Margin="0,0,6,0">
+                                <ui:SymbolIcon.Style>
+                                    <Style TargetType="ui:SymbolIcon">
+                                        <Setter Property="Foreground" Value="{DynamicResource Theme.TextSecondary}" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsSnippetsTabActive}" Value="True">
+                                                <Setter Property="Foreground" Value="{DynamicResource Theme.Accent}" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </ui:SymbolIcon.Style>
+                            </ui:SymbolIcon>
                             <TextBlock Text="常用短语" FontSize="12" FontWeight="SemiBold" />
                         </StackPanel>
                     </ui:Button>
@@ -242,14 +286,28 @@
             <ui:Button Grid.Column="2"
                        Margin="8,0,0,0"
                        Height="36"
-                       Appearance="Primary"
                        CornerRadius="8"
                        Padding="12,0"
+                       Cursor="Hand"
                        ToolTip="添加新的常用短语"
                        Click="OnAddSnippetClicked">
+                <ui:Button.Style>
+                    <Style TargetType="ui:Button" BasedOn="{StaticResource {x:Type ui:Button}}">
+                        <Setter Property="Background" Value="{DynamicResource Theme.Search}" />
+                        <Setter Property="BorderBrush" Value="{DynamicResource Theme.Border}" />
+                        <Setter Property="BorderThickness" Value="1" />
+                        <Setter Property="Foreground" Value="{DynamicResource Theme.Text}" />
+                        <Style.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="{DynamicResource Theme.CardHover}" />
+                                <Setter Property="BorderBrush" Value="{DynamicResource Theme.Accent}" />
+                            </Trigger>
+                        </Style.Triggers>
+                    </Style>
+                </ui:Button.Style>
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                    <ui:SymbolIcon Symbol="Add24" FontSize="15" Margin="0,0,4,0" />
-                    <TextBlock Text="新建短语" FontSize="12.5" />
+                    <ui:SymbolIcon Symbol="Add24" FontSize="15" Margin="0,0,4,0" Foreground="{DynamicResource Theme.Accent}" />
+                    <TextBlock Text="新建短语" FontSize="12.5" FontWeight="SemiBold" VerticalAlignment="Center" />
                 </StackPanel>
             </ui:Button>
         </Grid>
@@ -789,28 +847,115 @@
 
                 <ListBox.ItemTemplate>
                     <DataTemplate DataType="{x:Type models:SnippetItem}">
-                        <Border Margin="2,4"
+                        <Border x:Name="SnippetCard"
+                                Margin="2,4"
                                 Padding="12,10"
                                 CornerRadius="10"
-                                SnapsToDevicePixels="True"
-                                Background="{DynamicResource Theme.Card}"
-                                BorderBrush="{DynamicResource Theme.Border}"
-                                BorderThickness="1">
+                                SnapsToDevicePixels="True">
+                            <Border.ContextMenu>
+                                <ContextMenu Background="{DynamicResource Theme.Card}"
+                                             BorderBrush="{DynamicResource Theme.Border}"
+                                             BorderThickness="1"
+                                             Foreground="{DynamicResource Theme.Text}">
+                                    <MenuItem Header="粘贴 (Enter)" Click="OnMenuSnippetPasteClicked">
+                                        <MenuItem.Icon>
+                                            <ui:SymbolIcon Symbol="ClipboardPaste24" FontSize="14" />
+                                        </MenuItem.Icon>
+                                    </MenuItem>
+                                    <MenuItem Header="微调填入…" Click="OnMenuSnippetQuickAdjustClicked">
+                                        <MenuItem.Icon>
+                                            <ui:SymbolIcon Symbol="DocumentEdit24" FontSize="14" />
+                                        </MenuItem.Icon>
+                                    </MenuItem>
+                                    <MenuItem Header="复制内容 (Ctrl+C)" Click="OnMenuSnippetCopyClicked">
+                                        <MenuItem.Icon>
+                                            <ui:SymbolIcon Symbol="Copy24" FontSize="14" />
+                                        </MenuItem.Icon>
+                                    </MenuItem>
+                                    <Separator />
+                                    <MenuItem Header="编辑短语模版…" Click="OnMenuSnippetEditClicked">
+                                        <MenuItem.Icon>
+                                            <ui:SymbolIcon Symbol="Edit24" FontSize="14" />
+                                        </MenuItem.Icon>
+                                    </MenuItem>
+                                    <MenuItem Header="删除短语" Click="OnMenuSnippetDeleteClicked">
+                                        <MenuItem.Icon>
+                                            <ui:SymbolIcon Symbol="Delete24" FontSize="14" />
+                                        </MenuItem.Icon>
+                                    </MenuItem>
+                                </ContextMenu>
+                            </Border.ContextMenu>
+
+                            <Border.Style>
+                                <Style TargetType="Border">
+                                    <Setter Property="Background" Value="{DynamicResource Theme.Card}" />
+                                    <Setter Property="BorderBrush" Value="{DynamicResource Theme.Border}" />
+                                    <Setter Property="BorderThickness" Value="1" />
+                                    <Style.Triggers>
+                                        <!-- 悬停未选中 -->
+                                        <MultiDataTrigger>
+                                            <MultiDataTrigger.Conditions>
+                                                <Condition Binding="{Binding IsMouseOver, RelativeSource={RelativeSource Self}}" Value="True" />
+                                                <Condition Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="False" />
+                                            </MultiDataTrigger.Conditions>
+                                            <Setter Property="Background" Value="{DynamicResource Theme.CardHover}" />
+                                            <Setter Property="BorderBrush" Value="{DynamicResource Theme.BorderStrong}" />
+                                        </MultiDataTrigger>
+                                        <!-- 选中高亮 -->
+                                        <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
+                                            <Setter Property="Background" Value="{DynamicResource Theme.CardSelected}" />
+                                            <Setter Property="BorderBrush" Value="{DynamicResource Theme.Accent}" />
+                                            <Setter Property="BorderThickness" Value="1.5" />
+                                        </DataTrigger>
+                                        <!-- 选中 + 悬停 -->
+                                        <MultiDataTrigger>
+                                            <MultiDataTrigger.Conditions>
+                                                <Condition Binding="{Binding IsMouseOver, RelativeSource={RelativeSource Self}}" Value="True" />
+                                                <Condition Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True" />
+                                            </MultiDataTrigger.Conditions>
+                                            <Setter Property="Background" Value="{DynamicResource Theme.CardSelected}" />
+                                            <Setter Property="BorderBrush" Value="{DynamicResource Theme.Accent}" />
+                                            <Setter Property="BorderThickness" Value="2" />
+                                        </MultiDataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Border.Style>
+
                             <Grid>
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
                                 </Grid.RowDefinitions>
 
-                                <!-- 短语头部：分类徽章、标题、右侧快捷按钮 -->
+                                <!-- 短语头部：数字序号、分类徽章、标题、右侧快捷按钮 -->
                                 <Grid Grid.Row="0">
                                     <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
 
+                                    <!-- 快捷数字键序号（1~9） -->
                                     <Border Grid.Column="0"
+                                            Width="20" Height="20"
+                                            CornerRadius="5"
+                                            Background="{DynamicResource Theme.Search}"
+                                            BorderBrush="{DynamicResource Theme.Border}"
+                                            BorderThickness="1"
+                                            Margin="0,0,8,0"
+                                            VerticalAlignment="Center"
+                                            Visibility="{Binding HasDisplayIndex, Converter={StaticResource BoolToVis}}">
+                                        <TextBlock Text="{Binding DisplayIndex}"
+                                                   FontSize="10.5"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource Theme.TextSecondary}"
+                                                   HorizontalAlignment="Center"
+                                                   VerticalAlignment="Center" />
+                                    </Border>
+
+                                    <!-- 分类徽章 -->
+                                    <Border Grid.Column="1"
                                             Padding="6,2"
                                             CornerRadius="4"
                                             Background="{DynamicResource Theme.Badge}"
@@ -822,7 +967,8 @@
                                                    Foreground="{DynamicResource Theme.TextSecondary}" />
                                     </Border>
 
-                                    <TextBlock Grid.Column="1"
+                                    <!-- 标题 -->
+                                    <TextBlock Grid.Column="2"
                                                Text="{Binding Title}"
                                                FontSize="13"
                                                FontWeight="SemiBold"
@@ -831,20 +977,20 @@
                                                TextTrimming="CharacterEllipsis" />
 
                                     <!-- 动作按钮 -->
-                                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
                                         <ui:Button Appearance="Transparent"
                                                    Padding="5"
                                                    Margin="2,0"
                                                    CornerRadius="6"
-                                                   ToolTip="直接粘贴"
-                                                   Click="OnPasteSnippetDirectClicked">
-                                            <ui:SymbolIcon Symbol="ClipboardPaste24" FontSize="14" />
+                                                   ToolTip="微调填入 (临时修改并粘贴)"
+                                                   Click="OnSnippetQuickAdjustClicked">
+                                            <ui:SymbolIcon Symbol="DocumentEdit24" FontSize="14" Foreground="{DynamicResource Theme.Accent}" />
                                         </ui:Button>
                                         <ui:Button Appearance="Transparent"
                                                    Padding="5"
                                                    Margin="2,0"
                                                    CornerRadius="6"
-                                                   ToolTip="复制内容"
+                                                   ToolTip="复制内容 (已计算占位符)"
                                                    Click="OnCopySnippetDirectClicked">
                                             <ui:SymbolIcon Symbol="Copy24" FontSize="14" />
                                         </ui:Button>
@@ -852,7 +998,7 @@
                                                    Padding="5"
                                                    Margin="2,0"
                                                    CornerRadius="6"
-                                                   ToolTip="编辑短语"
+                                                   ToolTip="编辑短语模版"
                                                    Click="OnEditSnippetClicked">
                                             <ui:SymbolIcon Symbol="Edit24" FontSize="14" />
                                         </ui:Button>
@@ -1024,6 +1170,9 @@
                                 Margin="0,12,0,0"
                                 Padding="10,8,10,8"
                                 CornerRadius="8"
+                                Cursor="Hand"
+                                ToolTip="双击直接粘贴二维码文本"
+                                MouseLeftButtonDown="OnPreviewQrDecodePanelMouseLeftButtonDown"
                                 Visibility="Collapsed">
                             <Grid>
                                 <Border x:Name="PreviewQrDecodeBar"
@@ -1032,17 +1181,53 @@
                                         HorizontalAlignment="Left"
                                         VerticalAlignment="Stretch" />
                                 <StackPanel Margin="12,0,0,0">
-                                    <StackPanel Orientation="Horizontal">
-                                        <ui:SymbolIcon x:Name="PreviewQrDecodeIcon"
-                                                       Symbol="ScanQrCode24"
-                                                       FontSize="13"
+                                    <Grid>
+                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                            <ui:SymbolIcon x:Name="PreviewQrDecodeIcon"
+                                                           Symbol="ScanQrCode24"
+                                                           FontSize="13"
+                                                           VerticalAlignment="Center" />
+                                            <TextBlock x:Name="PreviewQrDecodeLabel"
+                                                       Text="已识别二维码"
+                                                       FontSize="11"
+                                                       Margin="6,0,0,0"
                                                        VerticalAlignment="Center" />
-                                        <TextBlock x:Name="PreviewQrDecodeLabel"
-                                                   Text="已识别二维码"
-                                                   FontSize="11"
-                                                   Margin="6,0,0,0"
-                                                   VerticalAlignment="Center" />
-                                    </StackPanel>
+                                        </StackPanel>
+                                        <Button x:Name="CopyPreviewQrButton"
+                                                HorizontalAlignment="Right"
+                                                VerticalAlignment="Center"
+                                                Background="Transparent"
+                                                BorderThickness="0"
+                                                Padding="4,1"
+                                                Cursor="Hand"
+                                                Click="OnCopyPreviewQrClicked"
+                                                ToolTip="复制二维码文本">
+                                            <Button.Style>
+                                                <Style TargetType="Button">
+                                                    <Setter Property="Foreground" Value="{DynamicResource Theme.Accent}" />
+                                                    <Setter Property="Template">
+                                                        <Setter.Value>
+                                                            <ControlTemplate TargetType="Button">
+                                                                <Border Background="Transparent">
+                                                                    <TextBlock x:Name="BtnText"
+                                                                               Text="[复制]"
+                                                                               FontSize="11.5"
+                                                                               FontWeight="SemiBold"
+                                                                               Foreground="{TemplateBinding Foreground}" />
+                                                                </Border>
+                                                                <ControlTemplate.Triggers>
+                                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                                        <Setter TargetName="BtnText" Property="Opacity" Value="0.75" />
+                                                                        <Setter TargetName="BtnText" Property="TextDecorations" Value="Underline" />
+                                                                    </Trigger>
+                                                                </ControlTemplate.Triggers>
+                                                            </ControlTemplate>
+                                                        </Setter.Value>
+                                                    </Setter>
+                                                </Style>
+                                            </Button.Style>
+                                        </Button>
+                                    </Grid>
                                     <ScrollViewer x:Name="PreviewQrDecodeScroll"
                                                   Margin="0,6,0,0"
                                                   MaxHeight="140"

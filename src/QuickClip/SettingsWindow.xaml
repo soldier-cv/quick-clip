@@ -344,14 +344,14 @@
                                        Click="OnResetHotkeyClicked" />
                         </Grid>
 
-                        <!-- 开启收集栈 -->
+                        <!-- 开启/关闭收集栈 -->
                         <Grid Margin="16,4,16,4">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="168" />
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
-                            <TextBlock Text="开启收集栈"
+                            <TextBlock Text="开启/关闭收集栈"
                                        Foreground="{DynamicResource Theme.Text}"
                                        FontSize="13"
                                        VerticalAlignment="Center" />
@@ -372,37 +372,6 @@
                                        Padding="12,0"
                                        Content="默认"
                                        Tag="StartStack"
-                                       Click="OnResetHotkeyClicked" />
-                        </Grid>
-
-                        <!-- 关闭收集栈 -->
-                        <Grid Margin="16,4,16,4">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="168" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="关闭收集栈"
-                                       Foreground="{DynamicResource Theme.Text}"
-                                       FontSize="13"
-                                       VerticalAlignment="Center" />
-                            <TextBox x:Name="StopStackBox"
-                                     Grid.Column="1"
-                                     Height="34"
-                                     Padding="10,0"
-                                     IsReadOnly="True"
-                                     VerticalContentAlignment="Center"
-                                     CaretBrush="Transparent"
-                                     Tag="StopStack"
-                                     PreviewKeyDown="HotkeyBox_PreviewKeyDown"
-                                     GotFocus="HotkeyBox_GotFocus" />
-                            <ui:Button Grid.Column="2"
-                                       Margin="8,0,0,0"
-                                       Appearance="Secondary"
-                                       Height="34"
-                                       Padding="12,0"
-                                       Content="默认"
-                                       Tag="StopStack"
                                        Click="OnResetHotkeyClicked" />
                         </Grid>
 
@@ -441,6 +410,155 @@
                                   Content="自动检查并下载更新"
                                   Checked="OnAutoCheckUpdatesToggled"
                                   Unchecked="OnAutoCheckUpdatesToggled" />
+                        <CheckBox x:Name="ContinuousPasteCheck"
+                                  Margin="0,10,0,0"
+                                  Foreground="{DynamicResource Theme.TextSecondary}"
+                                  FontSize="13"
+                                  Content="连续粘贴模式（按 Enter 粘贴后保持面板激活）"
+                                  Checked="OnContinuousPasteToggled"
+                                  Unchecked="OnContinuousPasteToggled" />
+                    </StackPanel>
+                </Border>
+
+                <!-- ========== AI 模型服务 ========== -->
+                <TextBlock Text="AI 模型服务"
+                           Foreground="{DynamicResource Theme.Text}"
+                           FontSize="16"
+                           FontWeight="SemiBold"
+                           Margin="0,22,0,10" />
+                <Border Padding="16,14"
+                        CornerRadius="12"
+                        Background="{DynamicResource Theme.Card}"
+                        BorderBrush="{DynamicResource Theme.Border}"
+                        BorderThickness="1">
+                    <StackPanel>
+                        <!-- 配置项下拉与增删 -->
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="100" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="配置选择"
+                                       Foreground="{DynamicResource Theme.TextSecondary}"
+                                       FontSize="13"
+                                       VerticalAlignment="Center" />
+                            <ComboBox x:Name="AiProfileBox"
+                                      Grid.Column="1"
+                                      Height="34"
+                                      DisplayMemberPath="Name"
+                                      SelectionChanged="OnAiProfileSelectionChanged"
+                                      PreviewMouseWheel="OnComboBoxPreviewMouseWheel" />
+                            <ui:Button x:Name="AddAiProfileButton"
+                                       Grid.Column="2"
+                                       Height="34"
+                                       Margin="8,0,0,0"
+                                       Padding="10,0"
+                                       Appearance="Secondary"
+                                       Content="新增"
+                                       Click="OnAddAiProfileClicked" />
+                            <ui:Button x:Name="DeleteAiProfileButton"
+                                       Grid.Column="3"
+                                       Height="34"
+                                       Margin="8,0,0,0"
+                                       Padding="10,0"
+                                       Appearance="Secondary"
+                                       Content="删除"
+                                       Click="OnDeleteAiProfileClicked" />
+                        </Grid>
+
+                        <Grid Margin="0,10,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="100" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="配置名称"
+                                       Foreground="{DynamicResource Theme.TextSecondary}"
+                                       FontSize="13"
+                                       VerticalAlignment="Center" />
+                            <ui:TextBox x:Name="AiProfileNameBox"
+                                        Grid.Column="1"
+                                        Height="34"
+                                        Padding="10,0"
+                                        VerticalContentAlignment="Center"
+                                        TextChanged="OnAiProfileNameTextChanged"
+                                        LostFocus="OnAiProfileNameLostFocus" />
+                        </Grid>
+
+                        <Grid Margin="0,10,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="100" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="接口地址"
+                                       Foreground="{DynamicResource Theme.TextSecondary}"
+                                       FontSize="13"
+                                       VerticalAlignment="Center" />
+                            <ui:TextBox x:Name="AiApiUrlBox"
+                                        Grid.Column="1"
+                                        Height="34"
+                                        Padding="10,0"
+                                        PlaceholderText="https://api.openai.com/v1/chat/completions"
+                                        VerticalContentAlignment="Center"
+                                        TextChanged="OnAiApiUrlTextChanged"
+                                        LostFocus="OnAiConfigLostFocus" />
+                            <ui:Button x:Name="FillSampleUrlButton"
+                                       Grid.Column="2"
+                                       Height="34"
+                                       Margin="8,0,0,0"
+                                       Padding="10,0"
+                                       Appearance="Secondary"
+                                       Content="填入样例"
+                                       ToolTip="填入默认样例地址并直接选中域名段供快速编辑"
+                                       Click="OnFillSampleUrlClicked" />
+                        </Grid>
+
+                        <Grid Margin="0,10,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="100" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="API Key"
+                                       Foreground="{DynamicResource Theme.TextSecondary}"
+                                       FontSize="13"
+                                       VerticalAlignment="Center" />
+                            <PasswordBox x:Name="AiApiKeyBox"
+                                         Grid.Column="1"
+                                         Height="34"
+                                         Padding="10,0"
+                                         VerticalContentAlignment="Center"
+                                         LostFocus="OnAiConfigLostFocus" />
+                        </Grid>
+
+                        <Grid Margin="0,10,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="100" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                <ui:Button x:Name="FetchModelsButton"
+                                           Height="34"
+                                           Padding="12,0"
+                                           Appearance="Secondary"
+                                           Content="获取模型列表"
+                                           Click="OnFetchModelsClicked" />
+                                <ui:Button x:Name="AiTestButton"
+                                           Height="34"
+                                           Margin="8,0,0,0"
+                                           Padding="12,0"
+                                           Appearance="Secondary"
+                                           Content="测试接口"
+                                           Click="OnAiTestClicked" />
+                            </StackPanel>
+                        </Grid>
+                        <TextBlock x:Name="AiTestStatus"
+                                   Margin="100,8,0,0"
+                                   Foreground="{DynamicResource Theme.TextSecondary}"
+                                   FontSize="11.5"
+                                   TextWrapping="Wrap"
+                                   Visibility="Collapsed" />
                     </StackPanel>
                 </Border>
 
@@ -711,29 +829,17 @@
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="100" />
                                     <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
-                                <TextBlock Text="接口地址"
+                                <TextBlock Text="模型配置"
                                            Foreground="{DynamicResource Theme.TextSecondary}"
                                            FontSize="13"
                                            VerticalAlignment="Center" />
-                                <ui:TextBox x:Name="VisionApiUrlBox"
-                                            Grid.Column="1"
-                                            Height="34"
-                                            Padding="10,0"
-                                            PlaceholderText="https://api.openai.com/v1/chat/completions"
-                                            VerticalContentAlignment="Center"
-                                            TextChanged="OnVisionApiUrlTextChanged"
-                                            LostFocus="OnVisionApiConfigLostFocus" />
-                                <ui:Button x:Name="FillSampleUrlButton"
-                                           Grid.Column="2"
-                                           Height="34"
-                                           Margin="8,0,0,0"
-                                           Padding="10,0"
-                                           Appearance="Secondary"
-                                           Content="填入样例"
-                                           ToolTip="填入默认样例地址并直接选中域名段供快速编辑"
-                                           Click="OnFillSampleUrlClicked" />
+                                <ComboBox x:Name="OcrProfileBox"
+                                          Grid.Column="1"
+                                          Height="34"
+                                          DisplayMemberPath="Name"
+                                          SelectionChanged="OnOcrProfileSelectionChanged"
+                                          PreviewMouseWheel="OnComboBoxPreviewMouseWheel" />
                             </Grid>
                             <Grid Margin="0,10,0,0">
                                 <Grid.ColumnDefinitions>
@@ -748,37 +854,22 @@
                                 <ComboBox x:Name="VisionApiModelBox"
                                           Grid.Column="1"
                                           Height="34"
-                                          IsEditable="True"
+                                          IsEditable="False"
                                           VerticalContentAlignment="Center"
                                           PreviewMouseWheel="OnComboBoxPreviewMouseWheel"
-                                          LostFocus="OnVisionApiConfigLostFocus" />
-                                <ui:Button x:Name="FetchModelsButton"
+                                          SelectionChanged="OnVisionApiModelSelectionChanged"
+                                          LostFocus="OnOcrConfigLostFocus" />
+                                <ui:Button x:Name="OcrFetchModelsButton"
                                            Grid.Column="2"
                                            Height="34"
                                            Width="34"
                                            Margin="8,0,0,0"
                                            Padding="0"
                                            Appearance="Secondary"
-                                           ToolTip="获取模型"
-                                           Click="OnFetchModelsClicked">
+                                           ToolTip="拉取该配置下的模型"
+                                           Click="OnOcrFetchModelsClicked">
                                     <ui:SymbolIcon Symbol="ArrowDownload24" FontSize="16" />
                                 </ui:Button>
-                            </Grid>
-                            <Grid Margin="0,10,0,0">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="100" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Text="API Key"
-                                           Foreground="{DynamicResource Theme.TextSecondary}"
-                                           FontSize="13"
-                                           VerticalAlignment="Center" />
-                                <PasswordBox x:Name="VisionApiKeyBox"
-                                              Grid.Column="1"
-                                              Height="34"
-                                              Padding="10,0"
-                                              VerticalContentAlignment="Center"
-                                              LostFocus="OnVisionApiConfigLostFocus" />
                             </Grid>
                             <Grid Margin="0,10,0,0">
                                 <Grid.ColumnDefinitions>
@@ -808,24 +899,134 @@
                                          TextWrapping="Wrap"
                                          VerticalScrollBarVisibility="Auto"
                                          Padding="10,6"
-                                         LostFocus="OnVisionApiConfigLostFocus" />
+                                         LostFocus="OnOcrConfigLostFocus" />
                             </Grid>
                         </StackPanel>
+                    </StackPanel>
+                </Border>
 
-                        <StackPanel x:Name="OcrTestPanel" Margin="0,14,0,0" Visibility="Collapsed">
-                            <StackPanel Orientation="Horizontal">
-                                <ui:Button x:Name="OcrTestButton"
-                                           Appearance="Secondary"
-                                           Height="34"
-                                           Padding="14,0"
-                                           Content="测试接口"
-                                           Click="OnOcrTestClicked" />
-                            </StackPanel>
-                            <TextBlock x:Name="OcrTestStatus"
-                                       Margin="0,8,0,0"
+                <!-- ========== 文本翻译 ========== -->
+                <TextBlock Text="文本翻译"
+                           Foreground="{DynamicResource Theme.Text}"
+                           FontSize="16"
+                           FontWeight="SemiBold"
+                           Margin="0,22,0,10" />
+                <Border Padding="16,14"
+                        CornerRadius="12"
+                        Background="{DynamicResource Theme.Card}"
+                        BorderBrush="{DynamicResource Theme.Border}"
+                        BorderThickness="1">
+                    <StackPanel>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="100" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="翻译引擎"
                                        Foreground="{DynamicResource Theme.TextSecondary}"
-                                       FontSize="11.5"
-                                       TextWrapping="Wrap" />
+                                       FontSize="13"
+                                       VerticalAlignment="Center" />
+                            <ComboBox x:Name="TranslationEngineBox"
+                                      Grid.Column="1"
+                                      Height="34"
+                                      SelectionChanged="OnTranslationEngineChanged"
+                                      PreviewMouseWheel="OnComboBoxPreviewMouseWheel">
+                                <ComboBoxItem Content="微软翻译" />
+                                <ComboBoxItem Content="Google 翻译" />
+                                <ComboBoxItem Content="AI 模型翻译" />
+                            </ComboBox>
+                            <ui:SymbolIcon x:Name="TranslationTipIcon"
+                                           Grid.Column="2"
+                                           Symbol="Info24"
+                                           FontSize="16"
+                                           Margin="8,0,0,0"
+                                           Foreground="{DynamicResource Theme.TextMuted}"
+                                           VerticalAlignment="Center" />
+                        </Grid>
+                        <TextBlock x:Name="TranslationEngineHint"
+                                   Margin="0,8,0,0"
+                                   Foreground="{DynamicResource Theme.TextMuted}"
+                                   FontSize="11.5"
+                                   TextWrapping="Wrap" />
+
+                        <StackPanel x:Name="AiTranslationPanel" Margin="0,14,0,0" Visibility="Collapsed">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="100" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="模型配置"
+                                           Foreground="{DynamicResource Theme.TextSecondary}"
+                                           FontSize="13"
+                                           VerticalAlignment="Center" />
+                                <ComboBox x:Name="TranslationProfileBox"
+                                          Grid.Column="1"
+                                          Height="34"
+                                          DisplayMemberPath="Name"
+                                          SelectionChanged="OnTranslationProfileSelectionChanged"
+                                          PreviewMouseWheel="OnComboBoxPreviewMouseWheel" />
+                            </Grid>
+                            <Grid Margin="0,10,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="100" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="翻译模型"
+                                           Foreground="{DynamicResource Theme.TextSecondary}"
+                                           FontSize="13"
+                                           VerticalAlignment="Center" />
+                                <ComboBox x:Name="TranslationModelBox"
+                                          Grid.Column="1"
+                                          Height="34"
+                                          IsEditable="False"
+                                          VerticalContentAlignment="Center"
+                                          PreviewMouseWheel="OnComboBoxPreviewMouseWheel"
+                                          SelectionChanged="OnTranslationModelSelectionChanged"
+                                          LostFocus="OnTranslationConfigLostFocus" />
+                                <ui:Button x:Name="TranslationFetchModelsButton"
+                                           Grid.Column="2"
+                                           Height="34"
+                                           Width="34"
+                                           Margin="8,0,0,0"
+                                           Padding="0"
+                                           Appearance="Secondary"
+                                           ToolTip="拉取该配置下的模型"
+                                           Click="OnTranslationFetchModelsClicked">
+                                    <ui:SymbolIcon Symbol="ArrowDownload24" FontSize="16" />
+                                </ui:Button>
+                            </Grid>
+                            <Grid Margin="0,10,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="100" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel VerticalAlignment="Top" Margin="0,6,0,0">
+                                    <TextBlock Text="翻译提示词"
+                                               Foreground="{DynamicResource Theme.TextSecondary}"
+                                               FontSize="13" />
+                                    <ui:Button x:Name="ResetTranslationPromptButton"
+                                               Margin="0,6,0,0"
+                                               Padding="6,2"
+                                               FontSize="11"
+                                               Appearance="Transparent"
+                                               Foreground="{DynamicResource Theme.TextMuted}"
+                                               HorizontalAlignment="Left"
+                                               Content="恢复默认"
+                                               ToolTip="恢复默认的翻译提示词"
+                                               Click="OnResetTranslationPromptClicked" />
+                                </StackPanel>
+                                <TextBox x:Name="TranslationPromptBox"
+                                         Grid.Column="1"
+                                         MinHeight="68"
+                                         MaxHeight="120"
+                                         AcceptsReturn="True"
+                                         TextWrapping="Wrap"
+                                         VerticalScrollBarVisibility="Auto"
+                                         Padding="10,6"
+                                         LostFocus="OnTranslationConfigLostFocus" />
+                            </Grid>
                         </StackPanel>
                     </StackPanel>
                 </Border>

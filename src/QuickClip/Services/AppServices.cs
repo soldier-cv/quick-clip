@@ -21,6 +21,7 @@ public sealed class AppServices : IDisposable
     public ClipboardMonitor Monitor { get; }
     public ClipboardPipeline Pipeline { get; }
     public TrayIconService Tray { get; }
+    public ToastService Toast { get; }
     public UpdateService Update { get; }
     public StickyService Sticky { get; }
     public StackPasteService StackPaste { get; }
@@ -48,11 +49,13 @@ public sealed class AppServices : IDisposable
         Pipeline = new ClipboardPipeline(Paths, Database, Qr, Paste, Settings);
         Hotkey = new HotkeyService();
         Monitor = new ClipboardMonitor();
+        Toast = new ToastService(Settings);
         Tray = new TrayIconService();
+        Tray.AttachToast(Toast);
         ClipboardGuard = new SystemClipboardGuard(Dispatcher.CurrentDispatcher);
         Update = new UpdateService();
         Sticky = new StickyService();
-        StackPaste = new StackPasteService(Paste);
+        StackPaste = new StackPasteService(Paste, Toast, Settings);
         Translation = new TranslationService(Settings);
 
         // 收集栈模式下，新捕获的条目自动压入栈
@@ -64,8 +67,8 @@ public sealed class AppServices : IDisposable
             }
         };
 
-        // 收集栈模式下拦截物理 Ctrl+V 出栈模拟粘贴与 Esc 退出
-        // 注意：焦点在 QuickClip 自身窗口时一律放行，避免劫持面板内的正常 Ctrl+V / Esc（隐藏面板）
+        // 收集栈模式下拦截物理 Ctrl+V 出栈模拟粘贴
+        // 注意：焦点在 QuickClip 自身窗口时一律放行，避免劫持面板内的正常 Ctrl+V
         Hotkey.InterceptCtrlV = () =>
         {
             if (!StackPaste.IsActive || StackPaste.Count == 0 || IsOwnProcessForeground())
@@ -75,14 +78,18 @@ public sealed class AppServices : IDisposable
             return StackPaste.PopAndPaste();
         };
 
-        Hotkey.InterceptEscape = () =>
+        // 方案 A：不再全局拦截物理 Esc 键，避免破坏其他软件（VS Code/浏览器/IDE）的正常 Esc 取消功能。
+        // 收集栈退出由快捷键（再次按 Ctrl+Shift+S）、浮窗「×」按钮、以及聚焦 HUD 自身时的 Esc 负责。
+        Hotkey.InterceptEscape = null;
+
+        // 全局热键开启/切换收集栈（按一下开，按一下关）
+        Hotkey.ToggleStackRequested += () =>
         {
-            if (!StackPaste.IsActive || IsOwnProcessForeground())
+            StackPaste.Toggle();
+            if (MainWindow is { IsVisible: true } && !Settings.WindowAlwaysOnTop)
             {
-                return false;
+                MainWindow.Hide();
             }
-            StackPaste.Stop();
-            return true;
         };
 
         // 冷启动优先热键/监听；清理延后到 8 分钟，避免与首屏争抢

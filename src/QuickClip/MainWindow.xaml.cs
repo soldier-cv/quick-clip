@@ -18,6 +18,7 @@ public partial class MainWindow : FluentWindow
     private readonly AppServices _services;
     private readonly MainViewModel _viewModel;
     private SettingsWindow? _settingsWindow;
+    private Views.SnippetQuickAdjustWindow? _activeQuickAdjustWindow;
     private bool _exiting;
     /// <summary>热键唤起后短时忽略 Deactivated，避免 Activate 被前台锁拒绝时立刻 Hide。</summary>
     private DateTime _suppressDeactivateUntil = DateTime.MinValue;
@@ -240,6 +241,7 @@ public partial class MainWindow : FluentWindow
         PreviewQrDecodeLabel.Foreground = secondary;
         PreviewQrDecodeText.Foreground = accent;
         PreviewQrDecodeScroll.Background = System.Windows.Media.Brushes.Transparent;
+        CopyPreviewQrButton.Foreground = accent;
     }
 
     /// <summary>窗口句柄创建后挂载剪贴板监听。</summary>
@@ -285,21 +287,23 @@ public partial class MainWindow : FluentWindow
         }
 
         // 失焦即隐：点到其他应用时隐藏（仿系统 Win+V）。
-        // 打开设置窗 / 自有模态对话框时主窗也会失焦，不能当「点到外部」——否则列表会被误收起。
+        // 打开设置窗 / 短语微调 / 短语编辑 / 自有模态对话框时主窗也会失焦，不能当「点到外部」——否则列表会被误收起。
         if (IsVisible && !_exiting && !_services.Settings.WindowAlwaysOnTop &&
             QrOverlay.Visibility == Visibility.Collapsed &&
             OcrOverlay.Visibility == Visibility.Collapsed &&
             !_modalDialogOpen &&
-            !IsSettingsWindowOpen())
+            !IsSubWindowOpen())
         {
             DebugLog.Log("失焦隐藏面板");
             HideWindow();
         }
     }
 
-    /// <summary>设置窗口是否正在显示（含刚激活、主窗暂失焦的情况）。</summary>
-    private bool IsSettingsWindowOpen() =>
-        _settingsWindow is { IsVisible: true };
+    /// <summary>检查 QuickClip 自身的子窗口是否正在显示，若有则主面板绝不自动隐藏。</summary>
+    private bool IsSubWindowOpen() =>
+        (_settingsWindow is { IsVisible: true }) ||
+        (_activeQuickAdjustWindow is { IsVisible: true }) ||
+        (_activeSnippetDialog is { IsVisible: true });
 
     /// <summary>
     /// 显示自有模态对话框：期间主窗会失焦，必须屏蔽「失焦即隐」，
@@ -649,24 +653,16 @@ public partial class MainWindow : FluentWindow
             return;
         }
 
-        // 开启收集栈
+        // 开启/关闭收集栈
         if (settings.StartStackHotkey.Matches(key, modifiers))
         {
-            if (!typing && !e.IsRepeat)
+            if (!e.IsRepeat)
             {
-                _viewModel.StartStackMode();
-            }
-
-            e.Handled = true;
-            return;
-        }
-
-        // 关闭收集栈
-        if (settings.StopStackHotkey.Matches(key, modifiers))
-        {
-            if (!typing && !e.IsRepeat)
-            {
-                _viewModel.StopStackMode();
+                _viewModel.ToggleStackMode();
+                if (!settings.WindowAlwaysOnTop)
+                {
+                    HideWindow();
+                }
             }
 
             e.Handled = true;
@@ -719,6 +715,17 @@ public partial class MainWindow : FluentWindow
 
     private void PasteItemAt(int index)
     {
+        if (_viewModel.IsSnippetsTabActive)
+        {
+            int snippetIndex = index - 1;
+            if (snippetIndex >= 0 && snippetIndex < _viewModel.Snippets.Count)
+            {
+                _viewModel.SelectedSnippet = _viewModel.Snippets[snippetIndex];
+                PasteSelected(false);
+            }
+            return;
+        }
+
         var vm = _viewModel.GetItemAt(index - 1);
         if (vm == null)
         {
@@ -731,11 +738,34 @@ public partial class MainWindow : FluentWindow
 
     private void PasteSelected(bool plainOnly)
     {
-        // 置顶（Ctrl+P / 图钉）= 工作会话：失焦不藏、粘贴后也不关；未置顶则粘贴后隐藏
+        // 置顶（Ctrl+P / 图钉）= 工作会话：失焦不藏、粘贴后也不关；未置顶且未开启连续粘贴则粘贴后隐藏
         bool pinned = _services.Settings.WindowAlwaysOnTop;
-        if (!pinned)
+        bool continuous = _services.Settings.ContinuousPasteMode;
+        if (!pinned && !continuous)
         {
             HideWindow();
+        }
+
+        if (_viewModel.IsSnippetsTabActive)
+        {
+            if (_viewModel.SelectedSnippet != null)
+            {
+                _ = _viewModel.PasteSnippetAsync(_viewModel.SelectedSnippet, plainOnly);
+                if (pinned)
+                {
+                    _viewModel.StatusText = "已粘贴短语（置顶中，面板保持打开）";
+                }
+                else if (continuous)
+                {
+                    _viewModel.StatusText = "已粘贴短语（连续粘贴中）";
+                }
+            }
+
+            if (continuous)
+            {
+                ReactivatePanelForContinuousPaste();
+            }
+            return;
         }
 
         _viewModel.PasteSelected(plainOnly);
@@ -743,20 +773,66 @@ public partial class MainWindow : FluentWindow
         {
             _viewModel.StatusText = "已粘贴（置顶中，面板保持打开）";
         }
+        else if (continuous)
+        {
+            _viewModel.StatusText = "已粘贴（连续粘贴中）";
+        }
+
+        if (continuous)
+        {
+            ReactivatePanelForContinuousPaste();
+        }
+    }
+
+    /// <summary>连续粘贴模式：完成一次粘贴后重新激活主面板并保留焦点，以便继续按 Enter 或上下键顺次粘贴。</summary>
+    private void ReactivatePanelForContinuousPaste()
+    {
+        _suppressDeactivateUntil = DateTime.UtcNow.AddMilliseconds(600);
+        Task.Delay(150).ContinueWith(_ =>
+        {
+            Dispatcher.Invoke(() =>
+            {
+                if (IsVisible)
+                {
+                    Activate();
+                    Focus();
+                }
+            });
+        });
     }
 
     private void MoveSelection(int delta)
     {
+        if (_viewModel.IsSnippetsTabActive)
+        {
+            if (_viewModel.Snippets.Count == 0) return;
+            int current = _viewModel.SelectedSnippet == null
+                ? -1
+                : _viewModel.Snippets.IndexOf(_viewModel.SelectedSnippet);
+            int target;
+            if (current == -1)
+            {
+                target = delta > 0 ? 0 : _viewModel.Snippets.Count - 1;
+            }
+            else
+            {
+                target = Math.Clamp(current + delta, 0, _viewModel.Snippets.Count - 1);
+            }
+            _viewModel.SelectedSnippet = _viewModel.Snippets[target];
+            SnippetList.ScrollIntoView(_viewModel.SelectedSnippet);
+            return;
+        }
+
         if (_viewModel.Items.Count == 0)
         {
             return;
         }
 
-        int current = _viewModel.SelectedItem == null
+        int currentHist = _viewModel.SelectedItem == null
             ? 0
             : _viewModel.Items.IndexOf(_viewModel.SelectedItem);
-        int target = Math.Clamp(current + delta, 0, _viewModel.Items.Count - 1);
-        _viewModel.SelectedItem = _viewModel.Items[target];
+        int targetHist = Math.Clamp(currentHist + delta, 0, _viewModel.Items.Count - 1);
+        _viewModel.SelectedItem = _viewModel.Items[targetHist];
         ItemList.ScrollIntoView(_viewModel.SelectedItem);
     }
 
@@ -1324,6 +1400,77 @@ public partial class MainWindow : FluentWindow
         _ = _viewModel.GenerateQrForSelectedAsync();
     }
 
+    private void OnCopyPreviewQrClicked(object sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        string? text = (PreviewPopup.DataContext as ClipboardItemViewModel)?.QrText;
+        if (string.IsNullOrEmpty(text))
+        {
+            text = PreviewQrDecodeText.Text;
+        }
+
+        if (!string.IsNullOrEmpty(text))
+        {
+            try
+            {
+                System.Windows.Clipboard.SetText(text);
+                _services.Toast.Show("已复制二维码文本", text, Wpf.Ui.Controls.SymbolRegular.Copy24);
+                _viewModel.StatusText = "已复制二维码文本";
+            }
+            catch (Exception ex)
+            {
+                DebugLog.LogException("复制二维码文本失败", ex);
+            }
+        }
+    }
+
+    private void OnPreviewQrDecodePanelMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ClickCount == 2)
+        {
+            e.Handled = true;
+            PastePreviewQrContent();
+        }
+    }
+
+    private void PastePreviewQrContent()
+    {
+        string? text = (PreviewPopup.DataContext as ClipboardItemViewModel)?.QrText;
+        if (string.IsNullOrEmpty(text))
+        {
+            text = PreviewQrDecodeText.Text;
+        }
+
+        if (string.IsNullOrEmpty(text))
+        {
+            return;
+        }
+
+        // 双击粘贴时关闭悬停预览浮层
+        PreviewPopup.IsOpen = false;
+
+        bool pinned = _services.Settings.WindowAlwaysOnTop;
+        bool continuous = _services.Settings.ContinuousPasteMode;
+
+        if (!pinned && !continuous)
+        {
+            HideWindow();
+        }
+
+        _services.Paste.RememberTargetWindow();
+        _services.Paste.PasteText(text, plainOnly: false);
+
+        if (pinned)
+        {
+            _viewModel.StatusText = "已粘贴二维码文本（置顶中，面板保持打开）";
+        }
+        else if (continuous)
+        {
+            _viewModel.StatusText = "已粘贴二维码文本（连续粘贴中）";
+            ReactivatePanelForContinuousPaste();
+        }
+    }
+
     private void OnCopyClicked(object sender, RoutedEventArgs e)
     {
         if (GetCardViewModel(sender) is { } vm)
@@ -1611,12 +1758,15 @@ public partial class MainWindow : FluentWindow
             ? $"[{s.PlainPasteHotkey}] 全局纯文本粘贴"
             : $"[{s.PlainPasteHotkey}] 全局纯文本粘贴（未启用）";
 
+        string stackTip = $"[{s.StartStackHotkey}] 开启/关闭收集栈\n";
+
         string body =
             $"单击选中 · 双击粘贴 · 卡片「复制」或 [{s.CopySelectedHotkey}] 仅复制\n" +
             $"[{s.PasteSelectedHotkey}] 粘贴选中项\n" +
             $"[{s.PasteSelectedPlainHotkey}] 纯文本粘贴选中项\n" +
             $"[1 ~ 9] 快速粘贴第 1~9 条\n" +
             $"{globalPaste}\n" +
+            $"{stackTip}" +
             $"[{s.TogglePinHotkey}] 窗口置顶（失焦不藏 / 粘贴不关）\n" +
             $"[{s.HidePanelHotkey}] 隐藏  ·  [{s.DeleteSelectedHotkey}] 删除\n" +
             $"[{Models.HotkeyBinding.WinV}] 唤起 QuickClip";
@@ -1638,6 +1788,7 @@ public partial class MainWindow : FluentWindow
 
     private void OpenSettingsWindow()
     {
+        _suppressDeactivateUntil = DateTime.UtcNow.AddMilliseconds(500);
         if (_settingsWindow is { IsVisible: true })
         {
             PositionSettingsBesideMain(_settingsWindow);
@@ -1939,28 +2090,201 @@ public partial class MainWindow : FluentWindow
         return vm ?? _viewModel.SelectedItem;
     }
 
+    private Views.SnippetEditWindow? _activeSnippetDialog;
+
     private void OnAddSnippetClicked(object sender, RoutedEventArgs e)
     {
-        var dialog = new Views.SnippetEditWindow(null, this);
-        bool confirmed = ShowOwnedModal(() => dialog.ShowDialog() == true);
-        if (confirmed)
+        if (_activeSnippetDialog != null)
         {
-            _ = _viewModel.AddSnippetAsync(dialog.ResultItem);
-            _viewModel.StatusText = "已添加常用短语";
+            _activeSnippetDialog.Activate();
+            return;
         }
+
+        var dialog = new Views.SnippetEditWindow(null);
+        _activeSnippetDialog = dialog;
+        dialog.Saved += async item =>
+        {
+            await _viewModel.AddSnippetAsync(item);
+            _viewModel.StatusText = "已添加常用短语";
+        };
+        dialog.Closed += (_, _) =>
+        {
+            if (_activeSnippetDialog == dialog)
+            {
+                _activeSnippetDialog = null;
+            }
+        };
+        dialog.Show();
     }
 
     private void OnEditSnippetClicked(object sender, RoutedEventArgs e)
     {
         if (sender is FrameworkElement { DataContext: Models.SnippetItem snippet })
         {
-            var dialog = new Views.SnippetEditWindow(snippet, this);
-            bool confirmed = ShowOwnedModal(() => dialog.ShowDialog() == true);
-            if (confirmed)
+            OpenSnippetEditor(snippet);
+        }
+    }
+
+    private void OpenSnippetEditor(Models.SnippetItem snippet)
+    {
+        if (_activeSnippetDialog != null)
+        {
+            _activeSnippetDialog.Activate();
+            return;
+        }
+
+        var dialog = new Views.SnippetEditWindow(snippet);
+        _activeSnippetDialog = dialog;
+        dialog.Saved += async item =>
+        {
+            await _viewModel.UpdateSnippetAsync(item);
+            _viewModel.StatusText = "已更新常用短语";
+        };
+        dialog.Closed += (_, _) =>
+        {
+            if (_activeSnippetDialog == dialog)
             {
-                _ = _viewModel.UpdateSnippetAsync(dialog.ResultItem);
-                _viewModel.StatusText = "已更新常用短语";
+                _activeSnippetDialog = null;
             }
+        };
+        dialog.Show();
+    }
+
+    private void OnSnippetQuickAdjustClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: Models.SnippetItem snippet })
+        {
+            OpenSnippetQuickAdjust(snippet);
+        }
+    }
+
+    private void OpenSnippetQuickAdjust(Models.SnippetItem snippet)
+    {
+        if (snippet == null) return;
+
+        _suppressDeactivateUntil = DateTime.UtcNow.AddMilliseconds(500);
+
+        if (_activeQuickAdjustWindow is { IsVisible: true })
+        {
+            _activeQuickAdjustWindow.UpdateSnippet(snippet);
+            _activeQuickAdjustWindow.Activate();
+            return;
+        }
+
+        var adjustWin = new Views.SnippetQuickAdjustWindow(snippet, this);
+        _activeQuickAdjustWindow = adjustWin;
+
+        adjustWin.Closed += (_, _) =>
+        {
+            if (_activeQuickAdjustWindow == adjustWin)
+            {
+                _activeQuickAdjustWindow = null;
+            }
+        };
+
+        adjustWin.ApplyAndPasteRequested += (rawText, snip) =>
+        {
+            string? currentClip = null;
+            try
+            {
+                if (System.Windows.Clipboard.ContainsText())
+                {
+                    currentClip = System.Windows.Clipboard.GetText();
+                }
+            }
+            catch { }
+
+            string finalText = Models.SnippetItem.ResolveText(rawText, currentClip);
+
+            bool pinned = _services.Settings.WindowAlwaysOnTop;
+            bool continuous = _services.Settings.ContinuousPasteMode;
+
+            if (!pinned && !continuous)
+            {
+                HideWindow();
+            }
+
+            _services.Paste.RememberTargetWindow();
+            _services.Paste.PasteText(finalText, plainOnly: false);
+
+            if (pinned)
+            {
+                _viewModel.StatusText = "已微调并粘贴（置顶中，面板保持打开）";
+            }
+            else if (continuous)
+            {
+                _viewModel.StatusText = "已微调并粘贴（连续粘贴中）";
+                ReactivatePanelForContinuousPaste();
+            }
+        };
+
+        adjustWin.CopyOnlyRequested += (rawText, snip) =>
+        {
+            try
+            {
+                string? currentClip = null;
+                try
+                {
+                    if (System.Windows.Clipboard.ContainsText())
+                    {
+                        currentClip = System.Windows.Clipboard.GetText();
+                    }
+                }
+                catch { }
+
+                string finalText = Models.SnippetItem.ResolveText(rawText, currentClip);
+                System.Windows.Clipboard.SetText(finalText);
+                _services.Toast.Show("已复制到剪贴板", "已复制微调后的短语内容", Wpf.Ui.Controls.SymbolRegular.Copy24);
+                _viewModel.StatusText = "已复制微调后的短语内容";
+            }
+            catch (Exception ex)
+            {
+                DebugLog.LogException("复制微调短语失败", ex);
+            }
+        };
+
+        adjustWin.Show();
+    }
+
+    private void OnMenuSnippetPasteClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: Models.SnippetItem snippet })
+        {
+            _viewModel.SelectedSnippet = snippet;
+            PasteSelected(plainOnly: false);
+        }
+    }
+
+    private void OnMenuSnippetQuickAdjustClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: Models.SnippetItem snippet })
+        {
+            OpenSnippetQuickAdjust(snippet);
+        }
+    }
+
+    private void OnMenuSnippetCopyClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: Models.SnippetItem snippet })
+        {
+            _ = CopySnippetDirectAsync(snippet);
+        }
+    }
+
+    private void OnMenuSnippetEditClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: Models.SnippetItem snippet })
+        {
+            OpenSnippetEditor(snippet);
+        }
+    }
+
+    private void OnMenuSnippetDeleteClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: Models.SnippetItem snippet })
+        {
+            _ = _viewModel.DeleteSnippetAsync(snippet);
+            _viewModel.StatusText = "已删除常用短语";
         }
     }
 
@@ -1987,14 +2311,19 @@ public partial class MainWindow : FluentWindow
         }
     }
 
-    private async void OnCopySnippetDirectClicked(object sender, RoutedEventArgs e)
+    private void OnCopySnippetDirectClicked(object sender, RoutedEventArgs e)
     {
         if (sender is FrameworkElement { DataContext: Models.SnippetItem snippet })
         {
-            string text = _viewModel.ResolveSnippetText(snippet);
-            await _services.Paste.CopyTextAsync(text, plainOnly: true);
-            _viewModel.StatusText = "已复制短语内容";
+            _ = CopySnippetDirectAsync(snippet);
         }
+    }
+
+    private async Task CopySnippetDirectAsync(Models.SnippetItem snippet)
+    {
+        string text = _viewModel.ResolveSnippetText(snippet);
+        await _services.Paste.CopyTextAsync(text, plainOnly: true);
+        _viewModel.StatusText = "已复制短语内容";
     }
 
     private void OnSnippetListDoubleClick(object sender, MouseButtonEventArgs e)

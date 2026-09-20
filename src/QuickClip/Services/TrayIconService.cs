@@ -130,8 +130,18 @@ public sealed class TrayIconService : IDisposable
         Apply();
     }
 
+    private ToastService? _toastService;
+
+    public void AttachToast(ToastService toast) => _toastService = toast;
+
     public void ShowBalloonTip(string title, string message)
     {
+        if (_toastService != null)
+        {
+            _toastService.Show(title, message);
+            return;
+        }
+
         try
         {
             _notifyIcon.BalloonTipTitle = title;

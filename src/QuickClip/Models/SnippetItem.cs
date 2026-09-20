@@ -26,10 +26,22 @@ public sealed class SnippetItem
     /// <summary>创建时间。</summary>
     public DateTime CreatedAt { get; set; } = DateTime.Now;
 
+    /// <summary>在列表中的显示序号（1~9 为数字，大于 9 为空）。</summary>
+    public string DisplayIndex { get; set; } = string.Empty;
+
+    /// <summary>是否有可显示的数字快捷键序号。</summary>
+    public bool HasDisplayIndex => !string.IsNullOrEmpty(DisplayIndex);
+
     /// <summary>计算替换动态占位符后的真实内容（不区分占位符大小写）。</summary>
     public string ResolveContent(string? currentClipboard = null)
     {
-        if (string.IsNullOrEmpty(Content))
+        return ResolveText(Content, currentClipboard);
+    }
+
+    /// <summary>计算替换任意文本中的动态占位符（不区分占位符大小写）。</summary>
+    public static string ResolveText(string? text, string? currentClipboard = null)
+    {
+        if (string.IsNullOrEmpty(text))
         {
             return string.Empty;
         }
@@ -37,7 +49,7 @@ public sealed class SnippetItem
         DateTime now = DateTime.Now;
         CultureInfo zhCulture = new("zh-CN");
 
-        string result = Content;
+        string result = text;
 
         // 基础日期时间
         result = ReplaceIgnoreCase(result, "{date}", now.ToString("yyyy-MM-dd"));

@@ -51,7 +51,7 @@ public sealed class ClipboardItemViewModel : INotifyPropertyChanged
         IsImage && HasQr ? SymbolRegular.ScanQrCode24 : SymbolRegular.QrCode24;
 
     public string QrActionToolTip =>
-        IsImage && HasQr ? "解析并复制文本" : "悬停预览二维码 · 点击放大";
+        IsImage && HasQr ? "复制二维码文本" : "悬停预览二维码 · 点击放大";
 
     public bool IsPinned => Item.IsPinned;
 

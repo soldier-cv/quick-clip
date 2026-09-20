@@ -40,48 +40,90 @@ public sealed class TranslationService : IDisposable
         string target = targetLang ?? DetectTargetLanguage(trimmed);
         string srcLang = target == "en" ? "zh" : "auto";
 
-        // 1. 若配置了 AI 视觉/LLM 服务，优先使用高质量大模型翻译
-        if (IsAiConfigured())
+        // 1. 若配置并启用了 AI 大模型翻译
+        if (_settings.TranslationEngine == TranslationEngineType.Ai)
         {
-            try
+            if (IsAiConfigured())
             {
-                var aiResult = await TranslateWithAiAsync(trimmed, target);
-                if (aiResult.Success)
+                try
                 {
-                    return aiResult;
+                    var aiResult = await TranslateWithAiAsync(trimmed, target);
+                    if (aiResult.Success)
+                    {
+                        return aiResult;
+                    }
+                    DebugLog.Log($"AI 翻译未成功，降级公共通道: {aiResult.ErrorMessage}");
                 }
-                DebugLog.Log($"AI 翻译未成功，降级公共通道: {aiResult.ErrorMessage}");
+                catch (Exception ex)
+                {
+                    DebugLog.LogException("AI 翻译异常，回退公共通道", ex);
+                }
             }
-            catch (Exception ex)
+            else
             {
-                DebugLog.LogException("AI 翻译异常，回退公共通道", ex);
+                DebugLog.Log("已选择 AI 翻译但未配置 AI 模型接口，回退公共通道");
             }
         }
 
-        // 2. 回退到开箱即用的公共免密翻译通道
-        return await TranslateWithPublicApiAsync(trimmed, target, srcLang);
+        // 2. 公共免密通道分流（或 AI 失败回退）
+        if (_settings.TranslationEngine == TranslationEngineType.Google)
+        {
+            var googleResult = await TranslateWithGooglePublicAsync(trimmed, target, srcLang);
+            if (googleResult.Success)
+            {
+                return googleResult;
+            }
+            // 若 Google 翻译因网络环境失败，自动尝试微软通道作为双重保险
+            DebugLog.Log("Google 翻译通道失败，尝试微软直连通道...");
+            return await TranslateWithBingPublicAsync(trimmed, target);
+        }
+
+        // 默认及 Bing 通道
+        return await TranslateWithBingPublicAsync(trimmed, target);
     }
 
-    /// <summary>检测是否配置了可用的 AI 接口。</summary>
+    /// <summary>检测是否配置了可用的 AI 接口与翻译模型。</summary>
     private bool IsAiConfigured()
     {
-        return !string.IsNullOrWhiteSpace(_settings.VisionApiUrl) &&
-               !string.IsNullOrWhiteSpace(_settings.VisionApiModel);
+        var profile = _settings.GetTranslationProfile();
+        return !string.IsNullOrWhiteSpace(profile.ApiUrl) &&
+               !string.IsNullOrWhiteSpace(_settings.TranslationModel);
     }
 
     /// <summary>使用 OpenAI 兼容协议或 Ollama 翻译。</summary>
     private async Task<TranslationResult> TranslateWithAiAsync(string text, string targetLang)
     {
-        string targetName = targetLang == "en" ? "English" : "Simplified Chinese";
-        string systemPrompt = $"You are a professional, accurate translator. Translate the provided text into {targetName}. Preserve code snippets, links, and formatting. Output ONLY the translated text without explanations, quotes, or conversational filler.";
+        string targetName = targetLang switch
+        {
+            "en" => "英语 (English)",
+            "zh" => "简体中文 (Simplified Chinese)",
+            "ja" => "日语 (Japanese)",
+            "ko" => "韩语 (Korean)",
+            "fr" => "法语 (French)",
+            "de" => "德语 (German)",
+            "es" => "西班牙语 (Spanish)",
+            "ru" => "俄语 (Russian)",
+            _ => targetLang
+        };
 
-        string url = _settings.VisionApiUrl.Trim();
+        string systemPrompt = _settings.TranslationPrompt;
+        if (systemPrompt.Contains("{target_lang}", StringComparison.OrdinalIgnoreCase))
+        {
+            systemPrompt = systemPrompt.Replace("{target_lang}", targetName, StringComparison.OrdinalIgnoreCase);
+        }
+        else
+        {
+            systemPrompt += $"\n目标语言：{targetName}";
+        }
+
+        var profile = _settings.GetTranslationProfile();
+        string url = profile.ApiUrl.Trim();
         bool isOllama = url.Contains("/api/generate", StringComparison.OrdinalIgnoreCase);
 
         using var request = new HttpRequestMessage(HttpMethod.Post, url);
-        if (!string.IsNullOrWhiteSpace(_settings.VisionApiKey))
+        if (!string.IsNullOrWhiteSpace(profile.ApiKey))
         {
-            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _settings.VisionApiKey);
+            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", profile.ApiKey);
         }
 
         string jsonPayload;
@@ -89,7 +131,7 @@ public sealed class TranslationService : IDisposable
         {
             var payload = new
             {
-                model = _settings.VisionApiModel,
+                model = _settings.TranslationModel,
                 prompt = $"{systemPrompt}\n\nText:\n{text}",
                 stream = false
             };
@@ -99,7 +141,7 @@ public sealed class TranslationService : IDisposable
         {
             var payload = new
             {
-                model = _settings.VisionApiModel,
+                model = _settings.TranslationModel,
                 messages = new[]
                 {
                     new { role = "system", content = systemPrompt },
@@ -141,15 +183,154 @@ public sealed class TranslationService : IDisposable
             return TranslationResult.Failed(text, "AI 接口未返回有效翻译结果");
         }
 
-        return TranslationResult.Succeeded(text, translated.Trim(), "auto", targetLang, $"AI ({_settings.VisionApiModel})");
+        return TranslationResult.Succeeded(text, translated.Trim(), "auto", targetLang, $"AI ({_settings.TranslationModel})");
     }
 
-    /// <summary>公共免秘钥在线翻译通道。</summary>
-    private async Task<TranslationResult> TranslateWithPublicApiAsync(string text, string targetLang, string srcLang)
+    #region 微软翻译公共免密通道 (国内直连)
+
+    private class BingAuth
+    {
+        public string Key { get; set; } = "";
+        public string Token { get; set; } = "";
+        public string Ig { get; set; } = "";
+        public string Iid { get; set; } = "translator.5023";
+        public DateTime ExpireAt { get; set; }
+    }
+
+    private BingAuth? _cachedBingAuth;
+    private readonly SemaphoreSlim _bingLock = new(1, 1);
+
+    private async Task<BingAuth?> GetBingAuthAsync(bool forceRefresh = false)
+    {
+        if (!forceRefresh && _cachedBingAuth != null && DateTime.UtcNow < _cachedBingAuth.ExpireAt)
+        {
+            return _cachedBingAuth;
+        }
+
+        await _bingLock.WaitAsync();
+        try
+        {
+            if (!forceRefresh && _cachedBingAuth != null && DateTime.UtcNow < _cachedBingAuth.ExpireAt)
+            {
+                return _cachedBingAuth;
+            }
+
+            using var req = new HttpRequestMessage(HttpMethod.Get, "https://cn.bing.com/translator");
+            req.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+
+            using var resp = await _http.SendAsync(req);
+            if (!resp.IsSuccessStatusCode) return null;
+
+            string html = await resp.Content.ReadAsStringAsync();
+
+            var mHelper = Regex.Match(html, @"params_AbusePreventionHelper\s*=\s*\[([^,]+),""([^""]+)"",([^\]]+)\]");
+            var mIg = Regex.Match(html, @"IG:""([a-zA-Z0-9]+)""");
+            var mIid = Regex.Match(html, @"data-iid=""([^""]+)""");
+
+            if (!mHelper.Success || !mIg.Success) return null;
+
+            string key = mHelper.Groups[1].Value.Trim();
+            string token = mHelper.Groups[2].Value.Trim();
+            string ig = mIg.Groups[1].Value.Trim();
+            string iid = mIid.Success ? mIid.Groups[1].Value.Trim() : "translator.5023";
+
+            _cachedBingAuth = new BingAuth
+            {
+                Key = key,
+                Token = token,
+                Ig = ig,
+                Iid = iid,
+                ExpireAt = DateTime.UtcNow.AddMinutes(30)
+            };
+            return _cachedBingAuth;
+        }
+        catch (Exception ex)
+        {
+            DebugLog.LogException("获取微软翻译凭据失败", ex);
+            return null;
+        }
+        finally
+        {
+            _bingLock.Release();
+        }
+    }
+
+    /// <summary>使用微软翻译公共免密通道（国内直连开箱即用）。</summary>
+    private async Task<TranslationResult> TranslateWithBingPublicAsync(string text, string targetLang)
+    {
+        string bingTarget = targetLang.StartsWith("zh", StringComparison.OrdinalIgnoreCase) ? "zh-Hans" : targetLang;
+
+        for (int retry = 0; retry < 2; retry++)
+        {
+            try
+            {
+                var auth = await GetBingAuthAsync(forceRefresh: retry > 0);
+                if (auth == null)
+                {
+                    continue;
+                }
+
+                string url = $"https://cn.bing.com/ttranslatev3?isVertical=1&&IG={auth.Ig}&IID={auth.Iid}";
+                using var req = new HttpRequestMessage(HttpMethod.Post, url);
+                req.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+
+                var formData = new Dictionary<string, string>
+                {
+                    ["fromLang"] = "auto-detect",
+                    ["text"] = text,
+                    ["to"] = bingTarget,
+                    ["token"] = auth.Token,
+                    ["key"] = auth.Key
+                };
+                req.Content = new FormUrlEncodedContent(formData);
+
+                using var resp = await _http.SendAsync(req);
+                if (!resp.IsSuccessStatusCode)
+                {
+                    _cachedBingAuth = null;
+                    continue;
+                }
+
+                string json = await resp.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(json);
+                if (doc.RootElement.ValueKind == JsonValueKind.Array && doc.RootElement.GetArrayLength() > 0)
+                {
+                    var item = doc.RootElement[0];
+                    if (item.TryGetProperty("translations", out var transArray) &&
+                        transArray.ValueKind == JsonValueKind.Array &&
+                        transArray.GetArrayLength() > 0)
+                    {
+                        var first = transArray[0];
+                        if (first.TryGetProperty("text", out var textProp))
+                        {
+                            string result = textProp.GetString()?.Trim() ?? string.Empty;
+                            if (!string.IsNullOrEmpty(result))
+                            {
+                                return TranslationResult.Succeeded(text, result, "auto", targetLang, "微软翻译");
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                DebugLog.LogException($"微软翻译通道异常 (重试 {retry})", ex);
+                _cachedBingAuth = null;
+            }
+        }
+
+        return TranslationResult.Failed(text, "网络连接失败或翻译服务暂不可用");
+    }
+
+    #endregion
+
+    #region Google 翻译公共免密通道 (需代理)
+
+    /// <summary>Google 翻译公共免密通道（需代理环境）。</summary>
+    private async Task<TranslationResult> TranslateWithGooglePublicAsync(string text, string targetLang, string srcLang)
     {
         try
         {
-            // 使用公共开放翻译网关客户端
             string escaped = Uri.EscapeDataString(text);
             string url = $"https://translate.googleapis.com/translate_a/single?client=gtx&sl={srcLang}&tl={targetLang}&dt=t&q={escaped}";
 
@@ -179,18 +360,20 @@ public sealed class TranslationService : IDisposable
                     string result = sb.ToString().Trim();
                     if (!string.IsNullOrEmpty(result))
                     {
-                        return TranslationResult.Succeeded(text, result, srcLang, targetLang, "公共在线服务");
+                        return TranslationResult.Succeeded(text, result, srcLang, targetLang, "Google 翻译");
                     }
                 }
             }
         }
         catch (Exception ex)
         {
-            DebugLog.LogException("公共翻译通道异常", ex);
+            DebugLog.LogException("Google 翻译通道异常", ex);
         }
 
-        return TranslationResult.Failed(text, "网络连接失败或翻译服务暂不可用");
+        return TranslationResult.Failed(text, "Google 翻译连接失败（国内直连受限，需开启代理）");
     }
+
+    #endregion
 
     /// <summary>根据字符特征自动推断目标语言。</summary>
     private static string DetectTargetLanguage(string text)

@@ -48,6 +48,7 @@
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                     <ui:Button x:Name="StackModeButton"
                                Focusable="False"
+                               Appearance="Transparent"
                                Padding="6,2"
                                Margin="0,0,6,0"
                                CornerRadius="6"
@@ -55,10 +56,12 @@
                                Click="OnStackModeClicked">
                         <ui:Button.Style>
                             <Style TargetType="ui:Button" BasedOn="{StaticResource {x:Type ui:Button}}">
-                                <Setter Property="Appearance" Value="Transparent" />
+                                <Setter Property="BorderThickness" Value="1" />
+                                <Setter Property="BorderBrush" Value="Transparent" />
                                 <Style.Triggers>
                                     <DataTrigger Binding="{Binding IsStackActive}" Value="True">
-                                        <Setter Property="Appearance" Value="Primary" />
+                                        <Setter Property="BorderBrush" Value="{DynamicResource Theme.Accent}" />
+                                        <Setter Property="Background" Value="{DynamicResource Theme.Badge}" />
                                     </DataTrigger>
                                 </Style.Triggers>
                             </Style>
@@ -68,10 +71,10 @@
                                            FontSize="15">
                                 <ui:SymbolIcon.Style>
                                     <Style TargetType="ui:SymbolIcon">
-                                        <Setter Property="Foreground" Value="{DynamicResource Theme.Accent}" />
+                                        <Setter Property="Foreground" Value="{DynamicResource Theme.TextSecondary}" />
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding IsStackActive}" Value="True">
-                                                <Setter Property="Foreground" Value="#FFFFFF" />
+                                                <Setter Property="Foreground" Value="{DynamicResource Theme.Accent}" />
                                             </DataTrigger>
                                         </Style.Triggers>
                                     </Style>
@@ -83,10 +86,11 @@
                                        VerticalAlignment="Center">
                                 <TextBlock.Style>
                                     <Style TargetType="TextBlock">
-                                        <Setter Property="Foreground" Value="{DynamicResource Theme.Text}" />
+                                        <Setter Property="Foreground" Value="{DynamicResource Theme.TextSecondary}" />
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding IsStackActive}" Value="True">
-                                                <Setter Property="Foreground" Value="#FFFFFF" />
+                                                <Setter Property="Foreground" Value="{DynamicResource Theme.Accent}" />
+                                                <Setter Property="FontWeight" Value="SemiBold" />
                                             </DataTrigger>
                                         </Style.Triggers>
                                     </Style>

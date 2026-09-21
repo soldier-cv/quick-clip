@@ -5,15 +5,12 @@
         Title="QuickClip Toast"
         WindowStyle="None"
         AllowsTransparency="True"
-        Background="Transparent"
+        Background="{x:Null}"
         Topmost="True"
         ShowInTaskbar="False"
         ShowActivated="False"
         SizeToContent="WidthAndHeight"
-        WindowStartupLocation="Manual"
-        MouseEnter="OnMouseEnter"
-        MouseLeave="OnMouseLeave"
-        MouseLeftButtonDown="OnMouseLeftButtonDown">
+        WindowStartupLocation="Manual">
 
     <Grid Margin="12">
         <Border x:Name="RootCard"
@@ -24,6 +21,9 @@
                 Padding="16,12"
                 Width="460"
                 Cursor="Hand"
+                MouseEnter="OnMouseEnter"
+                MouseLeave="OnMouseLeave"
+                MouseLeftButtonDown="OnMouseLeftButtonDown"
                 RenderTransformOrigin="0.5,0.5">
             <Border.RenderTransform>
                 <TranslateTransform x:Name="CardTranslate" Y="10" />

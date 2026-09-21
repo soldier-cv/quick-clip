@@ -41,7 +41,7 @@
                        FontSize="11.5"
                        Foreground="{DynamicResource Theme.TextSecondary}"
                        TextWrapping="Wrap"
-                       Text="在此临时调整短语内容（保留占位符，应用时动态替换）。按 Ctrl+Enter 立即应用并粘贴。" />
+                       Text="在此临时调整短语内容（保留占位符，粘贴时动态替换）。" />
 
             <!-- 正文编辑区 -->
             <TextBox x:Name="ContentBox"
@@ -66,37 +66,40 @@
                 BorderBrush="{DynamicResource Theme.Border}"
                 BorderThickness="0,1,0,0"
                 Padding="20,12">
-            <Grid>
-                <TextBlock Text="Ctrl+Enter 快速粘贴"
-                           FontSize="11"
-                           Foreground="{DynamicResource Theme.TextMuted}"
-                           VerticalAlignment="Center"
-                           HorizontalAlignment="Left" />
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <ui:Button Appearance="Secondary"
+                           Content="取消"
+                           Width="68"
+                           Margin="0,0,8,0"
+                           Click="OnCancelClicked" />
 
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                    <ui:Button Appearance="Secondary"
-                               Content="取消"
-                               Width="72"
-                               Margin="0,0,8,0"
-                               Click="OnCancelClicked" />
+                <ui:Button Appearance="Secondary"
+                           Content="复制"
+                           Width="68"
+                           Margin="0,0,8,0"
+                           ToolTip="将修改后的内容复制到剪贴板，不自动粘贴"
+                           Click="OnCopyOnlyClicked" />
 
-                    <ui:Button Appearance="Secondary"
-                               Content="仅复制"
-                               Width="76"
-                               Margin="0,0,8,0"
-                               ToolTip="将临时修改后的内容复制到剪贴板，不自动粘贴"
-                               Click="OnCopyOnlyClicked" />
+                <ui:Button x:Name="SaveButton"
+                           Appearance="Secondary"
+                           Content="保存"
+                           Width="68"
+                           Margin="0,0,8,0"
+                           ToolTip="将修改后的内容保存回常用短语模板"
+                           Click="OnSaveClicked" />
 
-                    <ui:Button x:Name="ApplyPasteButton"
-                               Appearance="Primary"
-                               Content="应用并粘贴"
-                               Height="32"
-                               Padding="16,0"
-                               FontWeight="SemiBold"
-                               ToolTip="解析占位符并立即自动粘贴到目标页面 (Ctrl+Enter)"
-                               Click="OnApplyAndPasteClicked" />
-                </StackPanel>
-            </Grid>
+                <ui:Button x:Name="ApplyPasteButton"
+                           Appearance="Secondary"
+                           Content="粘贴"
+                           Width="68"
+                           Height="32"
+                           FontWeight="SemiBold"
+                           BorderBrush="{DynamicResource Theme.Accent}"
+                           BorderThickness="1"
+                           Foreground="{DynamicResource Theme.Accent}"
+                           ToolTip="解析占位符并立即自动粘贴到目标页面"
+                           Click="OnApplyAndPasteClicked" />
+            </StackPanel>
         </Border>
     </Grid>
 </ui:FluentWindow>

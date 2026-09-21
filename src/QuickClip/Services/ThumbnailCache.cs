@@ -15,6 +15,27 @@ public static class ThumbnailCache
     private static readonly LinkedList<string> Order = new();
     private static readonly Dictionary<string, (LinkedListNode<string> Node, BitmapImage Image)> Map = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// 尝试从 LRU 缓存中获取已解码的位图（仅纯内存查找，零 I/O、零阻塞）。
+    /// </summary>
+    public static bool TryGet(string path, int decodePixelWidth, out BitmapImage? image)
+    {
+        string key = $"{path}|{decodePixelWidth}";
+        lock (Gate)
+        {
+            if (Map.TryGetValue(key, out var hit))
+            {
+                Order.Remove(hit.Node);
+                Order.AddFirst(hit.Node);
+                image = hit.Image;
+                return true;
+            }
+        }
+
+        image = null;
+        return false;
+    }
+
     public static BitmapImage GetOrCreate(string path, int decodePixelWidth)
     {
         string key = $"{path}|{decodePixelWidth}";
@@ -28,7 +49,6 @@ public static class ThumbnailCache
             }
         }
 
-        ClipboardImageNormalizer.RepairFileIfFullyTransparent(path);
         var bitmap = Decode(path, decodePixelWidth);
 
         lock (Gate)

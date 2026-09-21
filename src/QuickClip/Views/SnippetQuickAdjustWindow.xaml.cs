@@ -20,6 +20,7 @@ public partial class SnippetQuickAdjustWindow : FluentWindow
 
     public event Action<string, SnippetItem?>? ApplyAndPasteRequested;
     public event Action<string, SnippetItem?>? CopyOnlyRequested;
+    public event Action<string, SnippetItem?>? SaveRequested;
 
     public SnippetItem? CurrentSnippet => _currentSnippet;
 
@@ -68,9 +69,20 @@ public partial class SnippetQuickAdjustWindow : FluentWindow
         Close();
     }
 
+    private void OnSaveClicked(object sender, RoutedEventArgs e)
+    {
+        Save();
+    }
+
     private void OnCancelClicked(object sender, RoutedEventArgs e)
     {
         Close();
+    }
+
+    private void Save()
+    {
+        string text = ContentBox.Text;
+        SaveRequested?.Invoke(text, _currentSnippet);
     }
 
     private void ApplyAndPaste()
@@ -82,10 +94,10 @@ public partial class SnippetQuickAdjustWindow : FluentWindow
 
     private void OnContentBoxPreviewKeyDown(object sender, KeyEventArgs e)
     {
-        if (e.Key == Key.Enter && (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control)
+        if (e.Key == Key.S && (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control)
         {
-            // Ctrl+Enter 快速应用并粘贴
-            ApplyAndPaste();
+            // Ctrl+S 保存短语
+            Save();
             e.Handled = true;
         }
         // 普通 Enter 及 Shift+Enter 均不拦截，保留 TextBox 自然换行行为
@@ -96,6 +108,12 @@ public partial class SnippetQuickAdjustWindow : FluentWindow
         if (e.Key == Key.Escape)
         {
             Close();
+            e.Handled = true;
+        }
+        else if (e.Key == Key.S && (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control)
+        {
+            // 窗体级别兜底 Ctrl+S
+            Save();
             e.Handled = true;
         }
     }

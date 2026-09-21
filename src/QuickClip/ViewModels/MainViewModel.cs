@@ -14,8 +14,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private readonly AppServices _services;
     private CancellationTokenSource? _searchDebounce;
 
-    /// <summary>当前展示的卡片列表。</summary>
-    public ObservableCollection<ClipboardItemViewModel> Items { get; } = new();
+    /// <summary>当前展示的卡片列表（支持批量更新）。</summary>
+    public ObservableRangeCollection<ClipboardItemViewModel> Items { get; } = new();
 
     private string _searchText = string.Empty;
     public string SearchText
@@ -277,22 +277,38 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
         await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
         {
-            Items.Clear();
+            var existingMap = new Dictionary<long, ClipboardItemViewModel>();
+            foreach (var existing in Items)
+            {
+                existingMap[existing.Item.Id] = existing;
+            }
+
+            var newItems = new List<ClipboardItemViewModel>(filtered.Count);
             ClipboardItemViewModel? reselect = null;
+
             for (int i = 0; i < filtered.Count; i++)
             {
-                var vm = new ClipboardItemViewModel(filtered[i]) { Index = i + 1 };
-                if (_ocrBusyIds.Contains(filtered[i].Id))
+                var item = filtered[i];
+                if (!existingMap.TryGetValue(item.Id, out var vm))
                 {
-                    vm.IsOcrBusy = true;
+                    vm = new ClipboardItemViewModel(item);
+                }
+                else
+                {
+                    vm.Update(item);
                 }
 
-                Items.Add(vm);
-                if (selectedId is long id && filtered[i].Id == id)
+                vm.Index = i + 1;
+                vm.IsOcrBusy = _ocrBusyIds.Contains(item.Id);
+
+                newItems.Add(vm);
+                if (selectedId is long id && item.Id == id)
                 {
                     reselect = vm;
                 }
             }
+
+            Items.ReplaceAll(newItems);
 
             // 默认选中第 1 条（最近一条），便于 Enter 即贴
             SelectedItem = reselect ?? (Items.Count > 0 ? Items[0] : null);
@@ -757,7 +773,6 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         if (snippet == null) return Task.CompletedTask;
 
         string text = ResolveSnippetText(snippet);
-        _services.Paste.RememberTargetWindow();
         _services.Paste.PasteText(text, plainOnly);
         return Task.CompletedTask;
     }

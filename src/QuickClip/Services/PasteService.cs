@@ -115,49 +115,89 @@ public sealed class PasteService
         _ = CopyFilesAsync(files);
 
     /// <summary>
-    /// 等待目标窗口成为前台后再发送 Ctrl+V；固定 35ms 缓冲在重型聊天软件下偶发不足，轮询兜底。
-    /// 目标窗口最终仍未成为前台或属于自身进程时**不再盲发** Ctrl+V（否则会粘到自身或其他窗口），返回 false。
+    /// 由 UI 线程主动将前台焦点转交给目标窗口（尤其在置顶且面板保持打开时）。
+    /// 当前台窗口属主线程主动转交时，Windows 前台锁无条件放行。
+    /// </summary>
+    public void ActivateTargetWindow()
+    {
+        IntPtr target = _lastTargetWindow;
+        if (target != IntPtr.Zero && NativeMethods.IsWindow(target))
+        {
+            NativeMethods.GetWindowThreadProcessId(target, out uint pid);
+            if (pid != (uint)Environment.ProcessId)
+            {
+                NativeMethods.ForceForeground(target);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 等待目标窗口成为前台后再发送 Ctrl+V。
+    /// 支持同进程多 HWND 容错（如浏览器、现代聊天软件），置顶模式下协同 UI 线程焦点切换。
     /// </summary>
     private bool SimulatePaste()
     {
         IntPtr target = _lastTargetWindow;
+        // 若未记录到有效目标，尝试读取当前系统前台窗口（排除自身进程）
         if (target == IntPtr.Zero || !NativeMethods.IsWindow(target))
         {
-            DebugLog.Log("粘贴取消：未记录有效的外部目标窗口");
-            return false;
+            IntPtr fg = NativeMethods.GetForegroundWindow();
+            if (fg != IntPtr.Zero && NativeMethods.IsWindow(fg))
+            {
+                NativeMethods.GetWindowThreadProcessId(fg, out uint fgPid);
+                if (fgPid != (uint)Environment.ProcessId)
+                {
+                    target = fg;
+                    _lastTargetWindow = fg;
+                }
+            }
         }
 
-        NativeMethods.GetWindowThreadProcessId(target, out uint pid);
-        if (pid == (uint)Environment.ProcessId)
+        if (target != IntPtr.Zero && NativeMethods.IsWindow(target))
         {
-            DebugLog.Log($"粘贴取消：目标窗口 {target} 属于自身进程");
-            return false;
+            NativeMethods.GetWindowThreadProcessId(target, out uint targetPid);
+            if (targetPid != (uint)Environment.ProcessId)
+            {
+                // 使用 ForceForeground 激活目标窗口
+                NativeMethods.ForceForeground(target);
+
+                // 轮询等待确认前台窗口切换到位
+                var deadline = DateTime.UtcNow + TimeSpan.FromMilliseconds(300);
+                while (DateTime.UtcNow < deadline)
+                {
+                    IntPtr fg = NativeMethods.GetForegroundWindow();
+                    if (fg == target)
+                    {
+                        break;
+                    }
+
+                    if (fg != IntPtr.Zero && NativeMethods.IsWindow(fg))
+                    {
+                        NativeMethods.GetWindowThreadProcessId(fg, out uint currentPid);
+                        if (currentPid == targetPid && currentPid != (uint)Environment.ProcessId)
+                        {
+                            break;
+                        }
+                    }
+
+                    System.Threading.Thread.Sleep(15);
+                }
+            }
         }
 
-        // 使用 ForceForeground 穿透前台锁（尤其在置顶且面板不隐藏时）
-        NativeMethods.ForceForeground(target);
+        // 留出 35ms 缓冲确保目标窗口获得键盘焦点并响应 WM_SETFOCUS
+        System.Threading.Thread.Sleep(35);
 
-        // 前台切换通常瞬时完成（若 QuickClip 已隐藏则立即可达；若置顶则通过 ForceForeground 激活）；
-        // 轮询等待确认前台窗口切换到位，避免 Ctrl+V 落到错误窗口。
-        var deadline = DateTime.UtcNow + TimeSpan.FromMilliseconds(600);
-        while (DateTime.UtcNow < deadline)
+        // 确保物理鼠标左键未处于按下状态（避免在鼠标按下状态下发按键导致目标窗口误判为拖拽或选区）
+        var mouseDeadline = DateTime.UtcNow + TimeSpan.FromMilliseconds(150);
+        while (DateTime.UtcNow < mouseDeadline)
         {
-            if (NativeMethods.GetForegroundWindow() == target)
+            if (!NativeMethods.IsKeyDown(NativeMethods.VK_LBUTTON))
             {
                 break;
             }
-
-            System.Threading.Thread.Sleep(20);
+            System.Threading.Thread.Sleep(10);
         }
-
-        if (NativeMethods.GetForegroundWindow() != target)
-        {
-            DebugLog.Log($"粘贴取消：目标窗口 {target} 未成为前台");
-            return false;
-        }
-
-        // 留出 25ms 缓冲确保目标窗口获得键盘焦点并响应 WM_SETFOCUS
-        System.Threading.Thread.Sleep(25);
 
         NativeMethods.SendCtrlV();
         return true;

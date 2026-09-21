@@ -15,6 +15,7 @@ internal static class NativeMethods
     public const int WM_CLIPBOARDUPDATE = 0x031D;
     public const uint WM_HOTKEY = 0x0312;
 
+    public const int VK_LBUTTON = 0x01;
     public const int VK_V = 0x56;
     public const int VK_SHIFT = 0x10;
     public const int VK_LWIN = 0x5B;
@@ -45,10 +46,12 @@ internal static class NativeMethods
     public static readonly IntPtr HWND_NOTOPMOST = new(-2);
 
     /// <summary>SetWindowPos 标志：不移动、不改变大小、不激活、显示窗口。</summary>
-    public const uint SWP_NOMOVE = 0x0002;
     public const uint SWP_NOSIZE = 0x0001;
+    public const uint SWP_NOMOVE = 0x0002;
     public const uint SWP_NOACTIVATE = 0x0010;
     public const uint SWP_SHOWWINDOW = 0x0040;
+    public const uint SWP_NOOWNERZORDER = 0x0200;
+    public const uint SWP_NOSENDCHANGING = 0x0400;
 
     /// <summary>小图标推荐宽度（托盘图标槽，含 DPI）。</summary>
     public const int SM_CXSMICON = 49;
@@ -324,6 +327,11 @@ internal static class NativeMethods
 
         return ok || GetForegroundWindow() == hwnd;
     }
+
+    public const uint GW_HWNDNEXT = 2;
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
 
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

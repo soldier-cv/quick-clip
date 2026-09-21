@@ -12,7 +12,7 @@ namespace QuickClip.ViewModels;
 /// <summary>剪贴板条目的卡片展示模型。</summary>
 public sealed class ClipboardItemViewModel : INotifyPropertyChanged
 {
-    public ClipboardItem Item { get; }
+    public ClipboardItem Item { get; private set; }
 
     private int _index;
 
@@ -157,12 +157,66 @@ public sealed class ClipboardItemViewModel : INotifyPropertyChanged
         _ => SymbolRegular.Document24
     };
 
+    private volatile bool _thumbnailLoading;
+
     /// <summary>
-    /// 图片缩略图：每次取用都走 ThumbnailCache（LRU）。
-    /// 不能用 Lazy 缓存结果——Lazy 会永久持有解码后的 BitmapImage，
-    /// 使缓存淘汰失效，233 条历史的缩略图会一直留在内存里。
+    /// 图片缩略图：非阻塞异步加载。
+    /// 优先从内存 LRU 缓存获取；未命中时立即返回 null，后台线程池解码并 Freeze 后通过 Dispatcher 刷新，
+    /// 既保证 LRU 淘汰机制不失效（不产生长久强引用持有），又杜绝 UI 线程滚动卡顿。
     /// </summary>
-    public BitmapImage? Thumbnail => LoadThumbnail(240);
+    public BitmapImage? Thumbnail
+    {
+        get
+        {
+            if (!IsImage)
+            {
+                return null;
+            }
+
+            string? path = Item.PreviewPath;
+            if (string.IsNullOrEmpty(path) || !File.Exists(path))
+            {
+                return null;
+            }
+
+            if (ThumbnailCache.TryGet(path, 240, out var cached))
+            {
+                return cached;
+            }
+
+            if (!_thumbnailLoading)
+            {
+                _thumbnailLoading = true;
+                _ = Task.Run(() =>
+                {
+                    try
+                    {
+                        var img = ThumbnailCache.GetOrCreate(path, 240);
+                        var dispatcher = System.Windows.Application.Current?.Dispatcher;
+                        if (dispatcher != null && !dispatcher.HasShutdownStarted)
+                        {
+                            dispatcher.BeginInvoke(() =>
+                            {
+                                _thumbnailLoading = false;
+                                OnPropertyChanged(nameof(Thumbnail));
+                            });
+                        }
+                        else
+                        {
+                            _thumbnailLoading = false;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _thumbnailLoading = false;
+                        DebugLog.LogException("异步加载缩略图异常", ex);
+                    }
+                });
+            }
+
+            return null;
+        }
+    }
 
     /// <summary>悬浮预览大图（仅在打开 ToolTip 时才解码）。</summary>
     public BitmapImage? HoverThumbnail => LoadThumbnail(720);
@@ -184,6 +238,28 @@ public sealed class ClipboardItemViewModel : INotifyPropertyChanged
         }
 
         return ThumbnailCache.GetOrCreate(path, decodePixelWidth);
+    }
+
+    /// <summary>更新底层条目数据并触发必要绑定的属性通知，用于列表刷新时复用 ViewModel。</summary>
+    public void Update(ClipboardItem item)
+    {
+        bool pinnedChanged = Item.IsPinned != item.IsPinned;
+        bool qrChanged = Item.QrContent != item.QrContent;
+        Item = item;
+
+        if (pinnedChanged)
+        {
+            OnPropertyChanged(nameof(IsPinned));
+        }
+
+        if (qrChanged)
+        {
+            OnPropertyChanged(nameof(HasQr));
+            OnPropertyChanged(nameof(QrText));
+            OnPropertyChanged(nameof(ShowQrAction));
+            OnPropertyChanged(nameof(QrActionIcon));
+            OnPropertyChanged(nameof(QrActionToolTip));
+        }
     }
 
     public ClipboardItemViewModel(ClipboardItem item)

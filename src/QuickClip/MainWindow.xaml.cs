@@ -39,6 +39,11 @@ public partial class MainWindow : FluentWindow
     /// <summary>刚唤起主窗口的时间戳（TickCount64），在短时间内忽略 Toggle 隐藏，避免用户因等待冷启动快速连按而刚弹出又被关掉。</summary>
     private long _suppressToggleHideUntilTicks;
 
+    /// <summary>搜索框是否正处于输入法（IME）拼音/候选词选词组合状态。</summary>
+    private bool _isImeComposing;
+    /// <summary>上次 IME 组合结束的时间戳（TickCount64），用于短暂过滤选词上屏的回车。</summary>
+    private long _lastImeCompositionEndTicks;
+
     /// <summary>视图模型（设置窗口切换数据库后需要刷新列表）。</summary>
     public MainViewModel ViewModel => _viewModel;
 
@@ -82,6 +87,16 @@ public partial class MainWindow : FluentWindow
         _services.Paste.PasteFailed += OnPasteFailed;
 
         PositionWindow();
+
+        // 监听搜索框输入法组合状态，防止拼音输入中敲回车误触发粘贴
+        TextCompositionManager.AddPreviewTextInputStartHandler(SearchBox, (_, _) => _isImeComposing = true);
+        TextCompositionManager.AddPreviewTextInputUpdateHandler(SearchBox, (_, _) => _isImeComposing = true);
+        TextCompositionManager.AddPreviewTextInputHandler(SearchBox, (_, _) =>
+        {
+            _isImeComposing = false;
+            _lastImeCompositionEndTicks = Environment.TickCount64;
+        });
+        SearchBox.LostKeyboardFocus += (_, _) => _isImeComposing = false;
 
         // 预览浮层：离开条目/浮层 280ms 后自动关闭
         _previewCloseTimer.Tick += (_, _) =>
@@ -142,9 +157,31 @@ public partial class MainWindow : FluentWindow
         if (msg == QuickClip.Native.NativeMethods.WM_ACTIVATE)
         {
             int wa = (int)(wParam.ToInt64() & 0xFFFF);
-            if (wa != QuickClip.Native.NativeMethods.WA_INACTIVE && lParam != IntPtr.Zero)
+            if (wa != QuickClip.Native.NativeMethods.WA_INACTIVE)
             {
-                _services.Paste.RememberTargetWindow(lParam);
+                if (lParam != IntPtr.Zero)
+                {
+                    _services.Paste.RememberTargetWindow(lParam);
+                }
+                else
+                {
+                    // 置顶模式下用户从外部窗口点击激活面板时，lParam 经常为 0；
+                    // 顺着 Z-Order 查找紧随其后的第一个外部顶层可见窗口（如 Notepad++）
+                    IntPtr next = QuickClip.Native.NativeMethods.GetWindow(hwnd, QuickClip.Native.NativeMethods.GW_HWNDNEXT);
+                    while (next != IntPtr.Zero)
+                    {
+                        if (QuickClip.Native.NativeMethods.IsWindowVisible(next))
+                        {
+                            QuickClip.Native.NativeMethods.GetWindowThreadProcessId(next, out uint pid);
+                            if (pid != (uint)Environment.ProcessId && pid != 0)
+                            {
+                                _services.Paste.RememberTargetWindow(next);
+                                break;
+                            }
+                        }
+                        next = QuickClip.Native.NativeMethods.GetWindow(next, QuickClip.Native.NativeMethods.GW_HWNDNEXT);
+                    }
+                }
             }
         }
 
@@ -494,6 +531,14 @@ public partial class MainWindow : FluentWindow
             return;
         }
 
+        // 如果用户未开启置顶，且当前面板仍处于前台活跃状态（用户正在打字或浏览），
+        // 绝不要强行下发 HWND_NOTOPMOST 导致 DWM 强制重绘窗口阴影/边框闪烁；
+        // 只要用户点到外部，OnWindowDeactivated 自然会安全收起面板。
+        if (!_services.Settings.WindowAlwaysOnTop && IsActive)
+        {
+            return;
+        }
+
         var handle = new System.Windows.Interop.WindowInteropHelper(this).Handle;
         if (handle != IntPtr.Zero)
         {
@@ -511,7 +556,9 @@ public partial class MainWindow : FluentWindow
             0, 0, 0, 0,
             QuickClip.Native.NativeMethods.SWP_NOMOVE |
             QuickClip.Native.NativeMethods.SWP_NOSIZE |
-            QuickClip.Native.NativeMethods.SWP_NOACTIVATE);
+            QuickClip.Native.NativeMethods.SWP_NOACTIVATE |
+            QuickClip.Native.NativeMethods.SWP_NOOWNERZORDER |
+            QuickClip.Native.NativeMethods.SWP_NOSENDCHANGING);
     }
 
     private void HideWindow()
@@ -613,6 +660,11 @@ public partial class MainWindow : FluentWindow
     private void OnWindowKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
         Key key = e.Key == Key.System ? e.SystemKey : e.Key;
+        if (key == Key.ImeProcessed)
+        {
+            key = e.ImeProcessedKey;
+        }
+
         key = Models.HotkeyBinding.NormalizeKey(key);
         var modifiers = Keyboard.Modifiers &
                         (ModifierKeys.Control | ModifierKeys.Alt | ModifierKeys.Shift | ModifierKeys.Windows);
@@ -645,6 +697,12 @@ public partial class MainWindow : FluentWindow
 
         if (settings.PasteSelectedPlainHotkey.Matches(key, modifiers))
         {
+            // 搜索框打字中：若正处于输入法选词状态或刚结束选词（180ms 内），Enter 属于输入法上屏，不触发粘贴
+            if (typing && (_isImeComposing || (Environment.TickCount64 - _lastImeCompositionEndTicks < 180)))
+            {
+                return;
+            }
+
             // 长按不重复粘贴
             if (!e.IsRepeat)
             {
@@ -657,6 +715,12 @@ public partial class MainWindow : FluentWindow
 
         if (settings.PasteSelectedHotkey.Matches(key, modifiers))
         {
+            // 搜索框打字中：若正处于输入法选词状态或刚结束选词（180ms 内），Enter 属于输入法上屏，不触发粘贴
+            if (typing && (_isImeComposing || (Environment.TickCount64 - _lastImeCompositionEndTicks < 180)))
+            {
+                return;
+            }
+
             if (!e.IsRepeat)
             {
                 PasteSelected(plainOnly: false);
@@ -752,7 +816,18 @@ public partial class MainWindow : FluentWindow
     /// </summary>
     private void SearchBox_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
+        // 输入法选词过程中方向键用于候选词导航，绝不能被列表拦截
+        if (_isImeComposing)
+        {
+            return;
+        }
+
         Key key = e.Key == Key.System ? e.SystemKey : e.Key;
+        if (key == Key.ImeProcessed)
+        {
+            key = e.ImeProcessedKey;
+        }
+
         key = Models.HotkeyBinding.NormalizeKey(key);
         var modifiers = Keyboard.Modifiers &
                         (ModifierKeys.Control | ModifierKeys.Alt | ModifierKeys.Shift | ModifierKeys.Windows);
@@ -801,6 +876,14 @@ public partial class MainWindow : FluentWindow
         if (!pinned && !continuous)
         {
             HideWindow();
+        }
+        else
+        {
+            // 置顶/连续粘贴模式下面板保持打开：
+            // UI 线程必须在派发异步粘贴前，主动将前台焦点切给目标窗口，
+            // 使得当前前台进程的主线程把焦点转交，Windows 前台锁无条件放行！
+            Keyboard.ClearFocus();
+            _services.Paste.ActivateTargetWindow();
         }
 
         if (_viewModel.IsSnippetsTabActive)
@@ -958,8 +1041,7 @@ public partial class MainWindow : FluentWindow
         bool alreadyOpen = PreviewPopup.IsOpen;
         if (!alreadyOpen)
         {
-            PreviewPopup.HorizontalOffset = 0;
-            PreviewPopup.VerticalOffset = 0;
+            RepositionPreview();
             PreviewPopup.Opened -= OnPreviewOpened;
             PreviewPopup.Opened += OnPreviewOpened;
             PreviewPopup.IsOpen = true;
@@ -1256,6 +1338,8 @@ public partial class MainWindow : FluentWindow
     /// <summary>双击：粘贴选中项（等效 Enter）；不经过单击复制。</summary>
     private void OnItemListDoubleClick(object sender, MouseButtonEventArgs e)
     {
+        e.Handled = true;
+
         if (e.OriginalSource is not DependencyObject source)
         {
             return;
@@ -1269,8 +1353,53 @@ public partial class MainWindow : FluentWindow
         if (GetCardViewModel(source) is { } vm)
         {
             _viewModel.SelectedItem = vm;
-            PasteSelected(false);
+            ExecuteMousePaste(() => PasteSelected(false));
         }
+    }
+
+    /// <summary>
+    /// 执行鼠标双击粘贴：
+    /// 捕获鼠标并等待物理鼠标左键完全释放后再收起面板与粘贴，
+    /// 彻底防止双击的 WM_LBUTTONUP 或连击穿透到下层第三方窗口（如浏览器链接、Tab 或输入框）。
+    /// </summary>
+    private void ExecuteMousePaste(Action pasteAction)
+    {
+        // 捕获鼠标，确保随后的 MouseUp 依然派发给当前窗口，绝不外漏
+        Mouse.Capture(this, CaptureMode.SubTree);
+
+        _ = Task.Run(async () =>
+        {
+            // 等待物理鼠标左键完全释放（最多等待 300ms）
+            var deadline = DateTime.UtcNow + TimeSpan.FromMilliseconds(300);
+            while (DateTime.UtcNow < deadline)
+            {
+                if (!QuickClip.Native.NativeMethods.IsKeyDown(QuickClip.Native.NativeMethods.VK_LBUTTON))
+                {
+                    break;
+                }
+                await Task.Delay(10).ConfigureAwait(false);
+            }
+
+            // 再留出 35ms 缓冲，确保系统消息队列彻底排空该次双击的所有残留事件
+            await Task.Delay(35).ConfigureAwait(false);
+
+            await Dispatcher.InvokeAsync(() =>
+            {
+                try
+                {
+                    if (Mouse.Captured == this)
+                    {
+                        Mouse.Capture(null);
+                    }
+
+                    pasteAction();
+                }
+                catch (Exception ex)
+                {
+                    DebugLog.LogException("鼠标双击粘贴执行异常", ex);
+                }
+            });
+        });
     }
 
     private static T? FindAncestor<T>(DependencyObject? current) where T : DependencyObject
@@ -1350,11 +1479,15 @@ public partial class MainWindow : FluentWindow
 
         if (!PreviewPopup.IsOpen)
         {
-            PreviewPopup.HorizontalOffset = 0;
-            PreviewPopup.VerticalOffset = 0;
+            RepositionPreview();
             PreviewPopup.Opened -= OnPreviewOpened;
             PreviewPopup.Opened += OnPreviewOpened;
             PreviewPopup.IsOpen = true;
+        }
+        else
+        {
+            RepositionPreview();
+            _ = Dispatcher.BeginInvoke(RepositionPreview, DispatcherPriority.Loaded);
         }
 
         string? content = ResolveQrContent(vm);
@@ -1498,7 +1631,7 @@ public partial class MainWindow : FluentWindow
         if (e.ClickCount == 2)
         {
             e.Handled = true;
-            PastePreviewQrContent();
+            ExecuteMousePaste(PastePreviewQrContent);
         }
     }
 
@@ -2273,8 +2406,12 @@ public partial class MainWindow : FluentWindow
             {
                 HideWindow();
             }
+            else
+            {
+                Keyboard.ClearFocus();
+                _services.Paste.ActivateTargetWindow();
+            }
 
-            _services.Paste.RememberTargetWindow();
             _services.Paste.PasteText(finalText, plainOnly: false);
 
             if (pinned)
@@ -2310,6 +2447,24 @@ public partial class MainWindow : FluentWindow
             catch (Exception ex)
             {
                 DebugLog.LogException("复制微调短语失败", ex);
+            }
+        };
+
+        adjustWin.SaveRequested += async (rawText, snip) =>
+        {
+            if (snip == null) return;
+            try
+            {
+                snip.Content = rawText;
+                await _viewModel.UpdateSnippetAsync(snip);
+                string title = string.IsNullOrWhiteSpace(snip.Title) ? "常用短语" : snip.Title;
+                _services.Toast.Show("短语已更新", $"已成功保存短语「{title}」", Wpf.Ui.Controls.SymbolRegular.Save24);
+                _viewModel.StatusText = $"已保存短语「{title}」";
+            }
+            catch (Exception ex)
+            {
+                DebugLog.LogException("保存微调短语失败", ex);
+                _services.Toast.Show("保存失败", ex.Message, Wpf.Ui.Controls.SymbolRegular.ErrorCircle24);
             }
         };
 
@@ -2398,6 +2553,8 @@ public partial class MainWindow : FluentWindow
 
     private void OnSnippetListDoubleClick(object sender, MouseButtonEventArgs e)
     {
+        e.Handled = true;
+
         // 双击到「粘贴/复制/编辑/删除」按钮上时，交给按钮的 Click，避免误触发粘贴
         if (e.OriginalSource is DependencyObject source &&
             FindAncestor<System.Windows.Controls.Button>(source) != null)
@@ -2407,13 +2564,16 @@ public partial class MainWindow : FluentWindow
 
         if (SnippetList.SelectedItem is Models.SnippetItem snippet)
         {
-            bool pinned = _services.Settings.WindowAlwaysOnTop;
-            if (!pinned)
+            ExecuteMousePaste(() =>
             {
-                HideWindow();
-            }
+                bool pinned = _services.Settings.WindowAlwaysOnTop;
+                if (!pinned)
+                {
+                    HideWindow();
+                }
 
-            _ = _viewModel.PasteSnippetAsync(snippet, plainOnly: false);
+                _ = _viewModel.PasteSnippetAsync(snippet, plainOnly: false);
+            });
         }
     }
 

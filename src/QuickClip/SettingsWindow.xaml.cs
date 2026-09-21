@@ -1,6 +1,8 @@
+using System.ComponentModel;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
@@ -26,6 +28,8 @@ public partial class SettingsWindow : Window
     private bool _busy;
     private bool _suppressUiEvents;
     private bool _themeBoxReady;
+    private IReadOnlyList<string> _fontFamilies = Array.Empty<string>();
+    private bool _suppressFontFilter;
 
     /// <summary>主题下拉项（色块 + 名称）。</summary>
     private sealed class ThemeOption
@@ -41,6 +45,7 @@ public partial class SettingsWindow : Window
         _services = services;
 
         WindowChromeHelper.Apply(this, RootGrid);
+        FontFamilyBox.AddHandler(TextBox.TextChangedEvent, new TextChangedEventHandler(OnFontFamilyTextChanged), true);
         FillThemeBox();
 
         RefreshUi();
@@ -170,10 +175,10 @@ public partial class SettingsWindow : Window
             StartStackBox.Text = s.StartStackHotkey.ToString();
 
             SelectThemeInBox(s.Theme);
+            FillFontFamilyBox(s.UiFontFamily);
 
             AutoStartCheck.IsChecked = s.AutoStart;
             AutoCheckUpdatesCheck.IsChecked = s.AutoCheckUpdates;
-            ContinuousPasteCheck.IsChecked = s.ContinuousPasteMode;
             TextOnlyCheck.IsChecked = s.TextOnlyCapture;
             ChannelText.Text = "当前渠道：" + UpdateService.ChannelLabel;
             MaxHistoryBox.Text = s.MaxHistoryItems.ToString();
@@ -244,7 +249,7 @@ public partial class SettingsWindow : Window
 
         if (sysEnabled)
         {
-            SysClipboardStatusText.Text = "系统已开启 (可能冲突)";
+            SysClipboardStatusText.Text = "系统已开启（可能冲突）";
             if (FindResource("Theme.Pin") is MediaBrush pinBrush)
             {
                 SysClipboardStatusText.Foreground = pinBrush;
@@ -257,7 +262,7 @@ public partial class SettingsWindow : Window
         }
         else
         {
-            SysClipboardStatusText.Text = nativeRegistered ? "原生独占接管 (推荐)" : "系统历史已关闭";
+            SysClipboardStatusText.Text = nativeRegistered ? "原生独占接管（推荐）" : "系统历史已关闭";
             if (FindResource("Theme.Accent") is MediaBrush accentBrush)
             {
                 SysClipboardStatusText.Foreground = accentBrush;
@@ -479,21 +484,6 @@ public partial class SettingsWindow : Window
         }
     }
 
-    private void OnContinuousPasteToggled(object sender, RoutedEventArgs e)
-    {
-        if (_suppressUiEvents)
-        {
-            return;
-        }
-
-        if (ContinuousPasteCheck.IsChecked == _services.Settings.ContinuousPasteMode)
-        {
-            return;
-        }
-
-        _services.Settings.SetContinuousPasteMode(ContinuousPasteCheck.IsChecked == true);
-    }
-
     private void OnPendingUpdateChanged(PendingUpdate? _)
     {
         Dispatcher.BeginInvoke(RefreshUpdatePanel);
@@ -614,6 +604,226 @@ public partial class SettingsWindow : Window
         }
 
         ThemeBox.SelectedIndex = 0;
+    }
+
+    private void FillFontFamilyBox(string current)
+    {
+        if (_fontFamilies == null || FontFamilyBox.ItemsSource == null)
+        {
+            _fontFamilies = AppFontService.ListInstalledFamilies();
+            FontFamilyBox.ItemsSource = _fontFamilies;
+            FilterFontFamilies(string.Empty);
+        }
+
+        string selected = string.IsNullOrWhiteSpace(current)
+            ? AppFontService.DefaultDisplayName
+            : current;
+        if (!_fontFamilies.Contains(selected, StringComparer.OrdinalIgnoreCase))
+        {
+            selected = AppFontService.DefaultDisplayName;
+        }
+
+        if (!string.Equals(FontFamilyBox.SelectedItem as string, selected, StringComparison.OrdinalIgnoreCase))
+        {
+            _suppressUiEvents = true;
+            _suppressFontFilter = true;
+            try
+            {
+                FontFamilyBox.SelectedItem = selected;
+                FontFamilyBox.Text = selected;
+            }
+            finally
+            {
+                _suppressUiEvents = false;
+                _suppressFontFilter = false;
+            }
+        }
+    }
+
+    private void OnFontFamilyChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressUiEvents || _suppressFontFilter || !IsLoaded)
+        {
+            return;
+        }
+
+        if (FontFamilyBox.SelectedItem is not string name)
+        {
+            return;
+        }
+
+        _services.Settings.SetUiFontFamily(name);
+    }
+
+    private void OnFontFamilyTextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_suppressUiEvents || _suppressFontFilter || !IsLoaded)
+        {
+            return;
+        }
+
+        if (!FontFamilyBox.IsKeyboardFocusWithin)
+        {
+            return;
+        }
+
+        string query = FontFamilyBox.Text ?? string.Empty;
+        int caret = GetFontFamilyCaretIndex();
+        if (FontFamilyBox.SelectedItem is string selected &&
+            string.Equals(selected, query, StringComparison.OrdinalIgnoreCase))
+        {
+            FilterFontFamilies(string.Empty, caret);
+            return;
+        }
+
+        if (!FontFamilyBox.IsDropDownOpen)
+        {
+            FontFamilyBox.IsDropDownOpen = true;
+        }
+
+        FilterFontFamilies(query, caret);
+    }
+
+    private void OnFontFamilyDropDownClosed(object sender, EventArgs e)
+    {
+        if (_suppressUiEvents || !IsLoaded)
+        {
+            return;
+        }
+
+        CommitOrRevertFontFamilyText();
+    }
+
+    private void OnFontFamilyPreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter)
+        {
+            return;
+        }
+
+        string? name = FontFamilyBox.SelectedItem as string;
+        if (string.IsNullOrWhiteSpace(name) && FontFamilyBox.Items.Count > 0)
+        {
+            name = FontFamilyBox.Items[0] as string;
+        }
+
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return;
+        }
+
+        ApplyFontFamilySelection(name);
+        FontFamilyBox.IsDropDownOpen = false;
+        e.Handled = true;
+    }
+
+    private void OnFontFamilyLostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
+    {
+        if (_suppressUiEvents || !IsLoaded || FontFamilyBox.IsDropDownOpen)
+        {
+            return;
+        }
+
+        CommitOrRevertFontFamilyText();
+    }
+
+    private void CommitOrRevertFontFamilyText()
+    {
+        string typed = (FontFamilyBox.Text ?? string.Empty).Trim();
+        string? match = _fontFamilies.FirstOrDefault(n =>
+            string.Equals(n, typed, StringComparison.OrdinalIgnoreCase));
+        if (match != null)
+        {
+            ApplyFontFamilySelection(match);
+            return;
+        }
+
+        string current = string.IsNullOrWhiteSpace(_services.Settings.UiFontFamily)
+            ? AppFontService.DefaultDisplayName
+            : _services.Settings.UiFontFamily;
+        FilterFontFamilies(string.Empty);
+        FontFamilyBox.SelectedItem = current;
+        FontFamilyBox.Text = current;
+    }
+
+    private void ApplyFontFamilySelection(string name)
+    {
+        FilterFontFamilies(string.Empty);
+        FontFamilyBox.SelectedItem = name;
+        FontFamilyBox.Text = name;
+        if (!_suppressUiEvents && IsLoaded)
+        {
+            _services.Settings.SetUiFontFamily(name);
+        }
+    }
+
+    private void FilterFontFamilies(string query, int? caret = null)
+    {
+        if (FontFamilyBox.ItemsSource == null)
+        {
+            return;
+        }
+
+        _suppressFontFilter = true;
+        try
+        {
+            if (CollectionViewSource.GetDefaultView(FontFamilyBox.ItemsSource) is not ICollectionView view)
+            {
+                return;
+            }
+
+            string text = FontFamilyBox.Text ?? string.Empty;
+            int restoreCaret = caret ?? GetFontFamilyCaretIndex();
+            string q = query.Trim();
+            if (string.IsNullOrEmpty(q))
+            {
+                view.Filter = null;
+            }
+            else
+            {
+                view.Filter = obj => obj is string name && FontNameMatches(name, q);
+            }
+
+            view.Refresh();
+            FontFamilyBox.Text = text;
+            SetFontFamilyCaretIndex(restoreCaret);
+        }
+        finally
+        {
+            _suppressFontFilter = false;
+        }
+    }
+
+    private TextBox? GetFontFamilyEditBox()
+    {
+        return FontFamilyBox.Template?.FindName("PART_EditableTextBox", FontFamilyBox) as TextBox;
+    }
+
+    private int GetFontFamilyCaretIndex()
+    {
+        return GetFontFamilyEditBox()?.CaretIndex ?? (FontFamilyBox.Text?.Length ?? 0);
+    }
+
+    private void SetFontFamilyCaretIndex(int caret)
+    {
+        if (GetFontFamilyEditBox() is not TextBox box)
+        {
+            return;
+        }
+
+        int max = box.Text?.Length ?? 0;
+        box.CaretIndex = Math.Clamp(caret, 0, max);
+    }
+
+    private static bool FontNameMatches(string name, string query)
+    {
+        if (name.Contains(query, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        string initials = PinyinUtil.GetInitials(name);
+        return initials.Contains(query, StringComparison.OrdinalIgnoreCase);
     }
 
     private void OnTextOnlyToggled(object sender, RoutedEventArgs e)
@@ -1220,7 +1430,7 @@ public partial class SettingsWindow : Window
         {
             TranslationEngineHint.Text = engine switch
             {
-                TranslationEngineType.Google => "需代理环境 (由 Google 翻译提供)。",
+                TranslationEngineType.Google => "需代理环境（由 Google 翻译提供）。",
                 TranslationEngineType.Ai => "使用配置的 AI 大模型进行翻译与智能润色。",
                 _ => "由 微软翻译 提供。"
             };

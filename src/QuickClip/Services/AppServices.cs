@@ -55,12 +55,13 @@ public sealed class AppServices : IDisposable
         ClipboardGuard = new SystemClipboardGuard(Dispatcher.CurrentDispatcher);
         Update = new UpdateService();
         Sticky = new StickyService();
-        StackPaste = new StackPasteService(Paste, Toast, Settings);
+        StackPaste = new StackPasteService(Paste, Toast, Settings, Pipeline);
         Translation = new TranslationService(Settings);
 
-        // 收集栈模式下，新捕获的条目自动压入栈
+        // 收集栈模式下，新捕获的条目自动压入栈；任意新复制均解除出栈后的防重复粘贴守卫
         Pipeline.ItemAdded += item =>
         {
+            StackPaste.ResetPostStackSuppression();
             if (StackPaste.IsActive)
             {
                 StackPaste.Push(item);
@@ -71,10 +72,21 @@ public sealed class AppServices : IDisposable
         // 注意：焦点在 QuickClip 自身窗口时一律放行，避免劫持面板内的正常 Ctrl+V
         Hotkey.InterceptCtrlV = () =>
         {
-            if (!StackPaste.IsActive || StackPaste.Count == 0 || IsOwnProcessForeground())
+            if (IsOwnProcessForeground())
             {
                 return false;
             }
+
+            if (StackPaste.LastPasteInFlight || StackPaste.ShouldSuppressPostStackPaste)
+            {
+                return true;
+            }
+
+            if (!StackPaste.IsActive || StackPaste.Count == 0)
+            {
+                return false;
+            }
+
             return StackPaste.PopAndPaste();
         };
 
@@ -92,8 +104,8 @@ public sealed class AppServices : IDisposable
             }
         };
 
-        // 冷启动优先热键/监听；清理延后到 8 分钟，避免与首屏争抢
-        _cleanupTimer = new System.Threading.Timer(CleanupTick, null, TimeSpan.FromMinutes(8), TimeSpan.FromMinutes(60));
+        // 冷启动优先热键/监听；清理延后到 8 分钟首次执行，之后每 15 分钟轮询一次
+        _cleanupTimer = new System.Threading.Timer(CleanupTick, null, TimeSpan.FromMinutes(8), TimeSpan.FromMinutes(15));
     }
 
     /// <summary>当前前台窗口是否属于 QuickClip 自身进程。</summary>
@@ -235,6 +247,10 @@ public sealed class AppServices : IDisposable
             foreach (var (_, preview) in trimmed)
             {
                 ThumbnailCache.RemoveByPath(preview);
+                if (!string.IsNullOrEmpty(preview))
+                {
+                    try { File.Delete(preview); } catch { /* ignore */ }
+                }
             }
 
             await Database.CleanupOrphanPreviewsAsync(Paths);

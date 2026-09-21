@@ -107,8 +107,8 @@
                         <Button Tag="{}{time}" Style="{StaticResource PlaceholderBadgeButton}" Content="{}{time} 时间" ToolTip="当前时间&#x0a;示例：14:30:00" Click="OnPlaceholderBadgeClicked" />
                         <Button Tag="{}{datetime}" Style="{StaticResource PlaceholderBadgeButton}" Content="{}{datetime} 日期时间" ToolTip="完整日期时间&#x0a;示例：2026-09-20 14:30:00" Click="OnPlaceholderBadgeClicked" />
                         <Button Tag="{}{year}" Style="{StaticResource PlaceholderBadgeButton}" Content="{}{year} 年份" ToolTip="当前年份&#x0a;示例：2026" Click="OnPlaceholderBadgeClicked" />
-                        <Button Tag="{}{month}" Style="{StaticResource PlaceholderBadgeButton}" Content="{}{month} 月份" ToolTip="当前月份 (两位)&#x0a;示例：09" Click="OnPlaceholderBadgeClicked" />
-                        <Button Tag="{}{day}" Style="{StaticResource PlaceholderBadgeButton}" Content="{}{day} 日" ToolTip="当前日 (两位)&#x0a;示例：20" Click="OnPlaceholderBadgeClicked" />
+                        <Button Tag="{}{month}" Style="{StaticResource PlaceholderBadgeButton}" Content="{}{month} 月份" ToolTip="当前月份（两位）&#x0a;示例：09" Click="OnPlaceholderBadgeClicked" />
+                        <Button Tag="{}{day}" Style="{StaticResource PlaceholderBadgeButton}" Content="{}{day} 日" ToolTip="当前日（两位）&#x0a;示例：20" Click="OnPlaceholderBadgeClicked" />
                         <Button Tag="{}{weekday}" Style="{StaticResource PlaceholderBadgeButton}" Content="{}{weekday} 星期" ToolTip="中文星期几&#x0a;示例：星期日" Click="OnPlaceholderBadgeClicked" />
                         <Button Tag="{}{week}" Style="{StaticResource PlaceholderBadgeButton}" Content="{}{week} 周几" ToolTip="简写周几&#x0a;示例：周日" Click="OnPlaceholderBadgeClicked" />
                         <Button Tag="{}{timestamp}" Style="{StaticResource PlaceholderBadgeButton}" Content="{}{timestamp} 秒级时间戳" ToolTip="10位 Unix 秒级时间戳&#x0a;示例：1789892550" Click="OnPlaceholderBadgeClicked" />
@@ -120,7 +120,7 @@
                         <Button Tag="{}{device}" Style="{StaticResource PlaceholderBadgeButton}" Content="{}{device} 计算机名" ToolTip="当前计算机设备名&#x0a;示例：DESKTOP-PC" Click="OnPlaceholderBadgeClicked" />
 
                         <!-- 唯一标识与随机数类 -->
-                        <Button Tag="{}{guid}" Style="{StaticResource PlaceholderBadgeButton}" Content="{}{guid} 唯一ID" ToolTip="全新标准 GUID (含横杠)&#x0a;示例：c9a646d3-9c61-4cb7-bf86-64b55c1f0ff3" Click="OnPlaceholderBadgeClicked" />
+                        <Button Tag="{}{guid}" Style="{StaticResource PlaceholderBadgeButton}" Content="{}{guid} 唯一ID" ToolTip="全新标准 GUID（含横杠）&#x0a;示例：c9a646d3-9c61-4cb7-bf86-64b55c1f0ff3" Click="OnPlaceholderBadgeClicked" />
                         <Button Tag="{}{guid_n}" Style="{StaticResource PlaceholderBadgeButton}" Content="{}{guid_n} 32位ID" ToolTip="32位无横杠唯一ID&#x0a;示例：c9a646d39c614cb7bf8664b55c1f0ff3" Click="OnPlaceholderBadgeClicked" />
                         <Button Tag="{}{random4}" Style="{StaticResource PlaceholderBadgeButton}" Content="{}{random4} 4位随机数" ToolTip="4位随机数字&#x0a;示例：5821" Click="OnPlaceholderBadgeClicked" />
                         <Button Tag="{}{random6}" Style="{StaticResource PlaceholderBadgeButton}" Content="{}{random6} 6位随机数" ToolTip="6位随机数字&#x0a;示例：839201" Click="OnPlaceholderBadgeClicked" />

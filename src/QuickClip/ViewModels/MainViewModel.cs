@@ -177,9 +177,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     /// <summary>收集栈状态与文本。</summary>
     public bool IsStackActive => _services.StackPaste.IsActive;
     public int StackCount => _services.StackPaste.Count;
-    public string StackButtonText => IsStackActive ? $"收集栈 ({StackCount})" : "收集栈";
+    public string StackButtonText => IsStackActive ? $"收集栈（{StackCount}）" : "收集栈";
     public string StackButtonTooltip => IsStackActive
-        ? $"已开启收集栈 ({StackCount})，点击关闭"
+        ? $"已开启收集栈（{StackCount}），点击关闭"
         : "开启收集栈";
 
     /// <summary>二维码 PNG 就绪（窗口展示覆盖层）。</summary>

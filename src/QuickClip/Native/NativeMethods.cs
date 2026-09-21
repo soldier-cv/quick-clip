@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using QuickClip.Services;
 
 namespace QuickClip.Native;
 
@@ -284,6 +285,7 @@ internal static class NativeMethods
     public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
 
     public const int SW_SHOW = 5;
+    public const int SW_RESTORE = 9;
 
     [DllImport("user32.dll", EntryPoint = "ShowWindow")]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -306,21 +308,44 @@ internal static class NativeMethods
             return true;
         }
 
-        ShowWindowApi(hwnd, SW_SHOW);
-        BringWindowToTop(hwnd);
+        if (IsIconic(hwnd))
+        {
+            ShowWindowApi(hwnd, SW_RESTORE);
+        }
+        else
+        {
+            ShowWindowApi(hwnd, SW_SHOW);
+        }
 
+        BringWindowToTop(hwnd);
+        AllowSetForegroundWindow(ASFW_ANY);
+
+        uint targetThread = GetWindowThreadProcessId(hwnd, out _);
         uint fgThread = foreground == IntPtr.Zero
             ? 0
             : GetWindowThreadProcessId(foreground, out _);
         uint thisThread = GetCurrentThreadId();
-        bool attached = false;
+
+        bool attachedFg = false;
+        bool attachedTarget = false;
         if (fgThread != 0 && fgThread != thisThread)
         {
-            attached = AttachThreadInput(fgThread, thisThread, true);
+            attachedFg = AttachThreadInput(fgThread, thisThread, true);
+        }
+
+        if (targetThread != 0 && targetThread != thisThread && targetThread != fgThread)
+        {
+            attachedTarget = AttachThreadInput(targetThread, thisThread, true);
         }
 
         bool ok = SetForegroundWindow(hwnd);
-        if (attached)
+        BringWindowToTop(hwnd);
+        if (attachedTarget)
+        {
+            AttachThreadInput(targetThread, thisThread, false);
+        }
+
+        if (attachedFg)
         {
             AttachThreadInput(fgThread, thisThread, false);
         }
@@ -532,5 +557,78 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool IsIconic(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetAncestor(IntPtr hwnd, uint gaFlags);
+
+    public const uint GA_ROOT = 2;
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLong")]
+    private static extern int GetWindowLong32(IntPtr hWnd, int nIndex);
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtr")]
+    private static extern IntPtr GetWindowLongPtr64(IntPtr hWnd, int nIndex);
+
+    public static int GetWindowLong(IntPtr hWnd, int nIndex)
+    {
+        return IntPtr.Size == 8
+            ? unchecked((int)(long)GetWindowLongPtr64(hWnd, nIndex))
+            : GetWindowLong32(hWnd, nIndex);
+    }
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool AllowSetForegroundWindow(int dwProcessId);
+
+    public const int ASFW_ANY = -1;
+
+    public static string GetWindowClassName(IntPtr hwnd)
+    {
+        var sb = new System.Text.StringBuilder(256);
+        return GetClassName(hwnd, sb, sb.Capacity) > 0 ? sb.ToString() : string.Empty;
+    }
+
+    public static bool IsEligiblePasteTarget(IntPtr hwnd, uint ownProcessId)
+    {
+        if (hwnd == IntPtr.Zero || !IsWindow(hwnd))
+        {
+            return false;
+        }
+
+        GetWindowThreadProcessId(hwnd, out uint pid);
+        return PasteTargetFilter.IsEligibleTarget(
+            pid,
+            ownProcessId,
+            GetWindowClassName(hwnd),
+            GetWindowLong(hwnd, PasteTargetFilter.GWL_STYLE),
+            GetWindowLong(hwnd, PasteTargetFilter.GWL_EXSTYLE),
+            IsWindowVisible(hwnd),
+            IsIconic(hwnd));
+    }
+
+    /// <summary>
+    /// 从当前窗口沿 Z-order 向下找第一个可粘贴的外部顶层窗口。
+    /// 置顶面板激活时 lParam 常为 0，不能把任务栏/IME 当成目标。
+    /// </summary>
+    public static IntPtr FindNextPasteTarget(IntPtr fromHwnd, uint ownProcessId, int maxHops = 64)
+    {
+        IntPtr next = GetWindow(fromHwnd, GW_HWNDNEXT);
+        int hops = 0;
+        while (next != IntPtr.Zero && hops++ < maxHops)
+        {
+            if (IsEligiblePasteTarget(next, ownProcessId))
+            {
+                return next;
+            }
+
+            next = GetWindow(next, GW_HWNDNEXT);
+        }
+
+        return IntPtr.Zero;
+    }
 }
 

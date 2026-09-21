@@ -163,16 +163,7 @@ public sealed class ClipboardPipeline
                 TryDeletePreview(data.PreviewPath);
             }
 
-            var trimmed = await _db.TrimToMaxItemsAsync(_settings.MaxHistoryItems);
-            foreach (var (_, preview) in trimmed)
-            {
-                ThumbnailCache.RemoveByPath(preview);
-                if (!string.IsNullOrEmpty(preview))
-                {
-                    try { File.Delete(preview); } catch { /* ignore */ }
-                }
-            }
-
+            // 超条数清理交由后台定时轮询（每 15 分钟）与设置变更时统一处理，避免在复制热路径上执行额外 I/O
             ItemAdded?.Invoke(item);
         }
         catch (Exception ex)
@@ -183,6 +174,28 @@ public sealed class ClipboardPipeline
         {
             _captureGate.Release();
         }
+    }
+
+    /// <summary>将一条纯文本记入历史（收集栈拆分行）；不改系统剪贴板。</summary>
+    public async Task<ClipboardItem?> RecordTextAsync(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return null;
+        }
+
+        var item = new ClipboardItem
+        {
+            ContentType = ClipboardContentType.Text,
+            TextContent = text,
+            CharCount = text.Length,
+            CreatedAt = DateTime.Now
+        };
+
+        await _db.UpsertRecentAsync(item);
+        await _db.TrimToMaxItemsAsync(_settings.MaxHistoryItems);
+        ItemAdded?.Invoke(item);
+        return item;
     }
 
     private static void TryDeletePreview(string? path)

@@ -1,5 +1,6 @@
 using System.Drawing;
 using System.IO;
+using System.Windows.Threading;
 using QuickClip.Native;
 
 namespace QuickClip.Services;
@@ -21,6 +22,9 @@ public sealed class PasteService
 
     private IntPtr _lastTargetWindow = IntPtr.Zero;
 
+    /// <summary>创建时所在 UI 调度器：置顶粘贴必须在 UI 线程转交前台，后台 STA 线程会被前台锁拒绝。</summary>
+    private readonly Dispatcher? _uiDispatcher = Dispatcher.FromThread(Thread.CurrentThread);
+
     /// <summary>纯文本粘贴路径下、粘贴完成后需要还原的文件列表。</summary>
     private string[]? _filesToRestore;
 
@@ -30,49 +34,81 @@ public sealed class PasteService
     /// <summary>粘贴/复制失败原因（剪贴板被占用、目标窗口未激活、内容缺失等），供托盘气泡提示。</summary>
     public event Action<string>? PasteFailed;
 
-    /// <summary>记录唤起 QuickClip 之前的前台窗口，作为粘贴目标。自动过滤属于 QuickClip 进程自身的窗口。</summary>
+    /// <summary>记录唤起 QuickClip 之前的前台窗口，作为粘贴目标。自动过滤自身进程、任务栏、IME 等不可输入窗口。</summary>
     public void RememberTargetWindow(IntPtr candidate = default)
     {
-        IntPtr hwnd = candidate != IntPtr.Zero && NativeMethods.IsWindow(candidate)
-            ? candidate
-            : NativeMethods.GetForegroundWindow();
-
-        if (hwnd == IntPtr.Zero || !NativeMethods.IsWindow(hwnd))
+        uint ownPid = (uint)Environment.ProcessId;
+        IntPtr hwnd = candidate;
+        if (hwnd != IntPtr.Zero)
         {
-            return;
+            IntPtr root = NativeMethods.GetAncestor(hwnd, NativeMethods.GA_ROOT);
+            if (root != IntPtr.Zero)
+            {
+                hwnd = root;
+            }
+        }
+
+        if (!NativeMethods.IsEligiblePasteTarget(hwnd, ownPid))
+        {
+            if (HasValidTargetWindow())
+            {
+                return;
+            }
+
+            hwnd = NativeMethods.GetForegroundWindow();
+            if (!NativeMethods.IsEligiblePasteTarget(hwnd, ownPid))
+            {
+                return;
+            }
         }
 
         NativeMethods.GetWindowThreadProcessId(hwnd, out uint pid);
-        if (pid == (uint)Environment.ProcessId)
-        {
-            return;
-        }
-
         _lastTargetWindow = hwnd;
-        DebugLog.Log($"记录粘贴目标窗口: {hwnd}, pid={pid}");
+        DebugLog.Log($"记录粘贴目标窗口: {hwnd}, pid={pid}, class={NativeMethods.GetWindowClassName(hwnd)}");
+    }
+
+    /// <summary>当前已记录的粘贴目标是否仍有效。</summary>
+    public bool HasValidTargetWindow()
+    {
+        IntPtr target = _lastTargetWindow;
+        return NativeMethods.IsEligiblePasteTarget(target, (uint)Environment.ProcessId);
     }
 
     /// <summary>该序列号是否属于本服务最近一次成功写入（用于忽略自身回写）。</summary>
     public bool IsOwnSequence(uint sequence) =>
         sequence != 0 && (uint)Volatile.Read(ref _ownSequence) == sequence;
 
+    /// <summary>记录当前剪贴板序列号为自身写入（清空剪贴板后避免误入库一条空记录）。</summary>
+    public void MarkOwnSequence()
+    {
+        Volatile.Write(ref _ownSequence, (int)NativeClipboard.CurrentSequence);
+    }
+
     // ---------- 粘贴（后台回填剪贴板后模拟 Ctrl+V，异常仅记录日志） ----------
 
-    public void PasteText(string? text, bool plainOnly = false, string? html = null, string? rtf = null)
+    public void PasteText(string? text, bool plainOnly = false, string? html = null, string? rtf = null) =>
+        _ = PasteTextAsync(text, plainOnly, html, rtf, stayOnForeground: false);
+
+    public void PasteText(string? text, bool plainOnly, string? html, string? rtf, bool stayOnForeground) =>
+        _ = PasteTextAsync(text, plainOnly, html, rtf, stayOnForeground);
+
+    public Task PasteTextAsync(string? text, bool plainOnly, string? html, string? rtf, bool stayOnForeground)
     {
-        DebugLog.Log($"粘贴文本: plainOnly={plainOnly}, 长度={(text?.Length ?? 0)}, html={(html != null)}, rtf={(rtf != null)}");
-        _ = RunPasteAsync(() => CopyTextCore(text, plainOnly, html, rtf));
+        DebugLog.Log($"粘贴文本: plainOnly={plainOnly}, stayFg={stayOnForeground}, 长度={(text?.Length ?? 0)}, html={(html != null)}, rtf={(rtf != null)}");
+        return RunPasteAsync(() => CopyTextCore(text, plainOnly, html, rtf), stayOnForeground);
     }
 
-    public void PasteImage(string? previewPath)
-    {
-        _ = RunPasteAsync(() => CopyImageCore(previewPath));
-    }
+    public void PasteImage(string? previewPath, bool stayOnForeground = false) =>
+        _ = PasteImageAsync(previewPath, stayOnForeground);
 
-    public void PasteFiles(string[]? files)
-    {
-        _ = RunPasteAsync(() => CopyFilesCore(files));
-    }
+    public Task PasteImageAsync(string? previewPath, bool stayOnForeground = false) =>
+        RunPasteAsync(() => CopyImageCore(previewPath), stayOnForeground);
+
+    public void PasteFiles(string[]? files, bool stayOnForeground = false) =>
+        _ = PasteFilesAsync(files, stayOnForeground);
+
+    public Task PasteFilesAsync(string[]? files, bool stayOnForeground = false) =>
+        RunPasteAsync(() => CopyFilesCore(files), stayOnForeground);
 
     /// <summary>
     /// 将系统剪贴板中的内容以纯文本形式粘贴到前台窗口（全局 Ctrl+Shift+V）。
@@ -120,75 +156,74 @@ public sealed class PasteService
     /// </summary>
     public void ActivateTargetWindow()
     {
-        IntPtr target = _lastTargetWindow;
-        if (target != IntPtr.Zero && NativeMethods.IsWindow(target))
+        IntPtr target = ResolveTargetWindow();
+        if (target == IntPtr.Zero)
         {
-            NativeMethods.GetWindowThreadProcessId(target, out uint pid);
-            if (pid != (uint)Environment.ProcessId)
-            {
-                NativeMethods.ForceForeground(target);
-            }
+            return;
         }
+
+        ForceForegroundOnUi(target);
     }
 
     /// <summary>
     /// 等待目标窗口成为前台后再发送 Ctrl+V。
     /// 支持同进程多 HWND 容错（如浏览器、现代聊天软件），置顶模式下协同 UI 线程焦点切换。
     /// </summary>
-    private bool SimulatePaste()
+    private bool SimulatePaste(bool stayOnForeground)
     {
-        IntPtr target = _lastTargetWindow;
-        // 若未记录到有效目标，尝试读取当前系统前台窗口（排除自身进程）
-        if (target == IntPtr.Zero || !NativeMethods.IsWindow(target))
+        uint ownPid = (uint)Environment.ProcessId;
+        IntPtr currentFg = NativeMethods.GetForegroundWindow();
+        if (stayOnForeground && NativeMethods.IsEligiblePasteTarget(currentFg, ownPid))
+        {
+            NativeMethods.SendCtrlV();
+            return true;
+        }
+
+        IntPtr target = ResolveTargetWindow();
+        if (target == IntPtr.Zero)
+        {
+            DebugLog.Log("粘贴取消：没有有效的外部目标窗口");
+            return false;
+        }
+
+        NativeMethods.GetWindowThreadProcessId(target, out uint targetPid);
+        ForceForegroundOnUi(target);
+
+        var deadline = DateTime.UtcNow + TimeSpan.FromMilliseconds(450);
+        bool foregroundReady = false;
+        while (DateTime.UtcNow < deadline)
         {
             IntPtr fg = NativeMethods.GetForegroundWindow();
-            if (fg != IntPtr.Zero && NativeMethods.IsWindow(fg))
+            if (fg == target)
             {
-                NativeMethods.GetWindowThreadProcessId(fg, out uint fgPid);
-                if (fgPid != (uint)Environment.ProcessId)
+                foregroundReady = true;
+                break;
+            }
+
+            if (fg != IntPtr.Zero)
+            {
+                NativeMethods.GetWindowThreadProcessId(fg, out uint currentPid);
+                if (currentPid == targetPid && currentPid != (uint)Environment.ProcessId)
                 {
-                    target = fg;
-                    _lastTargetWindow = fg;
+                    foregroundReady = true;
+                    break;
                 }
             }
+
+            ForceForegroundOnUi(target);
+            System.Threading.Thread.Sleep(20);
         }
 
-        if (target != IntPtr.Zero && NativeMethods.IsWindow(target))
+        if (!foregroundReady)
         {
-            NativeMethods.GetWindowThreadProcessId(target, out uint targetPid);
-            if (targetPid != (uint)Environment.ProcessId)
-            {
-                // 使用 ForceForeground 激活目标窗口
-                NativeMethods.ForceForeground(target);
-
-                // 轮询等待确认前台窗口切换到位
-                var deadline = DateTime.UtcNow + TimeSpan.FromMilliseconds(300);
-                while (DateTime.UtcNow < deadline)
-                {
-                    IntPtr fg = NativeMethods.GetForegroundWindow();
-                    if (fg == target)
-                    {
-                        break;
-                    }
-
-                    if (fg != IntPtr.Zero && NativeMethods.IsWindow(fg))
-                    {
-                        NativeMethods.GetWindowThreadProcessId(fg, out uint currentPid);
-                        if (currentPid == targetPid && currentPid != (uint)Environment.ProcessId)
-                        {
-                            break;
-                        }
-                    }
-
-                    System.Threading.Thread.Sleep(15);
-                }
-            }
+            IntPtr fg = NativeMethods.GetForegroundWindow();
+            NativeMethods.GetWindowThreadProcessId(fg, out uint fgPid);
+            DebugLog.Log($"粘贴取消：目标窗口未能成为前台 target={target} fg={fg} fgPid={fgPid}");
+            return false;
         }
 
-        // 留出 35ms 缓冲确保目标窗口获得键盘焦点并响应 WM_SETFOCUS
-        System.Threading.Thread.Sleep(35);
+        System.Threading.Thread.Sleep(40);
 
-        // 确保物理鼠标左键未处于按下状态（避免在鼠标按下状态下发按键导致目标窗口误判为拖拽或选区）
         var mouseDeadline = DateTime.UtcNow + TimeSpan.FromMilliseconds(150);
         while (DateTime.UtcNow < mouseDeadline)
         {
@@ -203,8 +238,45 @@ public sealed class PasteService
         return true;
     }
 
+    private IntPtr ResolveTargetWindow()
+    {
+        uint ownPid = (uint)Environment.ProcessId;
+        IntPtr target = _lastTargetWindow;
+        if (NativeMethods.IsEligiblePasteTarget(target, ownPid))
+        {
+            return target;
+        }
+
+        IntPtr fg = NativeMethods.GetForegroundWindow();
+        if (NativeMethods.IsEligiblePasteTarget(fg, ownPid))
+        {
+            _lastTargetWindow = fg;
+            return fg;
+        }
+
+        return IntPtr.Zero;
+    }
+
+    private bool ForceForegroundOnUi(IntPtr target)
+    {
+        if (_uiDispatcher == null || _uiDispatcher.CheckAccess())
+        {
+            return NativeMethods.ForceForeground(target);
+        }
+
+        try
+        {
+            return _uiDispatcher.Invoke(() => NativeMethods.ForceForeground(target), DispatcherPriority.Send);
+        }
+        catch (Exception ex)
+        {
+            DebugLog.LogException("UI 线程激活目标窗口失败", ex);
+            return NativeMethods.ForceForeground(target);
+        }
+    }
+
     /// <summary>在后台 STA 线程回填剪贴板，完成后模拟粘贴；异常仅记录日志，不影响主流程。</summary>
-    private async Task RunPasteAsync(Func<bool> setter)
+    private async Task RunPasteAsync(Func<bool> setter, bool stayOnForeground = false)
     {
         try
         {
@@ -217,8 +289,8 @@ public sealed class PasteService
 
             // 关键：剪贴板回填完成后，留出微小的系统前台焦点稳定缓冲（约 35ms），
             // 确保 QuickClip 隐藏后目标第三方窗口已完成 WM_ACTIVATE 获得键盘焦点，再执行 SendInput
-            await Task.Delay(35);
-            if (!SimulatePaste())
+            await Task.Delay(stayOnForeground ? 15 : 35);
+            if (!SimulatePaste(stayOnForeground))
             {
                 ReportFailure("目标窗口未激活，已取消粘贴");
             }

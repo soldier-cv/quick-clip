@@ -38,6 +38,9 @@ public sealed class SettingsService
     /// <summary>外观主题（默认 Terminal）。</summary>
     public AppTheme Theme { get; private set; } = AppTheme.Terminal;
 
+    /// <summary>界面字体族名；空或「系统默认」表示 Segoe UI / 雅黑回退链。</summary>
+    public string UiFontFamily { get; private set; } = string.Empty;
+
     /// <summary>Toast 提示卡片尺寸（默认 Medium 标准）。</summary>
     public ToastSize ToastSize { get; private set; } = ToastSize.Medium;
 
@@ -60,6 +63,12 @@ public sealed class SettingsService
     /// <summary>上次面板位置 Y 坐标（null 表示默认屏幕垂直居中）。</summary>
     public double? WindowPositionY { get; private set; }
 
+    /// <summary>上次面板宽度（null 表示默认 460）。</summary>
+    public double? WindowWidth { get; private set; }
+
+    /// <summary>上次面板高度（null 表示默认 780）。</summary>
+    public double? WindowHeight { get; private set; }
+
     /// <summary>更新面板位置并持久化保存。</summary>
     public void SetWindowPosition(double x, double y)
     {
@@ -69,8 +78,14 @@ public sealed class SettingsService
         Save(raiseChanged: false);
     }
 
-    /// <summary>连续粘贴模式：按 Enter 粘贴后保持面板激活，并自动选至下一项，方便连续粘贴多条内容。</summary>
-    public bool ContinuousPasteMode { get; private set; }
+    /// <summary>更新面板尺寸并持久化保存。</summary>
+    public void SetWindowSize(double width, double height)
+    {
+        if (WindowWidth == width && WindowHeight == height) return;
+        WindowWidth = width;
+        WindowHeight = height;
+        Save(raiseChanged: false);
+    }
 
     /// <summary>
     /// 剪贴板历史数据库位置（null 表示默认本地库）。
@@ -336,11 +351,13 @@ public sealed class SettingsService
             AutoStart = dto.AutoStart ?? false;
             TakeOverSystemClipboard = dto.TakeOverSystemClipboard ?? true;
             WindowAlwaysOnTop = dto.WindowAlwaysOnTop ?? false;
-            ContinuousPasteMode = dto.ContinuousPasteMode ?? false;
             RememberWindowPosition = dto.RememberWindowPosition ?? true;
             WindowPositionX = dto.WindowPositionX;
             WindowPositionY = dto.WindowPositionY;
+            WindowWidth = dto.WindowWidth;
+            WindowHeight = dto.WindowHeight;
             Theme = ParseTheme(dto.Theme);
+            UiFontFamily = dto.UiFontFamily?.Trim() ?? string.Empty;
             if (dto.ToastSize is { } toastSizeStr && Enum.TryParse<ToastSize>(toastSizeStr, true, out var toastSize))
             {
                 ToastSize = toastSize;
@@ -413,11 +430,31 @@ public sealed class SettingsService
         if (Theme == theme)
         {
             ThemeService.Apply(theme);
+            AppFontService.Apply(UiFontFamily);
             return;
         }
 
         Theme = theme;
         ThemeService.Apply(theme);
+        AppFontService.Apply(UiFontFamily);
+        Save();
+    }
+
+    /// <summary>更新界面字体并立即应用到已打开窗口。</summary>
+    public void SetUiFontFamily(string? family)
+    {
+        string value = string.IsNullOrWhiteSpace(family) ||
+                       string.Equals(family, AppFontService.DefaultDisplayName, StringComparison.OrdinalIgnoreCase)
+            ? string.Empty
+            : family.Trim();
+        if (UiFontFamily == value)
+        {
+            AppFontService.Apply(value);
+            return;
+        }
+
+        UiFontFamily = value;
+        AppFontService.Apply(value);
         Save();
     }
 
@@ -564,18 +601,6 @@ public sealed class SettingsService
         }
 
         WindowAlwaysOnTop = enabled;
-        Save();
-    }
-
-    /// <summary>更新连续粘贴模式并持久化。</summary>
-    public void SetContinuousPasteMode(bool enabled)
-    {
-        if (ContinuousPasteMode == enabled)
-        {
-            return;
-        }
-
-        ContinuousPasteMode = enabled;
         Save();
     }
 
@@ -1114,11 +1139,13 @@ public sealed class SettingsService
                 AutoStart = AutoStart,
                 TakeOverSystemClipboard = TakeOverSystemClipboard,
                 WindowAlwaysOnTop = WindowAlwaysOnTop,
-                ContinuousPasteMode = ContinuousPasteMode,
                 RememberWindowPosition = RememberWindowPosition,
                 WindowPositionX = WindowPositionX,
                 WindowPositionY = WindowPositionY,
+                WindowWidth = WindowWidth,
+                WindowHeight = WindowHeight,
                 Theme = Theme.ToString(),
+                UiFontFamily = string.IsNullOrWhiteSpace(UiFontFamily) ? null : UiFontFamily,
                 ToastSize = ToastSize.ToString(),
                 // 不再写入 DatabasePath：设置页已移除自定义路径；旧文件中的字段读入后也不会再回写
                 OcrEngine = OcrEngine.ToString(),
@@ -1191,11 +1218,13 @@ public sealed class SettingsData
     public bool? AutoStart { get; set; }
     public bool? TakeOverSystemClipboard { get; set; }
     public bool? WindowAlwaysOnTop { get; set; }
-    public bool? ContinuousPasteMode { get; set; }
     public bool? RememberWindowPosition { get; set; }
     public double? WindowPositionX { get; set; }
     public double? WindowPositionY { get; set; }
+    public double? WindowWidth { get; set; }
+    public double? WindowHeight { get; set; }
     public string? Theme { get; set; }
+    public string? UiFontFamily { get; set; }
     public string? ToastSize { get; set; }
     public string? DatabasePath { get; set; }
     public string? OcrEngine { get; set; }

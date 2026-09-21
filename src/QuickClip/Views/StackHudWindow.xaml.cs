@@ -4,6 +4,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using QuickClip.Models;
+using QuickClip.Services;
 using Brushes = System.Windows.Media.Brushes;
 using KeyEventArgs = System.Windows.Input.KeyEventArgs;
 using MouseEventArgs = System.Windows.Input.MouseEventArgs;
@@ -20,72 +21,152 @@ public partial class StackHudWindow : Window
     /// <summary>提供栈内前 N 项快照的委托。</summary>
     public Func<List<string>>? QueueSnapshotProvider { get; set; }
 
-    private readonly DispatcherTimer _popupCloseTimer;
     private int _currentCount;
     private ToastSize _currentSize = ToastSize.Medium;
     private string? _lastRawPreview;
+    private bool _detached;
 
     public StackHudWindow()
     {
         InitializeComponent();
         Loaded += OnLoaded;
-
-        _popupCloseTimer = new DispatcherTimer
-        {
-            Interval = TimeSpan.FromMilliseconds(250)
-        };
-        _popupCloseTimer.Tick += (_, _) =>
-        {
-            _popupCloseTimer.Stop();
-            QueuePreviewPopup.IsOpen = false;
-        };
     }
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
+        if (!_detached)
+        {
+            return;
+        }
+
         Reposition();
     }
 
+    public void ResetDock() => _detached = false;
+
+    public bool IsDetached => _detached;
+
     public void Reposition()
     {
-        var workArea = SystemParameters.WorkArea;
-        // Window 宽度为 484（含外层 Margin 12），内部 MainBorder 宽度为 460
-        // Left = workArea.Right - Width 使 MainBorder 右边缘正好距工作区右侧 12px，与主列表完全对齐
-        Left = workArea.Right - Width;
-        // Top 底部距任务栏上方 16px 呼吸间距（含外层 Margin 12）
-        Top = workArea.Bottom - Height - 4;
+        ApplyPlacement(StackHudLayout.ParkBottomRight(WorkAreaRect(), StackHudLayout.DefaultPanelWidth, Height));
+    }
+
+    public void FollowPanel(Window? panel)
+    {
+        if (_detached)
+        {
+            ApplyWidth(panel?.ActualWidth > 1 ? panel.ActualWidth : StackHudLayout.DefaultPanelWidth);
+            return;
+        }
+
+        if (panel is { IsVisible: true, ActualWidth: > 1, ActualHeight: > 1 } &&
+            panel.Left > -10000 && panel.Top > -10000)
+        {
+            var place = StackHudLayout.DockToPanel(
+                new StackHudLayout.RectD(panel.Left, panel.Top, panel.ActualWidth, panel.ActualHeight),
+                WorkAreaRect(panel),
+                Height);
+            ApplyPlacement(place);
+            return;
+        }
+
+        double panelWidth = panel is { ActualWidth: > 1 }
+            ? panel.ActualWidth
+            : StackHudLayout.DefaultPanelWidth;
+        ApplyPlacement(StackHudLayout.ParkBottomRight(WorkAreaRect(panel), panelWidth, Height));
     }
 
     public void ApplySize(ToastSize size)
     {
         _currentSize = size;
-        // 统一固定为 460px 宽度（外层含 Margin 12 即 484px，内部卡片 460px，与主面板及 Toast 像素级对齐）
-        Width = 484;
-        Height = 92;
-        ContentGrid.Margin = new Thickness(14, 9, 14, 9);
+        Height = 76;
         HudHeaderIcon.FontSize = 15;
         HudTitleText.FontSize = 13;
         CountBadge.FontSize = 11;
 
         SplitButton.Height = 24;
         SplitButton.FontSize = 11.5;
-        SplitButton.Padding = new Thickness(8, 2, 8, 2);
 
         ClearButton.Height = 24;
         ClearButton.FontSize = 11.5;
-        ClearButton.Padding = new Thickness(8, 2, 8, 2);
 
         ExitButton.Height = 24;
         ExitButton.Padding = new Thickness(6, 2, 6, 2);
+        ApplyCompactChrome(Math.Max(1, Width - StackHudLayout.Chrome * 2));
 
         NextItemPreview.FontSize = 12;
-
-        PopupBorder.MinWidth = 460;
-        PopupBorder.MaxWidth = 520;
-
-        UpdateLayout();
-        Reposition();
         FormatNextItemPreview();
+    }
+
+    private void ApplyWidth(double panelWidth)
+    {
+        double width = StackHudLayout.WindowWidthForPanel(panelWidth);
+        Width = width;
+        double visual = Math.Max(1, panelWidth);
+        PopupBorder.MinWidth = visual;
+        PopupBorder.MaxWidth = visual;
+        ApplyCompactChrome(visual);
+    }
+
+    private void ApplyPlacement(StackHudLayout.Placement place)
+    {
+        Width = place.Width;
+        Height = place.Height;
+        Left = place.Left;
+        Top = place.Top;
+        QueuePreviewPopup.Placement = place.PopupAbove
+            ? System.Windows.Controls.Primitives.PlacementMode.Top
+            : System.Windows.Controls.Primitives.PlacementMode.Bottom;
+        QueuePreviewPopup.VerticalOffset = place.PopupAbove ? -6 : 6;
+        double visual = Math.Max(1, place.Width - StackHudLayout.Chrome * 2);
+        PopupBorder.MinWidth = visual;
+        PopupBorder.MaxWidth = visual;
+        ApplyCompactChrome(visual);
+    }
+
+    private void ApplyCompactChrome(double visualWidth)
+    {
+        bool compact = visualWidth < 420;
+        SplitButtonLabel.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+        ClearButtonLabel.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+        CountBadgeBorder.Visibility = compact && visualWidth < 300 ? Visibility.Collapsed : Visibility.Visible;
+        SplitButton.Padding = compact ? new Thickness(6, 2, 6, 2) : new Thickness(8, 2, 8, 2);
+        ClearButton.Padding = compact ? new Thickness(6, 2, 6, 2) : new Thickness(8, 2, 8, 2);
+        SplitButtonIcon.Margin = compact ? new Thickness(0) : new Thickness(0, 0, 3, 0);
+        ClearButtonIcon.Margin = compact ? new Thickness(0) : new Thickness(0, 0, 3, 0);
+        SplitButton.Margin = new Thickness(0);
+        ClearButton.Margin = compact ? new Thickness(4, 0, 0, 0) : new Thickness(6, 0, 0, 0);
+        ExitButton.Margin = compact ? new Thickness(4, 0, 0, 0) : new Thickness(6, 0, 0, 0);
+        ContentGrid.Margin = compact ? new Thickness(10, 8, 10, 8) : new Thickness(14, 9, 14, 8);
+    }
+
+    private static StackHudLayout.RectD WorkAreaRect(Window? relative = null)
+    {
+        if (relative != null)
+        {
+            try
+            {
+                IntPtr hwnd = new System.Windows.Interop.WindowInteropHelper(relative).EnsureHandle();
+                var screen = System.Windows.Forms.Screen.FromHandle(hwnd);
+                var wa = screen.WorkingArea;
+                var source = System.Windows.Interop.HwndSource.FromHwnd(hwnd);
+                var toDip = source?.CompositionTarget?.TransformFromDevice ?? System.Windows.Media.Matrix.Identity;
+                var topLeft = toDip.Transform(new System.Windows.Point(wa.Left, wa.Top));
+                var bottomRight = toDip.Transform(new System.Windows.Point(wa.Right, wa.Bottom));
+                return new StackHudLayout.RectD(
+                    topLeft.X,
+                    topLeft.Y,
+                    bottomRight.X - topLeft.X,
+                    bottomRight.Y - topLeft.Y);
+            }
+            catch
+            {
+                // 回退主显示器工作区
+            }
+        }
+
+        var area = SystemParameters.WorkArea;
+        return new StackHudLayout.RectD(area.Left, area.Top, area.Width, area.Height);
     }
 
     private DispatcherTimer? _transientFeedbackTimer;
@@ -165,7 +246,7 @@ public partial class StackHudWindow : Window
     private void RefreshQueuePreview()
     {
         QueueItemsPanel.Children.Clear();
-        PopupCountText.Text = $"共 {_currentCount} 项 (最多显示 10 项)";
+        PopupCountText.Text = $"共 {_currentCount} 项（最多显示 10 项）";
 
         var items = QueueSnapshotProvider?.Invoke() ?? new List<string>();
         if (items.Count == 0)
@@ -209,7 +290,7 @@ public partial class StackHudWindow : Window
             {
                 badgeBorder.SetResourceReference(Border.BackgroundProperty, "Theme.Accent");
                 badgeText.Foreground = Brushes.White;
-                badgeText.Text = "1 (下个出栈)";
+                badgeText.Text = "1（下个出栈）";
             }
             else
             {
@@ -251,55 +332,54 @@ public partial class StackHudWindow : Window
 
     private void OnHudMouseEnter(object sender, MouseEventArgs e)
     {
-        _popupCloseTimer.Stop();
         RefreshQueuePreview();
         QueuePreviewPopup.IsOpen = true;
     }
 
     private void OnHudMouseLeave(object sender, MouseEventArgs e)
     {
-        _popupCloseTimer.Stop();
-        _popupCloseTimer.Start();
-    }
-
-    private void OnPopupMouseEnter(object sender, MouseEventArgs e)
-    {
-        _popupCloseTimer.Stop();
-    }
-
-    private void OnPopupMouseLeave(object sender, MouseEventArgs e)
-    {
-        _popupCloseTimer.Stop();
-        _popupCloseTimer.Start();
-    }
-
-    private void OnMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-    {
-        // 点击按钮时不触发窗口拖拽
-        if (e.OriginalSource is DependencyObject dep && FindVisualParent<System.Windows.Controls.Button>(dep) != null)
+        if (QueuePreviewPopup.IsMouseOver)
         {
             return;
         }
 
-        if (e.ButtonState == MouseButtonState.Pressed)
-        {
-            try
-            {
-                DragMove();
-            }
-            catch
-            {
-                // 忽略
-            }
-        }
+        QueuePreviewPopup.IsOpen = false;
     }
 
-    private static T? FindVisualParent<T>(DependencyObject child) where T : DependencyObject
+    private void OnActionButtonsMouseEnter(object sender, MouseEventArgs e)
     {
-        DependencyObject parentObject = VisualTreeHelper.GetParent(child);
-        if (parentObject == null) return null;
-        if (parentObject is T parent) return parent;
-        return FindVisualParent<T>(parentObject);
+        // 鼠标移动到操作按钮区域时，关闭队列预览浮层，避免遮挡并保证按钮操作绝对顺畅
+        QueuePreviewPopup.IsOpen = false;
+    }
+
+    private void OnPopupMouseEnter(object sender, MouseEventArgs e)
+    {
+        // 鼠标移入浮层本身时保持展开
+    }
+
+    private void OnPopupMouseLeave(object sender, MouseEventArgs e)
+    {
+        QueuePreviewPopup.IsOpen = false;
+    }
+
+    private void OnDragHandleMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ButtonState != MouseButtonState.Pressed)
+        {
+            return;
+        }
+
+        try
+        {
+            DragMove();
+            _detached = true;
+        }
+        catch
+        {
+            // 忽略
+        }
+
+        e.Handled = true;
     }
 
     private void OnWindowKeyDown(object sender, KeyEventArgs e)

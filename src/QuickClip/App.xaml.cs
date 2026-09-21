@@ -67,10 +67,12 @@ public partial class App : System.Windows.Application
         {
             _services = new AppServices();
             ThemeService.Apply(_services.Settings.Theme);
+            AppFontService.Apply(_services.Settings.UiFontFamily);
 
             var viewModel = new MainViewModel(_services);
             var window = new MainWindow(viewModel, _services) { DataContext = viewModel };
             _services.MainWindow = window;
+            _services.StackPaste.AttachPanel(window);
 
             // 关键：先创建窗口句柄（触发 SourceInitialized → Monitor.Attach 挂剪贴板监听），
             // 再启动热键。开机自启动分支不会 Show()，若不主动建句柄，剪贴板监听永远挂不上，

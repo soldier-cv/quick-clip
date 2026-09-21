@@ -11,6 +11,13 @@
                 <!-- 必须在 WPF-UI 之后合并，覆盖其/系统默认白槽滚动条 -->
                 <ResourceDictionary Source="Themes/ThemeScrollBar.xaml" />
             </ResourceDictionary.MergedDictionaries>
+            <FontFamily x:Key="Theme.FontFamily">Segoe UI, Microsoft YaHei UI, Microsoft YaHei, sans-serif</FontFamily>
+            <Style TargetType="{x:Type Window}">
+                <Setter Property="FontFamily" Value="{DynamicResource Theme.FontFamily}" />
+            </Style>
+            <Style TargetType="{x:Type TextBlock}">
+                <Setter Property="FontFamily" Value="{DynamicResource Theme.FontFamily}" />
+            </Style>
         </ResourceDictionary>
     </Application.Resources>
 </Application>

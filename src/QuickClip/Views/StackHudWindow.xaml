@@ -9,14 +9,14 @@
         Topmost="True"
         ShowInTaskbar="False"
         ShowActivated="False"
-        Width="484" Height="92"
+        Width="468" Height="76"
+        MinWidth="200"
         WindowStartupLocation="Manual"
         KeyDown="OnWindowKeyDown"
-        MouseLeftButtonDown="OnMouseLeftButtonDown"
         MouseEnter="OnHudMouseEnter"
         MouseLeave="OnHudMouseLeave">
 
-    <Grid Margin="12">
+    <Grid Margin="4">
         <Border x:Name="MainBorder"
                 Background="{DynamicResource Theme.Panel}"
                 BorderBrush="{DynamicResource Theme.Border}"
@@ -34,30 +34,39 @@
 
                 <!-- 顶部状态行与操作按钮 -->
                 <Grid Grid.Row="0">
-                    <StackPanel Orientation="Horizontal"
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel x:Name="HudDragHandle"
+                                Grid.Column="0"
+                                Orientation="Horizontal"
                                 VerticalAlignment="Center"
                                 Cursor="SizeAll"
-                                ToolTip="拖拽移动浮窗位置">
+                                ToolTip="拖拽移动浮窗位置"
+                                MouseLeftButtonDown="OnDragHandleMouseLeftButtonDown">
                         <ui:SymbolIcon x:Name="HudHeaderIcon" Symbol="Layer24" FontSize="15" Foreground="{DynamicResource Theme.Accent}" Margin="0,0,6,0" />
-                        <TextBlock x:Name="HudTitleText" Text="收集栈" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource Theme.Text}" />
-                        <Border Margin="8,0,0,0" Padding="6,2" Background="{DynamicResource Theme.Search}" CornerRadius="4">
+                        <TextBlock x:Name="HudTitleText" Text="收集栈" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource Theme.Text}" VerticalAlignment="Center" />
+                        <Border x:Name="CountBadgeBorder" Margin="8,0,8,0" Padding="6,2" Background="{DynamicResource Theme.Search}" CornerRadius="4" VerticalAlignment="Center">
                             <TextBlock x:Name="CountBadge" FontSize="11" Foreground="{DynamicResource Theme.TextSecondary}" Text="0 项" />
                         </Border>
                     </StackPanel>
 
-                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"
+                                MouseEnter="OnActionButtonsMouseEnter">
                         <ui:Button x:Name="SplitButton"
                                    Appearance="Secondary"
                                    Padding="8,2"
                                    Height="24"
+                                   MinWidth="0"
                                    FontSize="11.5"
                                    CornerRadius="4"
                                    Cursor="Hand"
                                    ToolTip="将当前剪贴板多行文本拆分成多项入栈"
                                    Click="OnSplitLinesClicked">
                             <StackPanel Orientation="Horizontal">
-                                <ui:SymbolIcon Symbol="SplitVertical24" FontSize="12" Margin="0,0,3,0" />
-                                <TextBlock Text="拆分" FontSize="11.5" />
+                                <ui:SymbolIcon x:Name="SplitButtonIcon" Symbol="SplitVertical24" FontSize="12" Margin="0,0,3,0" />
+                                <TextBlock x:Name="SplitButtonLabel" Text="拆分" FontSize="11.5" />
                             </StackPanel>
                         </ui:Button>
 
@@ -66,12 +75,16 @@
                                    Margin="6,0,0,0"
                                    Padding="8,2"
                                    Height="24"
+                                   MinWidth="0"
                                    FontSize="11.5"
                                    CornerRadius="4"
                                    Cursor="Hand"
                                    ToolTip="清空栈内全部条目"
                                    Click="OnClearClicked">
-                            <TextBlock Text="清空" FontSize="11.5" />
+                            <StackPanel Orientation="Horizontal">
+                                <ui:SymbolIcon x:Name="ClearButtonIcon" Symbol="Delete24" FontSize="12" Margin="0,0,3,0" />
+                                <TextBlock x:Name="ClearButtonLabel" Text="清空" FontSize="11.5" />
+                            </StackPanel>
                         </ui:Button>
 
                         <ui:Button x:Name="ExitButton"
@@ -79,6 +92,7 @@
                                    Margin="6,0,0,0"
                                    Padding="6,2"
                                    Height="24"
+                                   MinWidth="0"
                                    CornerRadius="4"
                                    Cursor="Hand"
                                    ToolTip="退出收集栈"
@@ -107,15 +121,16 @@
                VerticalOffset="-6"
                AllowsTransparency="True"
                PopupAnimation="Fade"
-               StaysOpen="True">
+               StaysOpen="True"
+               Focusable="False">
             <Border x:Name="PopupBorder"
                     Background="{DynamicResource Theme.Panel}"
                     BorderBrush="{DynamicResource Theme.Border}"
                     BorderThickness="1"
                     CornerRadius="10"
-                    Padding="12,10"
-                    MinWidth="460"
-                    MaxWidth="520"
+                     Padding="12,10"
+                     MinWidth="200"
+                     MaxWidth="520"
                     MouseEnter="OnPopupMouseEnter"
                     MouseLeave="OnPopupMouseLeave">
                 <Border.Effect>

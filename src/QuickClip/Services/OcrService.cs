@@ -607,7 +607,7 @@ public sealed class OcrService
         }
         catch (OperationCanceledException)
         {
-            throw new HttpRequestException("连接 Ollama 接口超时 (15s)，请检查服务是否已启动。");
+            throw new HttpRequestException("连接 Ollama 接口超时（15s），请检查服务是否已启动。");
         }
 
         await EnsureSuccessWithBodyAsync(response);
@@ -658,7 +658,7 @@ public sealed class OcrService
         }
         catch (OperationCanceledException)
         {
-            throw new HttpRequestException("连接模型接口超时 (15s)，请检查网络或地址是否正确。");
+            throw new HttpRequestException("连接模型接口超时（15s），请检查网络或地址是否正确。");
         }
 
         await EnsureSuccessWithBodyAsync(response);

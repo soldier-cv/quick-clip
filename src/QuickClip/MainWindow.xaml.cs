@@ -109,9 +109,11 @@ public partial class MainWindow : FluentWindow
         _services.Settings.Changed += OnSettingsChanged;
         ThemeService.Changed += OnThemeChanged;
         LocationChanged += OnWindowLocationChanged;
+        SizeChanged += OnWindowSizeChanged;
         Closed += (_, _) =>
         {
             LocationChanged -= OnWindowLocationChanged;
+            SizeChanged -= OnWindowSizeChanged;
             _services.Paste.PasteFailed -= OnPasteFailed;
             _services.Settings.Changed -= OnSettingsChanged;
             ThemeService.Changed -= OnThemeChanged;
@@ -126,6 +128,20 @@ public partial class MainWindow : FluentWindow
         {
             _services.Settings.SetWindowPosition(Left, Top);
         }
+
+        _services.StackPaste.SyncHudToPanel();
+    }
+
+    private void OnWindowSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (IsVisible && ActualWidth > 1 && ActualHeight > 1 &&
+            Left > -10000 && Top > -10000 &&
+            _services.Settings.RememberWindowPosition)
+        {
+            _services.Settings.SetWindowSize(ActualWidth, ActualHeight);
+        }
+
+        _services.StackPaste.SyncHudToPanel();
     }
 
     private void OnPasteFailed(string message)
@@ -157,30 +173,25 @@ public partial class MainWindow : FluentWindow
         if (msg == QuickClip.Native.NativeMethods.WM_ACTIVATE)
         {
             int wa = (int)(wParam.ToInt64() & 0xFFFF);
-            if (wa != QuickClip.Native.NativeMethods.WA_INACTIVE)
+            if (wa == QuickClip.Native.NativeMethods.WA_INACTIVE)
             {
+                // 失焦时 lParam 是即将成为前台的窗口：这是置顶便签场景下最可靠的目标来源
                 if (lParam != IntPtr.Zero)
                 {
                     _services.Paste.RememberTargetWindow(lParam);
                 }
-                else
+            }
+            else if (lParam != IntPtr.Zero)
+            {
+                _services.Paste.RememberTargetWindow(lParam);
+            }
+            else if (!_services.Paste.HasValidTargetWindow())
+            {
+                IntPtr next = QuickClip.Native.NativeMethods.FindNextPasteTarget(
+                    hwnd, (uint)Environment.ProcessId);
+                if (next != IntPtr.Zero)
                 {
-                    // 置顶模式下用户从外部窗口点击激活面板时，lParam 经常为 0；
-                    // 顺着 Z-Order 查找紧随其后的第一个外部顶层可见窗口（如 Notepad++）
-                    IntPtr next = QuickClip.Native.NativeMethods.GetWindow(hwnd, QuickClip.Native.NativeMethods.GW_HWNDNEXT);
-                    while (next != IntPtr.Zero)
-                    {
-                        if (QuickClip.Native.NativeMethods.IsWindowVisible(next))
-                        {
-                            QuickClip.Native.NativeMethods.GetWindowThreadProcessId(next, out uint pid);
-                            if (pid != (uint)Environment.ProcessId && pid != 0)
-                            {
-                                _services.Paste.RememberTargetWindow(next);
-                                break;
-                            }
-                        }
-                        next = QuickClip.Native.NativeMethods.GetWindow(next, QuickClip.Native.NativeMethods.GW_HWNDNEXT);
-                    }
+                    _services.Paste.RememberTargetWindow(next);
                 }
             }
         }
@@ -345,6 +356,12 @@ public partial class MainWindow : FluentWindow
                 DebugLog.Log($"忽略失焦隐藏：当前前台窗口 (hwnd={fg}) 属于本进程自身");
                 return;
             }
+
+            // 置顶便签：用户点到 Notepad++ 等外部窗口时立刻记下粘贴目标
+            if (_services.Settings.WindowAlwaysOnTop)
+            {
+                _services.Paste.RememberTargetWindow(fg);
+            }
         }
 
         // 失焦即隐：点到其他应用时隐藏（仿系统 Win+V）。
@@ -496,6 +513,7 @@ public partial class MainWindow : FluentWindow
 
         SearchBox.Focus();
         SearchBox.SelectAll();
+        _services.StackPaste.SyncHudToPanel();
 
         var handle = new System.Windows.Interop.WindowInteropHelper(this).Handle;
         if (handle != IntPtr.Zero)
@@ -567,6 +585,7 @@ public partial class MainWindow : FluentWindow
         PreviewPopup.IsOpen = false;
         _viewModel.SuppressAutoSelect = false;
         Hide();
+        _services.StackPaste.SyncHudToPanel();
         DebugLog.Log("窗口已隐藏");
     }
 
@@ -604,21 +623,16 @@ public partial class MainWindow : FluentWindow
     {
         var workArea = GetWindowWorkArea();
         const double margin = 12;
-
-        // 小屏：限制高度 / 宽度（DIP，已按 DPI 换算）
-        double maxHeight = Math.Max(360, workArea.Height - margin * 2);
-        double maxWidth = Math.Max(320, workArea.Width - margin * 2);
-        if (Height > maxHeight)
-        {
-            Height = maxHeight;
-        }
-
-        if (Width > maxWidth)
-        {
-            Width = maxWidth;
-        }
-
         var settings = _services.Settings;
+
+        Width = StackHudLayout.ClampPanelWidth(
+            settings.WindowWidth ?? Width,
+            workArea.Width,
+            margin);
+        Height = StackHudLayout.ClampPanelHeight(
+            settings.WindowHeight ?? Height,
+            workArea.Height,
+            margin);
         if (settings.RememberWindowPosition &&
             settings.WindowPositionX.HasValue &&
             settings.WindowPositionY.HasValue)
@@ -870,21 +884,7 @@ public partial class MainWindow : FluentWindow
 
     private void PasteSelected(bool plainOnly)
     {
-        // 置顶（Ctrl+P / 图钉）= 工作会话：失焦不藏、粘贴后也不关；未置顶且未开启连续粘贴则粘贴后隐藏
-        bool pinned = _services.Settings.WindowAlwaysOnTop;
-        bool continuous = _services.Settings.ContinuousPasteMode;
-        if (!pinned && !continuous)
-        {
-            HideWindow();
-        }
-        else
-        {
-            // 置顶/连续粘贴模式下面板保持打开：
-            // UI 线程必须在派发异步粘贴前，主动将前台焦点切给目标窗口，
-            // 使得当前前台进程的主线程把焦点转交，Windows 前台锁无条件放行！
-            Keyboard.ClearFocus();
-            _services.Paste.ActivateTargetWindow();
-        }
+        bool pinned = PreparePasteSession();
 
         if (_viewModel.IsSnippetsTabActive)
         {
@@ -895,16 +895,8 @@ public partial class MainWindow : FluentWindow
                 {
                     _viewModel.StatusText = "已粘贴短语（置顶中，面板保持打开）";
                 }
-                else if (continuous)
-                {
-                    _viewModel.StatusText = "已粘贴短语（连续粘贴中）";
-                }
             }
 
-            if (continuous)
-            {
-                ReactivatePanelForContinuousPaste();
-            }
             return;
         }
 
@@ -913,32 +905,35 @@ public partial class MainWindow : FluentWindow
         {
             _viewModel.StatusText = "已粘贴（置顶中，面板保持打开）";
         }
-        else if (continuous)
-        {
-            _viewModel.StatusText = "已粘贴（连续粘贴中）";
-        }
-
-        if (continuous)
-        {
-            ReactivatePanelForContinuousPaste();
-        }
     }
 
-    /// <summary>连续粘贴模式：完成一次粘贴后重新激活主面板并保留焦点，以便继续按 Enter 或上下键顺次粘贴。</summary>
-    private void ReactivatePanelForContinuousPaste()
+    /// <summary>
+    /// 置顶 = 工作会话：失焦不藏、粘贴后也不关，并在 UI 线程把前台交给目标窗口。
+    /// 未置顶则粘贴后隐藏面板。
+    /// </summary>
+    private bool PreparePasteSession()
     {
-        _suppressDeactivateUntil = DateTime.UtcNow.AddMilliseconds(600);
-        Task.Delay(150).ContinueWith(_ =>
+        bool pinned = _services.Settings.WindowAlwaysOnTop;
+        if (!pinned)
         {
-            Dispatcher.Invoke(() =>
+            HideWindow();
+            return false;
+        }
+
+        if (!_services.Paste.HasValidTargetWindow())
+        {
+            var handle = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+            IntPtr next = QuickClip.Native.NativeMethods.FindNextPasteTarget(
+                handle, (uint)Environment.ProcessId);
+            if (next != IntPtr.Zero)
             {
-                if (IsVisible)
-                {
-                    Activate();
-                    Focus();
-                }
-            });
-        });
+                _services.Paste.RememberTargetWindow(next);
+            }
+        }
+
+        Keyboard.ClearFocus();
+        _services.Paste.ActivateTargetWindow();
+        return true;
     }
 
     private void MoveSelection(int delta)
@@ -1113,6 +1108,8 @@ public partial class MainWindow : FluentWindow
             return;
         }
 
+        ConstrainPreviewToWorkArea();
+
         // 强制测量未布局完成的内容，避免首次打开时 ActualWidth/Height 为 0
         if (root.ActualWidth <= 0 || root.ActualHeight <= 0)
         {
@@ -1173,6 +1170,22 @@ public partial class MainWindow : FluentWindow
         PreviewPopup.HorizontalOffset = offsetX;
         PreviewPopup.VerticalOffset = offsetY;
         DebugLog.Log($"预览浮层定位: size={popupWidth:F0}x{popupHeight:F0} side={(toLeft ? "左" : "右")} offset=({offsetX:F0},{offsetY:F0})");
+    }
+
+    /// <summary>窄屏/窄列表时把悬停预览钳到剩余工作区，避免弹层比主窗还宽。</summary>
+    private void ConstrainPreviewToWorkArea()
+    {
+        var workArea = GetWindowWorkArea();
+        double gap = 8;
+        double spaceLeft = Math.Max(0, Left - workArea.Left - gap);
+        double spaceRight = Math.Max(0, workArea.Right - (Left + ActualWidth) - gap);
+        double side = Math.Max(spaceLeft, spaceRight);
+        double max = side >= 180 ? Math.Min(480, side) : Math.Min(480, Math.Max(180, workArea.Width - 24));
+        PreviewBorder.MaxWidth = max;
+        double inner = Math.Max(120, max - 40);
+        PreviewHoverImage.MaxWidth = inner;
+        PreviewBodyText.MaxWidth = inner;
+        PreviewQrDecodeText.MaxWidth = inner;
     }
 
     /// <summary>获取主窗口所在（或光标所在）显示器的工作区，单位 DIP。</summary>
@@ -1651,25 +1664,13 @@ public partial class MainWindow : FluentWindow
         // 双击粘贴时关闭悬停预览浮层
         PreviewPopup.IsOpen = false;
 
-        bool pinned = _services.Settings.WindowAlwaysOnTop;
-        bool continuous = _services.Settings.ContinuousPasteMode;
+        bool pinned = PreparePasteSession();
 
-        if (!pinned && !continuous)
-        {
-            HideWindow();
-        }
-
-        _services.Paste.RememberTargetWindow();
         _services.Paste.PasteText(text, plainOnly: false);
 
         if (pinned)
         {
             _viewModel.StatusText = "已粘贴二维码文本（置顶中，面板保持打开）";
-        }
-        else if (continuous)
-        {
-            _viewModel.StatusText = "已粘贴二维码文本（连续粘贴中）";
-            ReactivatePanelForContinuousPaste();
         }
     }
 
@@ -2170,14 +2171,12 @@ public partial class MainWindow : FluentWindow
     {
         if (GetCardViewModel(sender) is { } vm && !string.IsNullOrWhiteSpace(vm.TranslatedText))
         {
-            bool pinned = _services.Settings.WindowAlwaysOnTop;
-            if (!pinned)
-            {
-                HideWindow();
-            }
-
-            _services.Paste.RememberTargetWindow();
+            bool pinned = PreparePasteSession();
             _services.Paste.PasteText(vm.TranslatedText, plainOnly: false);
+            if (pinned)
+            {
+                _viewModel.StatusText = "已粘贴译文（置顶中，面板保持打开）";
+            }
         }
     }
 
@@ -2252,7 +2251,7 @@ public partial class MainWindow : FluentWindow
         if (ResolveMenuTarget(sender) is { } vm)
         {
             _viewModel.PushItemToStack(vm);
-            _viewModel.StatusText = $"已压入收集栈 (当前共 {_viewModel.StackCount} 项)";
+            _viewModel.StatusText = $"已压入收集栈（当前共 {_viewModel.StackCount} 项）";
         }
     }
 
@@ -2399,29 +2398,12 @@ public partial class MainWindow : FluentWindow
 
             string finalText = Models.SnippetItem.ResolveText(rawText, currentClip);
 
-            bool pinned = _services.Settings.WindowAlwaysOnTop;
-            bool continuous = _services.Settings.ContinuousPasteMode;
-
-            if (!pinned && !continuous)
-            {
-                HideWindow();
-            }
-            else
-            {
-                Keyboard.ClearFocus();
-                _services.Paste.ActivateTargetWindow();
-            }
-
+            bool pinned = PreparePasteSession();
             _services.Paste.PasteText(finalText, plainOnly: false);
 
             if (pinned)
             {
                 _viewModel.StatusText = "已微调并粘贴（置顶中，面板保持打开）";
-            }
-            else if (continuous)
-            {
-                _viewModel.StatusText = "已微调并粘贴（连续粘贴中）";
-                ReactivatePanelForContinuousPaste();
             }
         };
 
@@ -2526,12 +2508,7 @@ public partial class MainWindow : FluentWindow
     {
         if (sender is FrameworkElement { DataContext: Models.SnippetItem snippet })
         {
-            bool pinned = _services.Settings.WindowAlwaysOnTop;
-            if (!pinned)
-            {
-                HideWindow();
-            }
-
+            PreparePasteSession();
             _ = _viewModel.PasteSnippetAsync(snippet, plainOnly: false);
         }
     }
@@ -2566,12 +2543,7 @@ public partial class MainWindow : FluentWindow
         {
             ExecuteMousePaste(() =>
             {
-                bool pinned = _services.Settings.WindowAlwaysOnTop;
-                if (!pinned)
-                {
-                    HideWindow();
-                }
-
+                PreparePasteSession();
                 _ = _viewModel.PasteSnippetAsync(snippet, plainOnly: false);
             });
         }
@@ -2590,7 +2562,7 @@ public partial class MainWindow : FluentWindow
             var res = await _services.Translation.TranslateAsync(OcrText.Text);
             if (res.Success)
             {
-                OcrText.Text = OcrText.Text + "\r\n\r\n--- 翻译结果 (" + res.Engine + ") ---\r\n" + res.TranslatedText;
+                OcrText.Text = OcrText.Text + "\r\n\r\n--- 翻译结果（" + res.Engine + "） ---\r\n" + res.TranslatedText;
                 OcrTitle.Text = "识别与翻译完成";
             }
             else

@@ -36,7 +36,7 @@
             <MenuItem Header="不透明度 75%" Click="OnMenuOpacity75Clicked" />
             <MenuItem Header="不透明度 50%" Click="OnMenuOpacity50Clicked" />
             <Separator />
-            <MenuItem Header="关闭 (Esc / 双击)" Click="OnMenuCloseClicked">
+            <MenuItem Header="关闭（Esc / 双击）" Click="OnMenuCloseClicked">
                 <MenuItem.Icon>
                     <ui:SymbolIcon Symbol="Dismiss24" FontSize="14" />
                 </MenuItem.Icon>
@@ -97,7 +97,7 @@
                                 <ui:Button Appearance="Transparent"
                                            Padding="4,2"
                                            CornerRadius="4"
-                                           ToolTip="关闭 (Esc)"
+                                            ToolTip="关闭（Esc）"
                                            Click="OnCloseButtonClicked">
                                     <ui:SymbolIcon Symbol="Dismiss24" FontSize="13" Foreground="{DynamicResource Theme.TextSecondary}" />
                                 </ui:Button>

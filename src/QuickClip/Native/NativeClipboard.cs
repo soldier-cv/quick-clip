@@ -47,7 +47,7 @@ public static class NativeClipboard
     /// <summary>当前剪贴板序列号（每次内容变更递增，用于识别自身写入）。</summary>
     public static uint CurrentSequence => NativeMethods.GetClipboardSequenceNumber();
 
-    /// <summary>CF_TEXT 使用系统 ANSI 代码页编码，避免 CJK 系统下乱码。</summary>
+    /// <summary>CF_TEXT 写入用系统 ANSI 代码页；读取走 UTF-8 / ANSI 双路径，见 ClipboardTextCodec。</summary>
     private static Encoding CreateAnsiEncoding()
     {
         try
@@ -257,6 +257,24 @@ public static class NativeClipboard
 
     public static bool TrySetText(string text, bool plainOnly) => TrySetText(text, plainOnly, null, null);
 
+    /// <summary>清空系统剪贴板（收集栈退出后避免再 Ctrl+V 误贴最后一条）。</summary>
+    public static bool TryClear()
+    {
+        if (!TryOpen(WriteOpenAttempts))
+        {
+            return false;
+        }
+
+        try
+        {
+            return NativeMethods.EmptyClipboard();
+        }
+        finally
+        {
+            NativeMethods.CloseClipboard();
+        }
+    }
+
     /// <summary>
     /// 写入文本；plainOnly=false 且提供了富文本时，额外写入 "HTML Format" 与 "Rich Text Format"，
     /// 让目标程序（Word / 浏览器 / 富文本编辑器）能保留原格式。
@@ -439,40 +457,13 @@ public static class NativeClipboard
     private static string? ReadUtf8(IntPtr hGlobal, long maxBytes)
     {
         byte[]? bytes = ReadAllBytes(hGlobal, maxBytes);
-        if (bytes == null || bytes.Length == 0)
-        {
-            return null;
-        }
-
-        int length = Array.IndexOf(bytes, (byte)0);
-        if (length < 0)
-        {
-            length = bytes.Length;
-        }
-
-        return Encoding.UTF8.GetString(bytes, 0, length);
+        return bytes == null ? null : ClipboardTextCodec.DecodeUtf8(bytes);
     }
 
     private static string? ReadUnicodeText(IntPtr hGlobal)
     {
         byte[]? bytes = ReadAllBytes(hGlobal, MaxTextReadBytes);
-        if (bytes == null || bytes.Length < 2)
-        {
-            return null;
-        }
-
-        int length = 0;
-        for (int i = 0; i + 1 < bytes.Length; i += 2)
-        {
-            if (bytes[i] == 0 && bytes[i + 1] == 0)
-            {
-                break;
-            }
-
-            length = i + 2;
-        }
-
-        return Encoding.Unicode.GetString(bytes, 0, length);
+        return bytes == null ? null : ClipboardTextCodec.DecodeUnicode(bytes);
     }
 
     private static string? ReadAnsiText(IntPtr hGlobal) => ReadAnsiText(hGlobal, MaxTextReadBytes);
@@ -480,18 +471,7 @@ public static class NativeClipboard
     private static string? ReadAnsiText(IntPtr hGlobal, long maxBytes)
     {
         byte[]? bytes = ReadAllBytes(hGlobal, maxBytes);
-        if (bytes == null || bytes.Length == 0)
-        {
-            return null;
-        }
-
-        int length = Array.IndexOf(bytes, (byte)0);
-        if (length < 0)
-        {
-            length = bytes.Length;
-        }
-
-        return AnsiEncoding.GetString(bytes, 0, length);
+        return bytes == null ? null : ClipboardTextCodec.DecodeAnsiOrUtf8(bytes, AnsiEncoding);
     }
 
     private static string[]? ReadFileDropList(IntPtr hGlobal)

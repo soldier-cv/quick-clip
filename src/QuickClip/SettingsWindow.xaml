@@ -135,6 +135,29 @@
                                 </ComboBox.ItemTemplate>
                             </ComboBox>
                         </Grid>
+                        <Grid Margin="0,12,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="100" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="字体"
+                                       Foreground="{DynamicResource Theme.TextSecondary}"
+                                       FontSize="13"
+                                       VerticalAlignment="Center" />
+                            <ComboBox x:Name="FontFamilyBox"
+                                      Grid.Column="1"
+                                      Height="36"
+                                      IsEditable="True"
+                                      IsTextSearchEnabled="False"
+                                      StaysOpenOnEdit="True"
+                                      MaxDropDownHeight="280"
+                                      ToolTip="输入名称筛选本机字体"
+                                      SelectionChanged="OnFontFamilyChanged"
+                                      DropDownClosed="OnFontFamilyDropDownClosed"
+                                      PreviewKeyDown="OnFontFamilyPreviewKeyDown"
+                                      LostKeyboardFocus="OnFontFamilyLostKeyboardFocus"
+                                      PreviewMouseWheel="OnComboBoxPreviewMouseWheel" />
+                        </Grid>
                     </StackPanel>
                 </Border>
 
@@ -410,13 +433,6 @@
                                   Content="自动检查并下载更新"
                                   Checked="OnAutoCheckUpdatesToggled"
                                   Unchecked="OnAutoCheckUpdatesToggled" />
-                        <CheckBox x:Name="ContinuousPasteCheck"
-                                  Margin="0,10,0,0"
-                                  Foreground="{DynamicResource Theme.TextSecondary}"
-                                  FontSize="13"
-                                  Content="连续粘贴模式（按 Enter 粘贴后保持面板激活）"
-                                  Checked="OnContinuousPasteToggled"
-                                  Unchecked="OnContinuousPasteToggled" />
                     </StackPanel>
                 </Border>
 

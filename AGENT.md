@@ -7,7 +7,7 @@
 ## 🔴 核心开发准则与协作规范 (Core Development Protocols)
 
 1. **功能基线与防退化规范 (CRITICAL)**：
-   - 所有参与本项目的开发者与 AI 智能体，在进行任何功能改动、重构或修缺陷前，**必须严格遵守 [docs/FEATURE_SPECIFICATION.md](docs/FEATURE_SPECIFICATION.md)（产品功能规格与需求基线说明书）**；
+   - 所有参与本项目的开发者与 AI 智能体，在进行任何功能改动、重构或修缺陷前，**必须严格遵守 [docs/SPECIFICATION.md](docs/SPECIFICATION.md)（核心规格、架构设计与需求基线说明书）**；
    - 严禁随意删除、弱化或改坏已有功能与交互体验；任何新功能开发不得以破坏已有功能（如普通模式/置顶模式的粘贴可用性）为代价。
 2. **构建与验证规范**：
    - 本项目通过 `dotnet build -c Release` 进行编译与语法合规性检查（确保 0 警告、0 错误）；

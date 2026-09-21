@@ -4,7 +4,7 @@ Windows 平台极速、纯净的本地剪贴板管理工具。基于 .NET 8 与 
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![.NET 8](https://img.shields.io/badge/.NET-8.0-512BD4.svg)](https://dotnet.microsoft.com/download/dotnet/8.0)
-[![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D6.svg)](docs/COMPATIBILITY.md)
+[![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D6.svg)](docs/SPECIFICATION.md#五-系统兼容性渲染降级与运行环境)
 [![Platform](https://img.shields.io/badge/Platform-Win--x64-gray.svg)](https://github.com/soldier-cv/quick-clip/releases)
 [![Gitee](https://img.shields.io/badge/Gitee-QuickClip-C71D23.svg)](https://gitee.com/huaxudong/quick-clip)
 [![Vibe Coding](https://img.shields.io/badge/Vibe%20Coding-AI%20Collaborative-FF69B4.svg)](AGENT.md)
@@ -191,13 +191,11 @@ QuickClip 所有数据均持久化在当前用户的本地应用数据目录：
 
 ---
 
-## 相关文档
+## 核心文档
 
-- [架构设计与技术实现](docs/DESIGN.md)
-- [系统环境与兼容性说明](docs/COMPATIBILITY.md)
-- [安全与隐私设计规范](docs/SECURITY.md)
-- [代码贡献指南](CONTRIBUTING.md)
-- [版本更新记录](CHANGELOG.md)
+- [核心规格、架构设计与需求基线](docs/SPECIFICATION.md)（深度融合产品需求、Win32 架构实现、系统兼容性与安全规约）
+- [AI 协同开发指南与代码规范](AGENT.md)（Vibe Coding 人机协同准则与 C# 编码规范）
+- [版本更新记录](CHANGELOG.md)（详细变更日志）
 
 ---
 

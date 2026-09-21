@@ -51,6 +51,24 @@ public sealed class SettingsService
     /// <summary>主窗口是否前端置顶（固定在最前，失焦不自动隐藏）。仅由 Ctrl+P / 图钉切换，设置页不再暴露。</summary>
     public bool WindowAlwaysOnTop { get; private set; }
 
+    /// <summary>是否记忆面板拖拽后的位置（默认 true）。</summary>
+    public bool RememberWindowPosition { get; private set; } = true;
+
+    /// <summary>上次面板位置 X 坐标（null 表示默认屏幕右侧）。</summary>
+    public double? WindowPositionX { get; private set; }
+
+    /// <summary>上次面板位置 Y 坐标（null 表示默认屏幕垂直居中）。</summary>
+    public double? WindowPositionY { get; private set; }
+
+    /// <summary>更新面板位置并持久化保存。</summary>
+    public void SetWindowPosition(double x, double y)
+    {
+        if (WindowPositionX == x && WindowPositionY == y) return;
+        WindowPositionX = x;
+        WindowPositionY = y;
+        Save(raiseChanged: false);
+    }
+
     /// <summary>连续粘贴模式：按 Enter 粘贴后保持面板激活，并自动选至下一项，方便连续粘贴多条内容。</summary>
     public bool ContinuousPasteMode { get; private set; }
 
@@ -319,6 +337,9 @@ public sealed class SettingsService
             TakeOverSystemClipboard = dto.TakeOverSystemClipboard ?? true;
             WindowAlwaysOnTop = dto.WindowAlwaysOnTop ?? false;
             ContinuousPasteMode = dto.ContinuousPasteMode ?? false;
+            RememberWindowPosition = dto.RememberWindowPosition ?? true;
+            WindowPositionX = dto.WindowPositionX;
+            WindowPositionY = dto.WindowPositionY;
             Theme = ParseTheme(dto.Theme);
             if (dto.ToastSize is { } toastSizeStr && Enum.TryParse<ToastSize>(toastSizeStr, true, out var toastSize))
             {
@@ -1094,6 +1115,9 @@ public sealed class SettingsService
                 TakeOverSystemClipboard = TakeOverSystemClipboard,
                 WindowAlwaysOnTop = WindowAlwaysOnTop,
                 ContinuousPasteMode = ContinuousPasteMode,
+                RememberWindowPosition = RememberWindowPosition,
+                WindowPositionX = WindowPositionX,
+                WindowPositionY = WindowPositionY,
                 Theme = Theme.ToString(),
                 ToastSize = ToastSize.ToString(),
                 // 不再写入 DatabasePath：设置页已移除自定义路径；旧文件中的字段读入后也不会再回写
@@ -1168,6 +1192,9 @@ public sealed class SettingsData
     public bool? TakeOverSystemClipboard { get; set; }
     public bool? WindowAlwaysOnTop { get; set; }
     public bool? ContinuousPasteMode { get; set; }
+    public bool? RememberWindowPosition { get; set; }
+    public double? WindowPositionX { get; set; }
+    public double? WindowPositionY { get; set; }
     public string? Theme { get; set; }
     public string? ToastSize { get; set; }
     public string? DatabasePath { get; set; }

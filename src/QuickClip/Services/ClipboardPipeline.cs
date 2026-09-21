@@ -157,7 +157,11 @@ public sealed class ClipboardPipeline
                 CreatedAt = DateTime.Now
             };
 
-            await _db.InsertAsync(item);
+            var (id, isNew) = await _db.UpsertRecentAsync(item);
+            if (!isNew && !string.IsNullOrEmpty(data.PreviewPath) && data.PreviewPath != item.PreviewPath)
+            {
+                TryDeletePreview(data.PreviewPath);
+            }
 
             var trimmed = await _db.TrimToMaxItemsAsync(_settings.MaxHistoryItems);
             foreach (var (_, preview) in trimmed)

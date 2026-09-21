@@ -88,12 +88,10 @@
                                Click="OnCopyOnlyClicked" />
 
                     <ui:Button x:Name="ApplyPasteButton"
+                               Appearance="Primary"
                                Content="应用并粘贴"
                                Height="32"
                                Padding="16,0"
-                               Background="{DynamicResource Theme.Accent}"
-                               Foreground="#FFFFFF"
-                               BorderThickness="0"
                                FontWeight="SemiBold"
                                ToolTip="解析占位符并立即自动粘贴到目标页面 (Ctrl+Enter)"
                                Click="OnApplyAndPasteClicked" />

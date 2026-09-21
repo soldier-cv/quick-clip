@@ -93,13 +93,24 @@ public partial class MainWindow : FluentWindow
         // 窗口置顶联动：设置变更（Ctrl+P / 标题栏按钮 / 设置窗口）即时生效
         _services.Settings.Changed += OnSettingsChanged;
         ThemeService.Changed += OnThemeChanged;
+        LocationChanged += OnWindowLocationChanged;
         Closed += (_, _) =>
         {
+            LocationChanged -= OnWindowLocationChanged;
             _services.Paste.PasteFailed -= OnPasteFailed;
             _services.Settings.Changed -= OnSettingsChanged;
             ThemeService.Changed -= OnThemeChanged;
         };
         OnSettingsChanged();
+    }
+
+    private void OnWindowLocationChanged(object? sender, EventArgs e)
+    {
+        // 仅在窗口可见且坐标正常（排除预热 -32000）且启用了记忆位置时持久化保存
+        if (IsVisible && Left > -10000 && Top > -10000 && _services.Settings.RememberWindowPosition)
+        {
+            _services.Settings.SetWindowPosition(Left, Top);
+        }
     }
 
     private void OnPasteFailed(string message)
@@ -160,8 +171,9 @@ public partial class MainWindow : FluentWindow
 
         if (msg == (int)WmTaskbarCreated)
         {
-            DebugLog.Log("检测到 Explorer 重建 (TaskbarCreated)，自愈刷新托盘与热键");
+            DebugLog.Log("检测到 Explorer 重建 (TaskbarCreated)，自愈刷新托盘、热键与剪贴板监听");
             _services.Hotkey.RefreshHotkeys();
+            _services.Monitor.Reattach(this);
             handled = true;
             return IntPtr.Zero;
         }
@@ -286,6 +298,18 @@ public partial class MainWindow : FluentWindow
             return;
         }
 
+        // 检查当前前台窗口是否属于本应用自身进程（包括子窗口、右键菜单、系统提示框、贴图等）
+        IntPtr fg = QuickClip.Native.NativeMethods.GetForegroundWindow();
+        if (fg != IntPtr.Zero)
+        {
+            QuickClip.Native.NativeMethods.GetWindowThreadProcessId(fg, out uint pid);
+            if (pid == (uint)Environment.ProcessId)
+            {
+                DebugLog.Log($"忽略失焦隐藏：当前前台窗口 (hwnd={fg}) 属于本进程自身");
+                return;
+            }
+        }
+
         // 失焦即隐：点到其他应用时隐藏（仿系统 Win+V）。
         // 打开设置窗 / 短语微调 / 短语编辑 / 自有模态对话框时主窗也会失焦，不能当「点到外部」——否则列表会被误收起。
         if (IsVisible && !_exiting && !_services.Settings.WindowAlwaysOnTop &&
@@ -312,6 +336,7 @@ public partial class MainWindow : FluentWindow
     private T ShowOwnedModal<T>(Func<T> show)
     {
         _modalDialogOpen = true;
+        _suppressDeactivateUntil = DateTime.UtcNow.AddMilliseconds(500);
         try
         {
             return show();
@@ -319,7 +344,8 @@ public partial class MainWindow : FluentWindow
         finally
         {
             _modalDialogOpen = false;
-            // 对话框关闭后把焦点还回面板（未置顶时）
+            // 对话框关闭后给 350ms 保护期，避免焦点恢复瞬间被误收起
+            _suppressDeactivateUntil = DateTime.UtcNow.AddMilliseconds(350);
             if (IsVisible)
             {
                 Activate();
@@ -524,7 +550,7 @@ public partial class MainWindow : FluentWindow
     }
 
     /// <summary>
-    /// 主面板停靠到当前显示器工作区右侧并垂直居中（仿 Win+V）。
+    /// 主面板停靠与定位：优先恢复记忆的位置（经多显示器安全检测），否则停靠到当前显示器工作区右侧并垂直居中（仿 Win+V）。
     /// 小分辨率时收缩宽高，避免超出屏幕。
     /// </summary>
     private void PositionWindow()
@@ -545,12 +571,43 @@ public partial class MainWindow : FluentWindow
             Width = maxWidth;
         }
 
+        var settings = _services.Settings;
+        if (settings.RememberWindowPosition &&
+            settings.WindowPositionX.HasValue &&
+            settings.WindowPositionY.HasValue)
+        {
+            double targetLeft = settings.WindowPositionX.Value;
+            double targetTop = settings.WindowPositionY.Value;
+
+            // 检查历史坐标是否处于可用虚拟屏幕可视范围内（防止多显示器插拔后飘出可视区）
+            if (IsPointWithinVirtualScreen(targetLeft, targetTop))
+            {
+                Left = targetLeft;
+                Top = targetTop;
+                return;
+            }
+        }
+
         Left = workArea.Right - Width - margin;
         Top = workArea.Top + (workArea.Height - Height) / 2;
 
         // 钳制在工作区内（多显示器 / 极端 DPI）
         Left = Math.Clamp(Left, workArea.Left + margin, Math.Max(workArea.Left + margin, workArea.Right - Width - margin));
         Top = Math.Clamp(Top, workArea.Top + margin, Math.Max(workArea.Top + margin, workArea.Bottom - Height - margin));
+    }
+
+    private static bool IsPointWithinVirtualScreen(double x, double y)
+    {
+        double vLeft = SystemParameters.VirtualScreenLeft;
+        double vTop = SystemParameters.VirtualScreenTop;
+        double vWidth = SystemParameters.VirtualScreenWidth;
+        double vHeight = SystemParameters.VirtualScreenHeight;
+
+        // 预留 80px 边缘，确保窗口至少有一部分能被用户看见和抓取
+        return x >= vLeft - 100 &&
+               x <= (vLeft + vWidth - 80) &&
+               y >= vTop - 100 &&
+               y <= (vTop + vHeight - 80);
     }
 
     private void OnWindowKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
@@ -806,17 +863,19 @@ public partial class MainWindow : FluentWindow
         if (_viewModel.IsSnippetsTabActive)
         {
             if (_viewModel.Snippets.Count == 0) return;
+            int count = _viewModel.Snippets.Count;
             int current = _viewModel.SelectedSnippet == null
                 ? -1
                 : _viewModel.Snippets.IndexOf(_viewModel.SelectedSnippet);
             int target;
             if (current == -1)
             {
-                target = delta > 0 ? 0 : _viewModel.Snippets.Count - 1;
+                target = delta > 0 ? 0 : count - 1;
             }
             else
             {
-                target = Math.Clamp(current + delta, 0, _viewModel.Snippets.Count - 1);
+                // 循环滚动：首项按 ↑ 跳至尾项，尾项按 ↓ 跳至首项
+                target = (current + delta % count + count) % count;
             }
             _viewModel.SelectedSnippet = _viewModel.Snippets[target];
             SnippetList.ScrollIntoView(_viewModel.SelectedSnippet);
@@ -828,10 +887,20 @@ public partial class MainWindow : FluentWindow
             return;
         }
 
+        int histCount = _viewModel.Items.Count;
         int currentHist = _viewModel.SelectedItem == null
-            ? 0
+            ? -1
             : _viewModel.Items.IndexOf(_viewModel.SelectedItem);
-        int targetHist = Math.Clamp(currentHist + delta, 0, _viewModel.Items.Count - 1);
+        int targetHist;
+        if (currentHist == -1)
+        {
+            targetHist = delta > 0 ? 0 : histCount - 1;
+        }
+        else
+        {
+            // 循环滚动：首项按 ↑ 跳至尾项，尾项按 ↓ 跳至首项
+            targetHist = (currentHist + delta % histCount + histCount) % histCount;
+        }
         _viewModel.SelectedItem = _viewModel.Items[targetHist];
         ItemList.ScrollIntoView(_viewModel.SelectedItem);
     }
@@ -1697,6 +1766,7 @@ public partial class MainWindow : FluentWindow
         DebugLog.Log(pinned
             ? $"窗口置顶已开启（{_services.Settings.TogglePinHotkey} / 图钉）"
             : $"窗口置顶已关闭（{_services.Settings.TogglePinHotkey} / 图钉）");
+        SearchBox.Focus();
     }
 
     /// <summary>设置变更联动：应用窗口置顶状态（Topmost + 标题栏按钮视觉 + 帮助提示）。</summary>

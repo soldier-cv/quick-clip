@@ -164,9 +164,68 @@ public sealed class DatabaseService : IDisposable
 
     public async Task<long> InsertAsync(ClipboardItem item)
     {
+        var (id, _) = await UpsertRecentAsync(item);
+        return id;
+    }
+
+    /// <summary>
+    /// 插入或提升至顶部（Bump to Top）：
+    /// 若历史中已存在相同文本/文件内容，则更新其 created_at 为当前时间并提升到最新，避免重复历史堆积；
+    /// 若不存在则执行正常 INSERT。返回 (id, isNew)。
+    /// </summary>
+    public async Task<(long Id, bool IsNew)> UpsertRecentAsync(ClipboardItem item)
+    {
         await _gate.WaitAsync();
         try
         {
+            // 文本、链接、文件类型查重提升
+            if (item.ContentType is ClipboardContentType.Text or ClipboardContentType.Link or ClipboardContentType.File &&
+                !string.IsNullOrEmpty(item.TextContent))
+            {
+                using var findCmd = _connection.CreateCommand();
+                findCmd.CommandText = """
+                    SELECT id, is_pinned, qr_content
+                    FROM clipboard_items
+                    WHERE content_type = $type AND text_content = $text
+                    ORDER BY id DESC LIMIT 1;
+                    """;
+                findCmd.Parameters.AddWithValue("$type", item.ContentType.ToString());
+                findCmd.Parameters.AddWithValue("$text", item.TextContent);
+
+                using var reader = await findCmd.ExecuteReaderAsync();
+                if (await reader.ReadAsync())
+                {
+                    long existingId = reader.GetInt64(0);
+                    bool isPinned = reader.GetInt32(1) == 1;
+                    string? qr = reader.IsDBNull(2) ? null : reader.GetString(2);
+                    reader.Close();
+
+                    using var updateCmd = _connection.CreateCommand();
+                    updateCmd.CommandText = """
+                        UPDATE clipboard_items
+                        SET created_at = $createdAt,
+                            html_content = COALESCE($html, html_content),
+                            rtf_content = COALESCE($rtf, rtf_content)
+                        WHERE id = $id;
+                        """;
+                    updateCmd.Parameters.AddWithValue("$createdAt", item.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss.fff"));
+                    updateCmd.Parameters.AddWithValue("$html", (object?)item.HtmlContent ?? DBNull.Value);
+                    updateCmd.Parameters.AddWithValue("$rtf", (object?)item.RtfContent ?? DBNull.Value);
+                    updateCmd.Parameters.AddWithValue("$id", existingId);
+                    await updateCmd.ExecuteNonQueryAsync();
+
+                    item.Id = existingId;
+                    item.IsPinned = isPinned;
+                    if (!string.IsNullOrEmpty(qr))
+                    {
+                        item.QrContent = qr;
+                    }
+
+                    return (existingId, false);
+                }
+            }
+
+            // 若无重复项，执行正常插入
             using var cmd = _connection.CreateCommand();
             cmd.CommandText = """
                 INSERT INTO clipboard_items
@@ -185,7 +244,7 @@ public sealed class DatabaseService : IDisposable
             cmd.Parameters.AddWithValue("$pinned", item.IsPinned ? 1 : 0);
             cmd.Parameters.AddWithValue("$createdAt", item.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss.fff"));
             item.Id = (long)(await cmd.ExecuteScalarAsync())!;
-            return item.Id;
+            return (item.Id, true);
         }
         finally
         {

@@ -149,11 +149,9 @@
         <Border Grid.Row="2" Background="{DynamicResource Theme.Search}" BorderBrush="{DynamicResource Theme.Border}" BorderThickness="0,1,0,0" Padding="20,12">
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                 <ui:Button Appearance="Secondary" Content="取消" Width="76" Margin="0,0,10,0" Click="OnCancelClicked" />
-                <ui:Button Content="保存"
+                <ui:Button Appearance="Primary"
+                           Content="保存"
                            Width="76"
-                           Background="{DynamicResource Theme.Accent}"
-                           Foreground="#FFFFFF"
-                           BorderThickness="0"
                            FontWeight="SemiBold"
                            Click="OnSaveClicked" />
             </StackPanel>

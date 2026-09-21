@@ -12,6 +12,8 @@ using QuickClip.Services;
 using ComboBox = System.Windows.Controls.ComboBox;
 using TextBox = System.Windows.Controls.TextBox;
 using MediaBrush = System.Windows.Media.Brush;
+using OpenFileDialog = Microsoft.Win32.OpenFileDialog;
+using QuickClip.Views;
 
 namespace QuickClip;
 
@@ -28,10 +30,6 @@ public partial class SettingsWindow : Window
     private bool _busy;
     private bool _suppressUiEvents;
     private bool _themeBoxReady;
-    private IReadOnlyList<string> _fontFamilies = Array.Empty<string>();
-    private bool _suppressFontFilter;
-    private readonly DispatcherTimer _fontPreviewTimer;
-    private string? _pendingFontPreview;
 
     /// <summary>主题下拉项（色块 + 名称）。</summary>
     private sealed class ThemeOption
@@ -47,9 +45,6 @@ public partial class SettingsWindow : Window
         _services = services;
 
         WindowChromeHelper.Apply(this, RootGrid);
-        _fontPreviewTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(180) };
-        _fontPreviewTimer.Tick += OnFontPreviewTick;
-        FontFamilyBox.AddHandler(TextBox.TextChangedEvent, new TextChangedEventHandler(OnFontFamilyTextChanged), true);
         FillThemeBox();
 
         RefreshUi();
@@ -72,8 +67,6 @@ public partial class SettingsWindow : Window
             _services.OcrPacks.PacksChanged -= OnOcrPacksChanged;
             ThemeService.Changed -= OnThemeServiceChanged;
             Loaded -= OnSettingsWindowLoaded;
-            _fontPreviewTimer.Stop();
-            _fontPreviewTimer.Tick -= OnFontPreviewTick;
             AppFontService.ClearPreview(this);
         };
     }
@@ -103,6 +96,23 @@ public partial class SettingsWindow : Window
         SettingsScrollViewer.InvalidateMeasure();
         SettingsScrollViewer.InvalidateArrange();
         UpdateLayout();
+    }
+
+    private void OnNavSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (NavListBox?.SelectedItem is not ListBoxItem item || item.Tag is not string tag)
+        {
+            return;
+        }
+
+        if (AppearancePanel != null) AppearancePanel.Visibility = tag == "Appearance" ? Visibility.Visible : Visibility.Collapsed;
+        if (HotkeysPanel != null) HotkeysPanel.Visibility = tag == "Hotkeys" ? Visibility.Visible : Visibility.Collapsed;
+        if (GeneralPanel != null) GeneralPanel.Visibility = tag == "General" ? Visibility.Visible : Visibility.Collapsed;
+        if (SmartServicesPanel != null) SmartServicesPanel.Visibility = tag == "SmartServices" ? Visibility.Visible : Visibility.Collapsed;
+        if (AboutPanel != null) AboutPanel.Visibility = tag == "About" ? Visibility.Visible : Visibility.Collapsed;
+
+        SettingsScrollViewer?.ScrollToTop();
+        RefreshScrollExtent();
     }
 
 
@@ -187,7 +197,6 @@ public partial class SettingsWindow : Window
             AutoStartCheck.IsChecked = s.AutoStart;
             AutoCheckUpdatesCheck.IsChecked = s.AutoCheckUpdates;
             TextOnlyCheck.IsChecked = s.TextOnlyCapture;
-            ChannelText.Text = "当前渠道：" + UpdateService.ChannelLabel;
             MaxHistoryBox.Text = s.MaxHistoryItems.ToString();
             VersionText.Text = "v" + UpdateService.CurrentVersion;
 
@@ -586,250 +595,64 @@ public partial class SettingsWindow : Window
 
     private void FillFontFamilyBox(string current)
     {
-        if (_fontFamilies == null || FontFamilyBox.ItemsSource == null)
+        var items = new List<string>(AppFontService.GetPresetNames());
+
+        string selected = AppFontService.ToDisplayName(current);
+        if (!items.Contains(selected, StringComparer.OrdinalIgnoreCase))
         {
-            _fontFamilies = AppFontService.ListInstalledFamilies();
-            FontFamilyBox.ItemsSource = _fontFamilies;
-            FilterFontFamilies(string.Empty);
+            items.Add(selected);
         }
 
-        string selected = string.IsNullOrWhiteSpace(current)
-            ? AppFontService.DefaultDisplayName
-            : current;
-        if (!_fontFamilies.Contains(selected, StringComparer.OrdinalIgnoreCase))
-        {
-            selected = AppFontService.DefaultDisplayName;
-        }
+        FontFamilyBox.ItemsSource = items;
 
         if (!string.Equals(FontFamilyBox.SelectedItem as string, selected, StringComparison.OrdinalIgnoreCase))
         {
             _suppressUiEvents = true;
-            _suppressFontFilter = true;
             try
             {
                 FontFamilyBox.SelectedItem = selected;
-                FontFamilyBox.Text = selected;
             }
             finally
             {
                 _suppressUiEvents = false;
-                _suppressFontFilter = false;
             }
         }
     }
 
     private void OnFontFamilyChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_suppressUiEvents || _suppressFontFilter || !IsLoaded)
-        {
-            return;
-        }
-
-        if (FontFamilyBox.SelectedItem is not string name)
-        {
-            return;
-        }
-
-        QueueFontPreview(name);
-        if (!FontFamilyBox.IsDropDownOpen)
-        {
-            CommitFontFamily(name);
-        }
-    }
-
-    private void OnFontFamilyTextChanged(object sender, TextChangedEventArgs e)
-    {
-        if (_suppressUiEvents || _suppressFontFilter || !IsLoaded)
-        {
-            return;
-        }
-
-        if (!FontFamilyBox.IsKeyboardFocusWithin)
-        {
-            return;
-        }
-
-        string query = FontFamilyBox.Text ?? string.Empty;
-        int caret = GetFontFamilyCaretIndex();
-        if (FontFamilyBox.SelectedItem is string selected &&
-            string.Equals(selected, query, StringComparison.OrdinalIgnoreCase))
-        {
-            FilterFontFamilies(string.Empty, caret);
-            return;
-        }
-
-        if (!FontFamilyBox.IsDropDownOpen)
-        {
-            FontFamilyBox.IsDropDownOpen = true;
-        }
-
-        FilterFontFamilies(query, caret);
-    }
-
-    private void OnFontFamilyDropDownClosed(object sender, EventArgs e)
-    {
         if (_suppressUiEvents || !IsLoaded)
         {
             return;
         }
 
-        CommitOrRevertFontFamilyText();
-    }
-
-    private void OnFontFamilyPreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
-    {
-        if (e.Key != Key.Enter)
+        if (FontFamilyBox.SelectedItem is not string displayName)
         {
             return;
         }
 
-        string? name = FontFamilyBox.SelectedItem as string;
-        if (string.IsNullOrWhiteSpace(name) && FontFamilyBox.Items.Count > 0)
+        string storedName = AppFontService.NormalizeStoredName(displayName);
+        if (displayName.StartsWith("自定义：") && AppFontService.IsFontFilePath(_services.Settings.UiFontFamily))
         {
-            name = FontFamilyBox.Items[0] as string;
+            storedName = _services.Settings.UiFontFamily;
         }
 
-        if (string.IsNullOrWhiteSpace(name))
-        {
-            return;
-        }
-
-        CommitFontFamily(name);
-        FontFamilyBox.IsDropDownOpen = false;
-        e.Handled = true;
-    }
-
-    private void OnFontFamilyLostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
-    {
-        if (_suppressUiEvents || !IsLoaded || FontFamilyBox.IsDropDownOpen)
-        {
-            return;
-        }
-
-        CommitOrRevertFontFamilyText();
-    }
-
-    private void CommitOrRevertFontFamilyText()
-    {
-        string typed = (FontFamilyBox.Text ?? string.Empty).Trim();
-        string? match = _fontFamilies.FirstOrDefault(n =>
-            string.Equals(n, typed, StringComparison.OrdinalIgnoreCase));
-        if (match != null)
-        {
-            CommitFontFamily(match);
-            return;
-        }
-
-        string current = string.IsNullOrWhiteSpace(_services.Settings.UiFontFamily)
-            ? AppFontService.DefaultDisplayName
-            : _services.Settings.UiFontFamily;
-        FilterFontFamilies(string.Empty);
-        FontFamilyBox.SelectedItem = current;
-        FontFamilyBox.Text = current;
+        _services.Settings.SetUiFontFamily(storedName);
         AppFontService.ClearPreview(this);
     }
 
-    private void QueueFontPreview(string name)
+    private void OnMoreFontsClicked(object sender, RoutedEventArgs e)
     {
-        _pendingFontPreview = name;
-        _fontPreviewTimer.Stop();
-        _fontPreviewTimer.Start();
-    }
-
-    private void OnFontPreviewTick(object? sender, EventArgs e)
-    {
-        _fontPreviewTimer.Stop();
-        if (_pendingFontPreview is not string name)
+        var picker = new FontPickerWindow(_services.Settings.UiFontFamily)
         {
-            return;
-        }
+            Owner = this
+        };
 
-        AppFontService.PreviewOn(this, name);
-    }
-
-    private void CommitFontFamily(string name)
-    {
-        _fontPreviewTimer.Stop();
-        _pendingFontPreview = null;
-        FilterFontFamilies(string.Empty);
-        FontFamilyBox.SelectedItem = name;
-        FontFamilyBox.Text = name;
-        if (_suppressUiEvents || !IsLoaded)
+        if (picker.ShowDialog() == true && !string.IsNullOrWhiteSpace(picker.SelectedFont))
         {
-            return;
+            _services.Settings.SetUiFontFamily(picker.SelectedFont);
+            FillFontFamilyBox(picker.SelectedFont);
         }
-
-        _services.Settings.SetUiFontFamily(name);
-        AppFontService.ClearPreview(this);
-    }
-
-    private void FilterFontFamilies(string query, int? caret = null)
-    {
-        if (FontFamilyBox.ItemsSource == null)
-        {
-            return;
-        }
-
-        _suppressFontFilter = true;
-        try
-        {
-            if (CollectionViewSource.GetDefaultView(FontFamilyBox.ItemsSource) is not ICollectionView view)
-            {
-                return;
-            }
-
-            string text = FontFamilyBox.Text ?? string.Empty;
-            int restoreCaret = caret ?? GetFontFamilyCaretIndex();
-            string q = query.Trim();
-            if (string.IsNullOrEmpty(q))
-            {
-                view.Filter = null;
-            }
-            else
-            {
-                view.Filter = obj => obj is string name && FontNameMatches(name, q);
-            }
-
-            view.Refresh();
-            FontFamilyBox.Text = text;
-            SetFontFamilyCaretIndex(restoreCaret);
-        }
-        finally
-        {
-            _suppressFontFilter = false;
-        }
-    }
-
-    private TextBox? GetFontFamilyEditBox()
-    {
-        return FontFamilyBox.Template?.FindName("PART_EditableTextBox", FontFamilyBox) as TextBox;
-    }
-
-    private int GetFontFamilyCaretIndex()
-    {
-        return GetFontFamilyEditBox()?.CaretIndex ?? (FontFamilyBox.Text?.Length ?? 0);
-    }
-
-    private void SetFontFamilyCaretIndex(int caret)
-    {
-        if (GetFontFamilyEditBox() is not TextBox box)
-        {
-            return;
-        }
-
-        int max = box.Text?.Length ?? 0;
-        box.CaretIndex = Math.Clamp(caret, 0, max);
-    }
-
-    private static bool FontNameMatches(string name, string query)
-    {
-        if (name.Contains(query, StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        string initials = PinyinUtil.GetInitials(name);
-        return initials.Contains(query, StringComparison.OrdinalIgnoreCase);
     }
 
     private void OnTextOnlyToggled(object sender, RoutedEventArgs e)

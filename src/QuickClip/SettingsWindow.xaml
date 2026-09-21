@@ -8,10 +8,10 @@
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         Title="QuickClip 设置"
-        Width="540"
-        Height="720"
-        MinWidth="400"
-        MinHeight="420"
+        Width="720"
+        Height="540"
+        MinWidth="600"
+        MinHeight="440"
         WindowStartupLocation="Manual"
         ShowInTaskbar="False"
         ResizeMode="CanResize"
@@ -22,6 +22,53 @@
         BorderThickness="1"
         SnapsToDevicePixels="True"
         UseLayoutRounding="True">
+
+    <Window.Resources>
+        <Style x:Key="SettingsNavListBoxItemStyle" TargetType="ListBoxItem">
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource Theme.TextSecondary}" />
+            <Setter Property="Height" Value="38" />
+            <Setter Property="Margin" Value="0,2" />
+            <Setter Property="Padding" Value="10,0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="RootBorder"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="6"
+                                Padding="{TemplateBinding Padding}">
+                            <Grid>
+                                <!-- 左侧高亮指示条（选中时显示） -->
+                                <Border x:Name="Indicator"
+                                        Width="3"
+                                        Height="18"
+                                        HorizontalAlignment="Left"
+                                        VerticalAlignment="Center"
+                                        CornerRadius="1.5"
+                                        Background="{DynamicResource Theme.Accent}"
+                                        Visibility="Collapsed" />
+                                <ContentPresenter Margin="6,0,0,0" VerticalAlignment="Center" />
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="RootBorder" Property="Background" Value="{DynamicResource Theme.CardHover}" />
+                                <Setter Property="Foreground" Value="{DynamicResource Theme.Text}" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="RootBorder" Property="Background" Value="{DynamicResource Theme.CardSelected}" />
+                                <Setter TargetName="Indicator" Property="Visibility" Value="Visible" />
+                                <Setter Property="Foreground" Value="{DynamicResource Theme.Accent}" />
+                                <Setter Property="FontWeight" Value="SemiBold" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
 
     <shell:WindowChrome.WindowChrome>
         <shell:WindowChrome CaptionHeight="40"
@@ -75,1097 +122,1138 @@
             </Button>
         </Grid>
 
-        <!--
-          双列主题 ScrollViewer：内容撑高（如 OCR 引擎面板展开）时 extent 跟随，
-          滚动条列 Auto 宽（约 6px，隐藏时为 0），不再留死白/黑条。
-        -->
-        <ScrollViewer x:Name="SettingsScrollViewer"
-                      Grid.Row="1"
-                      Background="{DynamicResource Theme.Panel}"
-                      VerticalScrollBarVisibility="Auto"
-                      HorizontalScrollBarVisibility="Disabled"
-                      Padding="22,8,12,28"
-                      CanContentScroll="False"
-                      Focusable="False"
-                      Template="{StaticResource ThemeOverlayScrollViewer}">
-            <StackPanel Background="{DynamicResource Theme.Panel}"
-                        Margin="0,0,0,12">
+        <!-- 主体区域：左侧分类导航 + 右侧内容区 -->
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="150" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
 
-                <!-- ========== 快捷键 ========== -->
-                <!-- ========== 外观 ========== -->
-                <TextBlock Text="外观"
-                           Foreground="{DynamicResource Theme.Text}"
-                           FontSize="16"
-                           FontWeight="SemiBold"
-                           Margin="0,8,0,10" />
-                <Border Padding="16,14"
-                        CornerRadius="12"
-                        Background="{DynamicResource Theme.Card}"
-                        BorderBrush="{DynamicResource Theme.Border}"
-                        BorderThickness="1">
-                    <StackPanel>
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="100" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="主题"
-                                       Foreground="{DynamicResource Theme.TextSecondary}"
-                                       FontSize="13"
-                                       VerticalAlignment="Center" />
-                            <ComboBox x:Name="ThemeBox"
-                                      Grid.Column="1"
-                                      Height="36"
-                                      SelectionChanged="OnThemeChanged"
-                                      PreviewMouseWheel="OnComboBoxPreviewMouseWheel">
-                                <ComboBox.ItemTemplate>
-                                    <DataTemplate>
-                                        <StackPanel Orientation="Horizontal">
-                                            <Border Width="16" Height="16"
-                                                    CornerRadius="4"
-                                                    Margin="0,0,10,0"
-                                                    BorderBrush="{DynamicResource Theme.Border}"
-                                                    BorderThickness="1"
-                                                    Background="{Binding Swatch}" />
-                                            <TextBlock Text="{Binding Name}"
-                                                       VerticalAlignment="Center"
-                                                       Foreground="{DynamicResource Theme.Text}" />
-                                        </StackPanel>
-                                    </DataTemplate>
-                                </ComboBox.ItemTemplate>
-                            </ComboBox>
-                        </Grid>
-                        <Grid Margin="0,12,0,0">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="100" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="字体"
-                                       Foreground="{DynamicResource Theme.TextSecondary}"
-                                       FontSize="13"
-                                       VerticalAlignment="Center" />
-                             <ComboBox x:Name="FontFamilyBox"
-                                       Grid.Column="1"
-                                       Height="36"
-                                       IsEditable="True"
-                                       IsTextSearchEnabled="False"
-                                       StaysOpenOnEdit="True"
-                                       VirtualizingStackPanel.IsVirtualizing="True"
-                                       VirtualizingStackPanel.VirtualizationMode="Recycling"
-                                       ScrollViewer.CanContentScroll="True"
-                                       MaxDropDownHeight="280"
-                                       ToolTip="输入名称筛选本机字体"
-                                       SelectionChanged="OnFontFamilyChanged"
-                                       DropDownClosed="OnFontFamilyDropDownClosed"
-                                       PreviewKeyDown="OnFontFamilyPreviewKeyDown"
-                                       LostKeyboardFocus="OnFontFamilyLostKeyboardFocus"
-                                       PreviewMouseWheel="OnComboBoxPreviewMouseWheel">
-                                 <ComboBox.ItemsPanel>
-                                     <ItemsPanelTemplate>
-                                         <VirtualizingStackPanel />
-                                     </ItemsPanelTemplate>
-                                 </ComboBox.ItemsPanel>
-                                 <ComboBox.ItemTemplate>
-                                     <DataTemplate>
-                                         <TextBlock Text="{Binding}"
-                                                    FontFamily="Segoe UI, Microsoft YaHei UI, Microsoft YaHei, sans-serif" />
-                                     </DataTemplate>
-                                 </ComboBox.ItemTemplate>
-                             </ComboBox>
-                        </Grid>
-                    </StackPanel>
-                </Border>
+            <!-- 左侧导航栏 -->
+            <Border Grid.Column="0"
+                    Background="{DynamicResource Theme.Panel}"
+                    BorderBrush="{DynamicResource Theme.Border}"
+                    BorderThickness="0,0,1,0">
+                <ListBox x:Name="NavListBox"
+                         Background="Transparent"
+                         BorderThickness="0"
+                         Margin="8,8,8,8"
+                         SelectionChanged="OnNavSelectionChanged"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                         ScrollViewer.VerticalScrollBarVisibility="Auto"
+                         ItemContainerStyle="{StaticResource SettingsNavListBoxItemStyle}">
+                    <ListBoxItem Tag="Appearance" IsSelected="True">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <ui:SymbolIcon Symbol="Color24" FontSize="16" />
+                            <TextBlock Text="外观" Margin="10,0,0,0" FontSize="13" />
+                        </StackPanel>
+                    </ListBoxItem>
+                    <ListBoxItem Tag="Hotkeys">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <ui:SymbolIcon Symbol="Keyboard24" FontSize="16" />
+                            <TextBlock Text="快捷键" Margin="10,0,0,0" FontSize="13" />
+                        </StackPanel>
+                    </ListBoxItem>
+                    <ListBoxItem Tag="General">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <ui:SymbolIcon Symbol="Settings24" FontSize="16" />
+                            <TextBlock Text="常规" Margin="10,0,0,0" FontSize="13" />
+                        </StackPanel>
+                    </ListBoxItem>
+                    <ListBoxItem Tag="SmartServices">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <ui:SymbolIcon Symbol="Sparkle24" FontSize="16" />
+                            <TextBlock Text="智能服务" Margin="10,0,0,0" FontSize="13" />
+                        </StackPanel>
+                    </ListBoxItem>
+                    <ListBoxItem Tag="About">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <ui:SymbolIcon Symbol="Info24" FontSize="16" />
+                            <TextBlock Text="关于" Margin="10,0,0,0" FontSize="13" />
+                        </StackPanel>
+                    </ListBoxItem>
+                </ListBox>
+            </Border>
 
-                <TextBlock Text="快捷键"
-                           Foreground="{DynamicResource Theme.Text}"
-                           FontSize="16"
-                           FontWeight="SemiBold"
-                           Margin="0,22,0,10" />
+            <!-- 右侧分类内容区 -->
+            <ScrollViewer x:Name="SettingsScrollViewer"
+                          Grid.Column="1"
+                          Background="{DynamicResource Theme.Panel}"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled"
+                          Padding="24,10,18,24"
+                          CanContentScroll="False"
+                          Focusable="False"
+                          Template="{StaticResource ThemeOverlayScrollViewer}">
+                <Grid Background="{DynamicResource Theme.Panel}">
 
-                <Border Padding="0"
-                        CornerRadius="12"
-                        Background="{DynamicResource Theme.Card}"
-                        BorderBrush="{DynamicResource Theme.Border}"
-                        BorderThickness="1">
-                    <StackPanel>
-
-                        <!-- 分区：全局 -->
-                        <TextBlock Text="全局"
-                                   Foreground="{DynamicResource Theme.TextSecondary}"
-                                   FontSize="11"
+                    <!-- ========== 1. 外观面板 ========== -->
+                    <StackPanel x:Name="AppearancePanel" Visibility="Visible" Margin="0,0,0,12">
+                        <TextBlock Text="外观"
+                                   Foreground="{DynamicResource Theme.Text}"
+                                   FontSize="16"
                                    FontWeight="SemiBold"
-                                   Margin="16,14,16,6" />
-
-                        <!-- 系统剪贴板接管（含固定 Win+V 唤起面板；不可改键） -->
-                        <Grid Margin="16,4,16,2">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="168" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="系统剪贴板接管"
-                                       Foreground="{DynamicResource Theme.Text}"
-                                       FontSize="13"
-                                       VerticalAlignment="Center" />
-                            <Border Grid.Column="1"
-                                    Height="34"
-                                    Padding="10,0"
-                                    CornerRadius="4"
-                                    Background="{DynamicResource Theme.Search}"
-                                    BorderBrush="{DynamicResource Theme.Border}"
-                                    BorderThickness="1">
-                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                    <Border x:Name="SysClipboardStatusBadge"
-                                            Padding="6,2"
-                                            CornerRadius="4"
-                                            Background="{DynamicResource Theme.AccentMuted}"
-                                            VerticalAlignment="Center">
-                                        <TextBlock x:Name="SysClipboardStatusText"
-                                                   FontSize="11.5"
-                                                   FontWeight="SemiBold"
-                                                   Foreground="{DynamicResource Theme.Accent}"
-                                                   Text="已自动彻底接管" />
-                                    </Border>
-                                </StackPanel>
-                            </Border>
-                            <ui:Button x:Name="SysClipboardToggleButton"
-                                       Grid.Column="2"
-                                       Margin="8,0,0,0"
-                                       Appearance="Secondary"
-                                       Height="34"
-                                       Padding="12,0"
-                                       VerticalAlignment="Center"
-                                       Content="关闭接管"
-                                       Click="OnToggleSysClipboardClicked"
-                                       ToolTip="关闭后按接管前的注册表快照还原 Windows 自带剪贴板历史与 Win+V" />
-                        </Grid>
-                        <TextBlock x:Name="SysClipboardHintText"
-                                   Margin="184,2,16,6"
-                                   Foreground="{DynamicResource Theme.TextMuted}"
-                                   FontSize="11.5"
-                                   LineHeight="16"
-                                   TextWrapping="Wrap"
-                                   Text="Win+V 固定唤起面板；系统剪贴板历史已释放，由 QuickClip 独占接管。" />
-
-                        <Rectangle Height="1" Fill="#12FFFFFF" Margin="16,8,16,8" />
-
-                        <!-- 全局纯文本粘贴：固定 Ctrl+Shift+V，仅启用/禁用 -->
-                        <Grid Margin="16,4,16,4">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="168" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="全局纯文本粘贴"
-                                       Foreground="{DynamicResource Theme.Text}"
-                                       FontSize="13"
-                                       VerticalAlignment="Center" />
-                            <Border Grid.Column="1"
-                                    Height="34"
-                                    Padding="10,0"
-                                    CornerRadius="4"
-                                    Background="{DynamicResource Theme.Search}"
-                                    BorderBrush="{DynamicResource Theme.Border}"
-                                    BorderThickness="1"
-                                    VerticalAlignment="Center">
-                                <TextBlock Text="Ctrl + Shift + V"
-                                           Foreground="{DynamicResource Theme.TextSecondary}"
-                                           FontSize="12.5"
-                                           VerticalAlignment="Center" />
-                            </Border>
-                        </Grid>
-                        <CheckBox x:Name="PlainPasteEnabledCheck"
-                                  Margin="184,2,16,4"
-                                  Foreground="{DynamicResource Theme.TextSecondary}"
-                                  FontSize="12"
-                                  Content="启用此全局热键"
-                                  Checked="OnPlainPasteEnabledToggled"
-                                  Unchecked="OnPlainPasteEnabledToggled" />
-
-                        <!-- 分区：面板内 -->
-                        <Rectangle Height="1" Fill="#12FFFFFF" Margin="16,10,16,4" />
-                        <TextBlock Text="面板内"
-                                   Foreground="{DynamicResource Theme.TextSecondary}"
-                                   FontSize="11"
-                                   FontWeight="SemiBold"
-                                   Margin="16,8,16,6" />
-
-                        <!-- 粘贴选中 -->
-                        <Grid Margin="16,4,16,4">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="168" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="粘贴选中项"
-                                       Foreground="{DynamicResource Theme.Text}"
-                                       FontSize="13"
-                                       VerticalAlignment="Center" />
-                            <TextBox x:Name="PasteSelectedBox"
-                                     Grid.Column="1"
-                                     Height="34"
-                                     Padding="10,0"
-                                     IsReadOnly="True"
-                                     VerticalContentAlignment="Center"
-                                     CaretBrush="Transparent"
-                                     Tag="PasteSelected"
-                                     PreviewKeyDown="HotkeyBox_PreviewKeyDown"
-                                     GotFocus="HotkeyBox_GotFocus" />
-                            <ui:Button Grid.Column="2"
-                                       Margin="8,0,0,0"
-                                       Appearance="Secondary"
-                                       Height="34"
-                                       Padding="12,0"
-                                       Content="默认"
-                                       Tag="PasteSelected"
-                                       Click="OnResetHotkeyClicked" />
-                        </Grid>
-
-                        <!-- 纯文本粘贴选中 -->
-                        <Grid Margin="16,4,16,4">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="168" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="纯文本粘贴选中项"
-                                       Foreground="{DynamicResource Theme.Text}"
-                                       FontSize="13"
-                                       VerticalAlignment="Center" />
-                            <TextBox x:Name="PasteSelectedPlainBox"
-                                     Grid.Column="1"
-                                     Height="34"
-                                     Padding="10,0"
-                                     IsReadOnly="True"
-                                     VerticalContentAlignment="Center"
-                                     CaretBrush="Transparent"
-                                     Tag="PasteSelectedPlain"
-                                     PreviewKeyDown="HotkeyBox_PreviewKeyDown"
-                                     GotFocus="HotkeyBox_GotFocus" />
-                            <ui:Button Grid.Column="2"
-                                       Margin="8,0,0,0"
-                                       Appearance="Secondary"
-                                       Height="34"
-                                       Padding="12,0"
-                                       Content="默认"
-                                       Tag="PasteSelectedPlain"
-                                       Click="OnResetHotkeyClicked" />
-                        </Grid>
-
-                        <!-- 窗口置顶（产品热键，可改） -->
-                        <Grid Margin="16,4,16,4">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="168" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="窗口置顶 / 取消"
-                                       Foreground="{DynamicResource Theme.Text}"
-                                       FontSize="13"
-                                       VerticalAlignment="Center" />
-                            <TextBox x:Name="TogglePinBox"
-                                     Grid.Column="1"
-                                     Height="34"
-                                     Padding="10,0"
-                                     IsReadOnly="True"
-                                     VerticalContentAlignment="Center"
-                                     CaretBrush="Transparent"
-                                     Tag="TogglePin"
-                                     PreviewKeyDown="HotkeyBox_PreviewKeyDown"
-                                     GotFocus="HotkeyBox_GotFocus" />
-                            <ui:Button Grid.Column="2"
-                                       Margin="8,0,0,0"
-                                       Appearance="Secondary"
-                                       Height="34"
-                                       Padding="12,0"
-                                       Content="默认"
-                                       Tag="TogglePin"
-                                       Click="OnResetHotkeyClicked" />
-                        </Grid>
-
-                        <!-- 开启/关闭收集栈 -->
-                        <Grid Margin="16,4,16,4">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="168" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="开启/关闭收集栈"
-                                       Foreground="{DynamicResource Theme.Text}"
-                                       FontSize="13"
-                                       VerticalAlignment="Center" />
-                            <TextBox x:Name="StartStackBox"
-                                     Grid.Column="1"
-                                     Height="34"
-                                     Padding="10,0"
-                                     IsReadOnly="True"
-                                     VerticalContentAlignment="Center"
-                                     CaretBrush="Transparent"
-                                     Tag="StartStack"
-                                     PreviewKeyDown="HotkeyBox_PreviewKeyDown"
-                                     GotFocus="HotkeyBox_GotFocus" />
-                            <ui:Button Grid.Column="2"
-                                       Margin="8,0,0,0"
-                                       Appearance="Secondary"
-                                       Height="34"
-                                       Padding="12,0"
-                                       Content="默认"
-                                       Tag="StartStack"
-                                       Click="OnResetHotkeyClicked" />
-                        </Grid>
-
-                        <!-- 仅在捕获快捷键出错 / 成功改绑时显示 -->
-                        <TextBlock x:Name="HotkeyHintText"
-                                   Margin="16,6,16,14"
-                                   Foreground="{DynamicResource Theme.Accent}"
-                                   FontSize="11.5"
-                                   TextWrapping="Wrap"
-                                   Visibility="Collapsed" />
-                    </StackPanel>
-                </Border>
-
-                <!-- ========== 通用 ========== -->
-                <TextBlock Text="通用"
-                           Foreground="{DynamicResource Theme.Text}"
-                           FontSize="16"
-                           FontWeight="SemiBold"
-                           Margin="0,22,0,10" />
-                <Border Padding="16,14"
-                        CornerRadius="12"
-                        Background="{DynamicResource Theme.Card}"
-                        BorderBrush="{DynamicResource Theme.Border}"
-                        BorderThickness="1">
-                    <StackPanel>
-                        <CheckBox x:Name="AutoStartCheck"
-                                  Foreground="{DynamicResource Theme.TextSecondary}"
-                                  FontSize="13"
-                                  Content="开机自启动"
-                                  Checked="OnAutoStartToggled"
-                                  Unchecked="OnAutoStartToggled" />
-                        <CheckBox x:Name="AutoCheckUpdatesCheck"
-                                  Margin="0,10,0,0"
-                                  Foreground="{DynamicResource Theme.TextSecondary}"
-                                  FontSize="13"
-                                  Content="自动检查并下载更新"
-                                  Checked="OnAutoCheckUpdatesToggled"
-                                  Unchecked="OnAutoCheckUpdatesToggled" />
-                    </StackPanel>
-                </Border>
-
-                <!-- ========== AI 模型服务 ========== -->
-                <TextBlock Text="AI 模型服务"
-                           Foreground="{DynamicResource Theme.Text}"
-                           FontSize="16"
-                           FontWeight="SemiBold"
-                           Margin="0,22,0,10" />
-                <Border Padding="16,14"
-                        CornerRadius="12"
-                        Background="{DynamicResource Theme.Card}"
-                        BorderBrush="{DynamicResource Theme.Border}"
-                        BorderThickness="1">
-                    <StackPanel>
-                        <!-- 配置项下拉与增删 -->
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="100" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="配置选择"
-                                       Foreground="{DynamicResource Theme.TextSecondary}"
-                                       FontSize="13"
-                                       VerticalAlignment="Center" />
-                            <ComboBox x:Name="AiProfileBox"
-                                      Grid.Column="1"
-                                      Height="34"
-                                      DisplayMemberPath="Name"
-                                      SelectionChanged="OnAiProfileSelectionChanged"
-                                      PreviewMouseWheel="OnComboBoxPreviewMouseWheel" />
-                            <ui:Button x:Name="AddAiProfileButton"
-                                       Grid.Column="2"
-                                       Height="34"
-                                       Margin="8,0,0,0"
-                                       Padding="10,0"
-                                       Appearance="Secondary"
-                                       Content="新增"
-                                       Click="OnAddAiProfileClicked" />
-                            <ui:Button x:Name="DeleteAiProfileButton"
-                                       Grid.Column="3"
-                                       Height="34"
-                                       Margin="8,0,0,0"
-                                       Padding="10,0"
-                                       Appearance="Secondary"
-                                       Content="删除"
-                                       Click="OnDeleteAiProfileClicked" />
-                        </Grid>
-
-                        <Grid Margin="0,10,0,0">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="100" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="配置名称"
-                                       Foreground="{DynamicResource Theme.TextSecondary}"
-                                       FontSize="13"
-                                       VerticalAlignment="Center" />
-                            <ui:TextBox x:Name="AiProfileNameBox"
-                                        Grid.Column="1"
-                                        Height="34"
-                                        Padding="10,0"
-                                        VerticalContentAlignment="Center"
-                                        TextChanged="OnAiProfileNameTextChanged"
-                                        LostFocus="OnAiProfileNameLostFocus" />
-                        </Grid>
-
-                        <Grid Margin="0,10,0,0">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="100" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="接口地址"
-                                       Foreground="{DynamicResource Theme.TextSecondary}"
-                                       FontSize="13"
-                                       VerticalAlignment="Center" />
-                            <ui:TextBox x:Name="AiApiUrlBox"
-                                        Grid.Column="1"
-                                        Height="34"
-                                        Padding="10,0"
-                                        PlaceholderText="https://api.openai.com/v1/chat/completions"
-                                        VerticalContentAlignment="Center"
-                                        TextChanged="OnAiApiUrlTextChanged"
-                                        LostFocus="OnAiConfigLostFocus" />
-                            <ui:Button x:Name="FillSampleUrlButton"
-                                       Grid.Column="2"
-                                       Height="34"
-                                       Margin="8,0,0,0"
-                                       Padding="10,0"
-                                       Appearance="Secondary"
-                                       Content="填入样例"
-                                       ToolTip="填入默认样例地址并直接选中域名段供快速编辑"
-                                       Click="OnFillSampleUrlClicked" />
-                        </Grid>
-
-                        <Grid Margin="0,10,0,0">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="100" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="API Key"
-                                       Foreground="{DynamicResource Theme.TextSecondary}"
-                                       FontSize="13"
-                                       VerticalAlignment="Center" />
-                            <PasswordBox x:Name="AiApiKeyBox"
-                                         Grid.Column="1"
-                                         Height="34"
-                                         Padding="10,0"
-                                         VerticalContentAlignment="Center"
-                                         LostFocus="OnAiConfigLostFocus" />
-                        </Grid>
-
-                        <Grid Margin="0,10,0,0">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="100" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <StackPanel Grid.Column="1" Orientation="Horizontal">
-                                <ui:Button x:Name="FetchModelsButton"
-                                           Height="34"
-                                           Padding="12,0"
-                                           Appearance="Secondary"
-                                           Content="获取模型列表"
-                                           Click="OnFetchModelsClicked" />
-                                <ui:Button x:Name="AiTestButton"
-                                           Height="34"
-                                           Margin="8,0,0,0"
-                                           Padding="12,0"
-                                           Appearance="Secondary"
-                                           Content="测试接口"
-                                           Click="OnAiTestClicked" />
-                            </StackPanel>
-                        </Grid>
-                        <TextBlock x:Name="AiTestStatus"
-                                   Margin="100,8,0,0"
-                                   Foreground="{DynamicResource Theme.TextSecondary}"
-                                   FontSize="11.5"
-                                   TextWrapping="Wrap"
-                                   Visibility="Collapsed" />
-                    </StackPanel>
-                </Border>
-
-                <!-- ========== OCR：下拉选引擎，默认系统离线 ========== -->
-                <TextBlock Text="OCR 识别"
-                           Foreground="{DynamicResource Theme.Text}"
-                           FontSize="16"
-                           FontWeight="SemiBold"
-                           Margin="0,22,0,10" />
-                <Border Padding="16,14"
-                        CornerRadius="12"
-                        Background="{DynamicResource Theme.Card}"
-                        BorderBrush="{DynamicResource Theme.Border}"
-                        BorderThickness="1">
-                    <StackPanel>
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="100" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="识别引擎"
-                                       Foreground="{DynamicResource Theme.TextSecondary}"
-                                       FontSize="13"
-                                       VerticalAlignment="Center" />
-                            <ComboBox x:Name="OcrEngineBox"
-                                      Grid.Column="1"
-                                      Height="34"
-                                      SelectionChanged="OnOcrEngineChanged"
-                                      PreviewMouseWheel="OnComboBoxPreviewMouseWheel">
-                                <ComboBoxItem Content="系统自带" />
-                                <ComboBoxItem Content="离线模型（PP-OCRv6）" />
-                                <ComboBoxItem Content="OpenAI 兼容" />
-                            </ComboBox>
-                        </Grid>
-                        <TextBlock x:Name="OcrEngineHint"
-                                   Margin="0,8,0,0"
-                                   Foreground="{DynamicResource Theme.TextMuted}"
-                                   FontSize="11.5"
-                                   TextWrapping="Wrap" />
-
-                        <StackPanel x:Name="LocalOcrPanel" Margin="0,14,0,0" Visibility="Collapsed">
-                            <StackPanel.Resources>
-                                <Style x:Key="OcrDownloadProgressBar" TargetType="ProgressBar">
-                                    <Setter Property="Height" Value="6" />
-                                    <Setter Property="Minimum" Value="0" />
-                                    <Setter Property="Maximum" Value="100" />
-                                    <Setter Property="BorderThickness" Value="0" />
-                                    <Setter Property="Visibility" Value="Collapsed" />
-                                    <Setter Property="Template">
-                                        <Setter.Value>
-                                            <ControlTemplate TargetType="ProgressBar">
-                                                <!-- PART_Track 必须存在，否则 Value 不会驱动指示条宽度 -->
-                                                <Border x:Name="PART_Track"
-                                                        Background="{DynamicResource Theme.Border}"
-                                                        CornerRadius="3"
-                                                        Height="6">
-                                                    <Border x:Name="PART_Indicator"
-                                                            HorizontalAlignment="Left"
-                                                            Background="{DynamicResource Theme.Accent}"
-                                                            CornerRadius="3" />
-                                                </Border>
-                                            </ControlTemplate>
-                                        </Setter.Value>
-                                    </Setter>
-                                </Style>
-                            </StackPanel.Resources>
-                            <TextBlock Text="选择模型包"
-                                       Foreground="{DynamicResource Theme.TextSecondary}"
-                                       FontSize="12"
-                                       Margin="0,0,0,8" />
-
-                            <Border x:Name="OcrPackSmallCard"
-                                    Padding="12,10"
-                                    CornerRadius="8"
-                                    Cursor="Hand"
-                                    BorderThickness="1"
-                                    Background="{DynamicResource Theme.Search}"
-                                    BorderBrush="{DynamicResource Theme.Border}"
-                                    MouseLeftButtonUp="OnOcrPackCardClicked"
-                                    Tag="Small">
+                                   Margin="0,4,0,12" />
+                        <Border Padding="16,14"
+                                CornerRadius="12"
+                                Background="{DynamicResource Theme.Card}"
+                                BorderBrush="{DynamicResource Theme.Border}"
+                                BorderThickness="1">
+                            <StackPanel>
                                 <Grid>
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                    </Grid.RowDefinitions>
                                     <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="100" />
                                         <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <StackPanel>
-                                        <StackPanel Orientation="Horizontal">
-                                            <TextBlock Text="均衡"
-                                                       Foreground="{DynamicResource Theme.Text}"
-                                                       FontSize="13"
-                                                       FontWeight="SemiBold" />
-                                            <TextBlock Text="PP-OCRv6 Small"
-                                                       Margin="8,0,0,0"
-                                                       Foreground="{DynamicResource Theme.TextSecondary}"
-                                                       FontSize="12.5"
-                                                       VerticalAlignment="Center" />
-                                        </StackPanel>
-                                        <TextBlock Text="约 30 MB · 识别 81.3% · 检测 84.1%"
-                                                   Margin="0,4,0,0"
-                                                   Foreground="{DynamicResource Theme.TextMuted}"
-                                                   FontSize="11.5" />
-                                        <TextBlock Text="日常截图够用"
-                                                   Margin="0,2,0,0"
-                                                   Foreground="{DynamicResource Theme.TextSecondary}"
-                                                   FontSize="11.5" />
-                                        <TextBlock x:Name="OcrPackSmallStatus"
-                                                   Margin="0,4,0,0"
-                                                   Foreground="{DynamicResource Theme.TextMuted}"
-                                                   FontSize="11"
-                                                   TextWrapping="Wrap" />
-                                    </StackPanel>
-                                    <ui:Button x:Name="OcrPackSmallButton"
-                                               Grid.Column="1"
-                                               Appearance="Secondary"
-                                               Height="32"
-                                               Padding="12,0"
-                                               VerticalAlignment="Center"
-                                               Margin="12,0,0,0"
-                                               Content="下载"
-                                               Tag="Small"
-                                               Click="OnOcrPackActionClicked" />
-                                    <ProgressBar x:Name="OcrPackSmallProgress"
-                                                 Grid.Row="1"
-                                                 Grid.ColumnSpan="2"
-                                                 Margin="0,8,0,0"
-                                                 Style="{StaticResource OcrDownloadProgressBar}" />
+                                    <TextBlock Text="主题"
+                                               Foreground="{DynamicResource Theme.TextSecondary}"
+                                               FontSize="13"
+                                               VerticalAlignment="Center" />
+                                    <ComboBox x:Name="ThemeBox"
+                                              Grid.Column="1"
+                                              Height="36"
+                                              SelectionChanged="OnThemeChanged"
+                                              PreviewMouseWheel="OnComboBoxPreviewMouseWheel">
+                                        <ComboBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <StackPanel Orientation="Horizontal">
+                                                    <Border Width="16" Height="16"
+                                                            CornerRadius="4"
+                                                            Margin="0,0,10,0"
+                                                            BorderBrush="{DynamicResource Theme.Border}"
+                                                            BorderThickness="1"
+                                                            Background="{Binding Swatch}" />
+                                                    <TextBlock Text="{Binding Name}"
+                                                               VerticalAlignment="Center"
+                                                               Foreground="{DynamicResource Theme.Text}" />
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </ComboBox.ItemTemplate>
+                                    </ComboBox>
                                 </Grid>
-                            </Border>
-
-                            <Border x:Name="OcrPackMediumCard"
-                                    Margin="0,8,0,0"
-                                    Padding="12,10"
-                                    CornerRadius="8"
-                                    Cursor="Hand"
-                                    BorderThickness="1"
-                                    Background="{DynamicResource Theme.Search}"
-                                    BorderBrush="{DynamicResource Theme.Border}"
-                                    MouseLeftButtonUp="OnOcrPackCardClicked"
-                                    Tag="Medium">
-                                <Grid>
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                    </Grid.RowDefinitions>
+                                <Grid Margin="0,12,0,0">
                                     <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="100" />
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <StackPanel>
-                                        <StackPanel Orientation="Horizontal">
-                                            <TextBlock Text="高精度"
-                                                       Foreground="{DynamicResource Theme.Text}"
-                                                       FontSize="13"
-                                                       FontWeight="SemiBold" />
-                                            <Border Margin="8,0,0,0"
-                                                    Padding="6,1"
+                                    <TextBlock Text="字体"
+                                               Foreground="{DynamicResource Theme.TextSecondary}"
+                                               FontSize="13"
+                                               VerticalAlignment="Center" />
+                                    <ComboBox x:Name="FontFamilyBox"
+                                              Grid.Column="1"
+                                              Height="36"
+                                              IsEditable="False"
+                                              SelectionChanged="OnFontFamilyChanged"
+                                              PreviewMouseWheel="OnComboBoxPreviewMouseWheel" />
+                                    <ui:Button x:Name="MoreFontsButton"
+                                               Grid.Column="2"
+                                               Margin="8,0,0,0"
+                                               Height="36"
+                                               Padding="12,0"
+                                               Appearance="Secondary"
+                                               Content="更多"
+                                               ToolTip="选择本机已安装字体或外部字体文件"
+                                               Click="OnMoreFontsClicked" />
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+
+                    <!-- ========== 2. 快捷键面板 ========== -->
+                    <StackPanel x:Name="HotkeysPanel" Visibility="Collapsed" Margin="0,0,0,12">
+                        <TextBlock Text="快捷键"
+                                   Foreground="{DynamicResource Theme.Text}"
+                                   FontSize="16"
+                                   FontWeight="SemiBold"
+                                   Margin="0,4,0,12" />
+                        <Border Padding="0"
+                                CornerRadius="12"
+                                Background="{DynamicResource Theme.Card}"
+                                BorderBrush="{DynamicResource Theme.Border}"
+                                BorderThickness="1">
+                            <StackPanel>
+                                <!-- 分区：全局 -->
+                                <TextBlock Text="全局"
+                                           Foreground="{DynamicResource Theme.TextSecondary}"
+                                           FontSize="11"
+                                           FontWeight="SemiBold"
+                                           Margin="16,14,16,6" />
+
+                                <!-- 系统剪贴板接管（含固定 Win+V 唤起面板；不可改键） -->
+                                <Grid Margin="16,4,16,2">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="168" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="系统剪贴板接管"
+                                               Foreground="{DynamicResource Theme.Text}"
+                                               FontSize="13"
+                                               VerticalAlignment="Center" />
+                                    <Border Grid.Column="1"
+                                            Height="34"
+                                            Padding="10,0"
+                                            CornerRadius="4"
+                                            Background="{DynamicResource Theme.Search}"
+                                            BorderBrush="{DynamicResource Theme.Border}"
+                                            BorderThickness="1">
+                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                            <Border x:Name="SysClipboardStatusBadge"
+                                                    Padding="6,2"
                                                     CornerRadius="4"
                                                     Background="{DynamicResource Theme.AccentMuted}"
                                                     VerticalAlignment="Center">
-                                                <TextBlock Text="推荐"
-                                                           FontSize="11"
+                                                <TextBlock x:Name="SysClipboardStatusText"
+                                                           FontSize="11.5"
                                                            FontWeight="SemiBold"
-                                                           Foreground="{DynamicResource Theme.Accent}" />
+                                                           Foreground="{DynamicResource Theme.Accent}"
+                                                           Text="已自动彻底接管" />
                                             </Border>
-                                            <TextBlock Text="PP-OCRv6 Medium"
-                                                       Margin="8,0,0,0"
-                                                       Foreground="{DynamicResource Theme.TextSecondary}"
-                                                       FontSize="12.5"
-                                                       VerticalAlignment="Center" />
                                         </StackPanel>
-                                        <TextBlock Text="约 132 MB · 识别 83.2% · 检测 86.2%"
-                                                   Margin="0,4,0,0"
-                                                   Foreground="{DynamicResource Theme.TextMuted}"
-                                                   FontSize="11.5" />
-                                        <TextBlock Text="屏幕、混排更稳"
-                                                   Margin="0,2,0,0"
-                                                   Foreground="{DynamicResource Theme.TextSecondary}"
-                                                   FontSize="11.5" />
-                                        <TextBlock x:Name="OcrPackMediumStatus"
-                                                   Margin="0,4,0,0"
-                                                   Foreground="{DynamicResource Theme.TextMuted}"
-                                                   FontSize="11"
-                                                   TextWrapping="Wrap" />
-                                    </StackPanel>
-                                    <ui:Button x:Name="OcrPackMediumButton"
-                                               Grid.Column="1"
+                                    </Border>
+                                    <ui:Button x:Name="SysClipboardToggleButton"
+                                               Grid.Column="2"
+                                               Margin="8,0,0,0"
                                                Appearance="Secondary"
-                                               Height="32"
+                                               Height="34"
                                                Padding="12,0"
                                                VerticalAlignment="Center"
-                                               Margin="12,0,0,0"
-                                               Content="下载"
-                                               Tag="Medium"
-                                               Click="OnOcrPackActionClicked" />
-                                    <ProgressBar x:Name="OcrPackMediumProgress"
-                                                 Grid.Row="1"
-                                                 Grid.ColumnSpan="2"
-                                                 Margin="0,8,0,0"
-                                                 Style="{StaticResource OcrDownloadProgressBar}" />
+                                               Content="关闭接管"
+                                               Click="OnToggleSysClipboardClicked"
+                                               ToolTip="关闭后按接管前的注册表快照还原 Windows 自带剪贴板历史与 Win+V" />
                                 </Grid>
-                            </Border>
+                                <TextBlock x:Name="SysClipboardHintText"
+                                           Margin="184,2,16,6"
+                                           Foreground="{DynamicResource Theme.TextMuted}"
+                                           FontSize="11.5"
+                                           LineHeight="16"
+                                           TextWrapping="Wrap"
+                                           Text="Win+V 固定唤起面板；系统剪贴板历史已释放，由 QuickClip 独占接管。" />
 
-                            <Border x:Name="OcrPackCustomCard"
-                                    Margin="0,8,0,0"
-                                    Padding="12,10"
-                                    CornerRadius="8"
-                                    Cursor="Hand"
-                                    BorderThickness="1"
-                                    Background="{DynamicResource Theme.Search}"
-                                    BorderBrush="{DynamicResource Theme.Border}"
-                                    MouseLeftButtonUp="OnOcrPackCardClicked"
-                                    Tag="Custom">
-                                <StackPanel>
-                                    <StackPanel Orientation="Horizontal">
-                                        <TextBlock Text="自定义"
-                                                   Foreground="{DynamicResource Theme.Text}"
-                                                   FontSize="13"
-                                                   FontWeight="SemiBold" />
-                                        <TextBlock Text="自备 det + rec + 字典"
-                                                   Margin="8,0,0,0"
+                                <Rectangle Height="1" Fill="#12FFFFFF" Margin="16,8,16,8" />
+
+                                <!-- 全局纯文本粘贴：固定 Ctrl+Shift+V，仅启用/禁用 -->
+                                <Grid Margin="16,4,16,4">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="168" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="全局纯文本粘贴"
+                                               Foreground="{DynamicResource Theme.Text}"
+                                               FontSize="13"
+                                               VerticalAlignment="Center" />
+                                    <Border Grid.Column="1"
+                                            Height="34"
+                                            Padding="10,0"
+                                            CornerRadius="4"
+                                            Background="{DynamicResource Theme.Search}"
+                                            BorderBrush="{DynamicResource Theme.Border}"
+                                            BorderThickness="1"
+                                            VerticalAlignment="Center">
+                                        <TextBlock Text="Ctrl + Shift + V"
                                                    Foreground="{DynamicResource Theme.TextSecondary}"
                                                    FontSize="12.5"
                                                    VerticalAlignment="Center" />
-                                    </StackPanel>
-                                    <TextBlock Text="大小按目录实际占用 · 精度自备"
-                                               Margin="0,4,0,0"
-                                               Foreground="{DynamicResource Theme.TextMuted}"
-                                               FontSize="11.5" />
-                                    <Grid Margin="0,8,0,0">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <TextBox x:Name="OcrCustomDirBox"
+                                    </Border>
+                                </Grid>
+                                <CheckBox x:Name="PlainPasteEnabledCheck"
+                                          Margin="184,2,16,4"
+                                          Foreground="{DynamicResource Theme.TextSecondary}"
+                                          FontSize="12"
+                                          Content="启用此全局热键"
+                                          Checked="OnPlainPasteEnabledToggled"
+                                          Unchecked="OnPlainPasteEnabledToggled" />
+
+                                <!-- 分区：面板内 -->
+                                <Rectangle Height="1" Fill="#12FFFFFF" Margin="16,10,16,4" />
+                                <TextBlock Text="面板内"
+                                           Foreground="{DynamicResource Theme.TextSecondary}"
+                                           FontSize="11"
+                                           FontWeight="SemiBold"
+                                           Margin="16,8,16,6" />
+
+                                <!-- 粘贴选中 -->
+                                <Grid Margin="16,4,16,4">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="168" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="粘贴选中项"
+                                               Foreground="{DynamicResource Theme.Text}"
+                                               FontSize="13"
+                                               VerticalAlignment="Center" />
+                                    <TextBox x:Name="PasteSelectedBox"
+                                             Grid.Column="1"
+                                             Height="34"
+                                             Padding="10,0"
+                                             IsReadOnly="True"
+                                             VerticalContentAlignment="Center"
+                                             CaretBrush="Transparent"
+                                             Tag="PasteSelected"
+                                             PreviewKeyDown="HotkeyBox_PreviewKeyDown"
+                                             GotFocus="HotkeyBox_GotFocus" />
+                                    <ui:Button Grid.Column="2"
+                                               Margin="8,0,0,0"
+                                               Appearance="Secondary"
+                                               Height="34"
+                                               Padding="12,0"
+                                               Content="默认"
+                                               Tag="PasteSelected"
+                                               Click="OnResetHotkeyClicked" />
+                                </Grid>
+
+                                <!-- 纯文本粘贴选中 -->
+                                <Grid Margin="16,4,16,4">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="168" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="纯文本粘贴选中项"
+                                               Foreground="{DynamicResource Theme.Text}"
+                                               FontSize="13"
+                                               VerticalAlignment="Center" />
+                                    <TextBox x:Name="PasteSelectedPlainBox"
+                                             Grid.Column="1"
+                                             Height="34"
+                                             Padding="10,0"
+                                             IsReadOnly="True"
+                                             VerticalContentAlignment="Center"
+                                             CaretBrush="Transparent"
+                                             Tag="PasteSelectedPlain"
+                                             PreviewKeyDown="HotkeyBox_PreviewKeyDown"
+                                             GotFocus="HotkeyBox_GotFocus" />
+                                    <ui:Button Grid.Column="2"
+                                               Margin="8,0,0,0"
+                                               Appearance="Secondary"
+                                               Height="34"
+                                               Padding="12,0"
+                                               Content="默认"
+                                               Tag="PasteSelectedPlain"
+                                               Click="OnResetHotkeyClicked" />
+                                </Grid>
+
+                                <!-- 窗口置顶（产品热键，可改） -->
+                                <Grid Margin="16,4,16,4">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="168" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="窗口置顶 / 取消"
+                                               Foreground="{DynamicResource Theme.Text}"
+                                               FontSize="13"
+                                               VerticalAlignment="Center" />
+                                    <TextBox x:Name="TogglePinBox"
+                                             Grid.Column="1"
+                                             Height="34"
+                                             Padding="10,0"
+                                             IsReadOnly="True"
+                                             VerticalContentAlignment="Center"
+                                             CaretBrush="Transparent"
+                                             Tag="TogglePin"
+                                             PreviewKeyDown="HotkeyBox_PreviewKeyDown"
+                                             GotFocus="HotkeyBox_GotFocus" />
+                                    <ui:Button Grid.Column="2"
+                                               Margin="8,0,0,0"
+                                               Appearance="Secondary"
+                                               Height="34"
+                                               Padding="12,0"
+                                               Content="默认"
+                                               Tag="TogglePin"
+                                               Click="OnResetHotkeyClicked" />
+                                </Grid>
+
+                                <!-- 开启/关闭收集栈 -->
+                                <Grid Margin="16,4,16,4">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="168" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="开启/关闭收集栈"
+                                               Foreground="{DynamicResource Theme.Text}"
+                                               FontSize="13"
+                                               VerticalAlignment="Center" />
+                                    <TextBox x:Name="StartStackBox"
+                                             Grid.Column="1"
+                                             Height="34"
+                                             Padding="10,0"
+                                             IsReadOnly="True"
+                                             VerticalContentAlignment="Center"
+                                             CaretBrush="Transparent"
+                                             Tag="StartStack"
+                                             PreviewKeyDown="HotkeyBox_PreviewKeyDown"
+                                             GotFocus="HotkeyBox_GotFocus" />
+                                    <ui:Button Grid.Column="2"
+                                               Margin="8,0,0,0"
+                                               Appearance="Secondary"
+                                               Height="34"
+                                               Padding="12,0"
+                                               Content="默认"
+                                               Tag="StartStack"
+                                               Click="OnResetHotkeyClicked" />
+                                </Grid>
+
+                                <!-- 仅在捕获快捷键出错 / 成功改绑时显示 -->
+                                <TextBlock x:Name="HotkeyHintText"
+                                           Margin="16,6,16,14"
+                                           Foreground="{DynamicResource Theme.Accent}"
+                                           FontSize="11.5"
+                                           TextWrapping="Wrap"
+                                           Visibility="Collapsed" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+
+                    <!-- ========== 3. 常规面板 ========== -->
+                    <StackPanel x:Name="GeneralPanel" Visibility="Collapsed" Margin="0,0,0,12">
+                        <TextBlock Text="系统行为"
+                                   Foreground="{DynamicResource Theme.Text}"
+                                   FontSize="16"
+                                   FontWeight="SemiBold"
+                                   Margin="0,4,0,12" />
+                        <Border Padding="16,14"
+                                CornerRadius="12"
+                                Background="{DynamicResource Theme.Card}"
+                                BorderBrush="{DynamicResource Theme.Border}"
+                                BorderThickness="1">
+                            <StackPanel>
+                                <CheckBox x:Name="AutoStartCheck"
+                                          Foreground="{DynamicResource Theme.TextSecondary}"
+                                          FontSize="13"
+                                          Content="开机自启动"
+                                          Checked="OnAutoStartToggled"
+                                          Unchecked="OnAutoStartToggled" />
+                                <CheckBox x:Name="AutoCheckUpdatesCheck"
+                                          Margin="0,10,0,0"
+                                          Foreground="{DynamicResource Theme.TextSecondary}"
+                                          FontSize="13"
+                                          Content="自动检查并下载更新"
+                                          Checked="OnAutoCheckUpdatesToggled"
+                                          Unchecked="OnAutoCheckUpdatesToggled" />
+                            </StackPanel>
+                        </Border>
+
+                        <TextBlock Text="存储与限制"
+                                   Foreground="{DynamicResource Theme.Text}"
+                                   FontSize="16"
+                                   FontWeight="SemiBold"
+                                   Margin="0,20,0,12" />
+                        <Border Padding="16,14"
+                                CornerRadius="12"
+                                Background="{DynamicResource Theme.Card}"
+                                BorderBrush="{DynamicResource Theme.Border}"
+                                BorderThickness="1">
+                            <StackPanel>
+                                <CheckBox x:Name="TextOnlyCheck"
+                                          Foreground="{DynamicResource Theme.TextSecondary}"
+                                          FontSize="13"
+                                          Content="仅记录文本（忽略图片/文件）"
+                                          Checked="OnTextOnlyToggled"
+                                          Unchecked="OnTextOnlyToggled" />
+                                <Grid Margin="0,14,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="100" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="最大条数"
+                                               Foreground="{DynamicResource Theme.TextSecondary}"
+                                               FontSize="13"
+                                               VerticalAlignment="Center" />
+                                    <TextBox x:Name="MaxHistoryBox"
+                                             Grid.Column="1"
+                                             Height="34"
+                                             Padding="10,0"
+                                             VerticalContentAlignment="Center"
+                                             LostFocus="OnMaxHistoryLostFocus" />
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+
+                    <!-- ========== 4. 智能服务面板 ========== -->
+                    <StackPanel x:Name="SmartServicesPanel" Visibility="Collapsed" Margin="0,0,0,12">
+                        <!-- AI 模型服务 -->
+                        <TextBlock Text="AI 模型服务"
+                                   Foreground="{DynamicResource Theme.Text}"
+                                   FontSize="16"
+                                   FontWeight="SemiBold"
+                                   Margin="0,4,0,12" />
+                        <Border Padding="16,14"
+                                CornerRadius="12"
+                                Background="{DynamicResource Theme.Card}"
+                                BorderBrush="{DynamicResource Theme.Border}"
+                                BorderThickness="1">
+                            <StackPanel>
+                                <!-- 配置项下拉与增删 -->
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="100" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="配置选择"
+                                               Foreground="{DynamicResource Theme.TextSecondary}"
+                                               FontSize="13"
+                                               VerticalAlignment="Center" />
+                                    <ComboBox x:Name="AiProfileBox"
+                                              Grid.Column="1"
+                                              Height="34"
+                                              DisplayMemberPath="Name"
+                                              SelectionChanged="OnAiProfileSelectionChanged"
+                                              PreviewMouseWheel="OnComboBoxPreviewMouseWheel" />
+                                    <ui:Button x:Name="AddAiProfileButton"
+                                               Grid.Column="2"
+                                               Height="34"
+                                               Margin="8,0,0,0"
+                                               Padding="10,0"
+                                               Appearance="Secondary"
+                                               Content="新增"
+                                               Click="OnAddAiProfileClicked" />
+                                    <ui:Button x:Name="DeleteAiProfileButton"
+                                               Grid.Column="3"
+                                               Height="34"
+                                               Margin="8,0,0,0"
+                                               Padding="10,0"
+                                               Appearance="Secondary"
+                                               Content="删除"
+                                               Click="OnDeleteAiProfileClicked" />
+                                </Grid>
+
+                                <Grid Margin="0,10,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="100" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="配置名称"
+                                               Foreground="{DynamicResource Theme.TextSecondary}"
+                                               FontSize="13"
+                                               VerticalAlignment="Center" />
+                                    <ui:TextBox x:Name="AiProfileNameBox"
+                                                Grid.Column="1"
+                                                Height="34"
+                                                Padding="10,0"
+                                                VerticalContentAlignment="Center"
+                                                TextChanged="OnAiProfileNameTextChanged"
+                                                LostFocus="OnAiProfileNameLostFocus" />
+                                </Grid>
+
+                                <Grid Margin="0,10,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="100" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="接口地址"
+                                               Foreground="{DynamicResource Theme.TextSecondary}"
+                                               FontSize="13"
+                                               VerticalAlignment="Center" />
+                                    <ui:TextBox x:Name="AiApiUrlBox"
+                                                Grid.Column="1"
+                                                Height="34"
+                                                Padding="10,0"
+                                                PlaceholderText="https://api.openai.com/v1/chat/completions"
+                                                VerticalContentAlignment="Center"
+                                                TextChanged="OnAiApiUrlTextChanged"
+                                                LostFocus="OnAiConfigLostFocus" />
+                                    <ui:Button x:Name="FillSampleUrlButton"
+                                               Grid.Column="2"
+                                               Height="34"
+                                               Margin="8,0,0,0"
+                                               Padding="10,0"
+                                               Appearance="Secondary"
+                                               Content="填入样例"
+                                               ToolTip="填入默认样例地址并直接选中域名段供快速编辑"
+                                               Click="OnFillSampleUrlClicked" />
+                                </Grid>
+
+                                <Grid Margin="0,10,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="100" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="API Key"
+                                               Foreground="{DynamicResource Theme.TextSecondary}"
+                                               FontSize="13"
+                                               VerticalAlignment="Center" />
+                                    <PasswordBox x:Name="AiApiKeyBox"
+                                                 Grid.Column="1"
                                                  Height="34"
                                                  Padding="10,0"
                                                  VerticalContentAlignment="Center"
-                                                 LostFocus="OnOcrCustomDirLostFocus" />
-                                        <ui:Button Grid.Column="1"
-                                                   Appearance="Secondary"
+                                                 LostFocus="OnAiConfigLostFocus" />
+                                </Grid>
+
+                                <Grid Margin="0,10,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="100" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                        <ui:Button x:Name="FetchModelsButton"
                                                    Height="34"
                                                    Padding="12,0"
+                                                   Appearance="Secondary"
+                                                   Content="获取模型列表"
+                                                   Click="OnFetchModelsClicked" />
+                                        <ui:Button x:Name="AiTestButton"
+                                                   Height="34"
                                                    Margin="8,0,0,0"
-                                                   Content="浏览"
-                                                   Click="OnOcrCustomBrowseClicked" />
-                                    </Grid>
-                                    <TextBlock x:Name="OcrPackCustomStatus"
-                                               Margin="0,6,0,0"
-                                               Foreground="{DynamicResource Theme.TextMuted}"
-                                               FontSize="11"
+                                                   Padding="12,0"
+                                                   Appearance="Secondary"
+                                                   Content="测试接口"
+                                                   Click="OnAiTestClicked" />
+                                    </StackPanel>
+                                </Grid>
+                                <TextBlock x:Name="AiTestStatus"
+                                           Margin="100,8,0,0"
+                                           Foreground="{DynamicResource Theme.TextSecondary}"
+                                           FontSize="11.5"
+                                           TextWrapping="Wrap"
+                                           Visibility="Collapsed" />
+                            </StackPanel>
+                        </Border>
+
+                        <!-- OCR 识别 -->
+                        <TextBlock Text="OCR 识别"
+                                   Foreground="{DynamicResource Theme.Text}"
+                                   FontSize="16"
+                                   FontWeight="SemiBold"
+                                   Margin="0,20,0,12" />
+                        <Border Padding="16,14"
+                                CornerRadius="12"
+                                Background="{DynamicResource Theme.Card}"
+                                BorderBrush="{DynamicResource Theme.Border}"
+                                BorderThickness="1">
+                            <StackPanel>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="100" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="识别引擎"
+                                               Foreground="{DynamicResource Theme.TextSecondary}"
+                                               FontSize="13"
+                                               VerticalAlignment="Center" />
+                                    <ComboBox x:Name="OcrEngineBox"
+                                              Grid.Column="1"
+                                              Height="34"
+                                              SelectionChanged="OnOcrEngineChanged"
+                                              PreviewMouseWheel="OnComboBoxPreviewMouseWheel">
+                                        <ComboBoxItem Content="系统自带" />
+                                        <ComboBoxItem Content="离线模型（PP-OCRv6）" />
+                                        <ComboBoxItem Content="OpenAI 兼容" />
+                                    </ComboBox>
+                                </Grid>
+                                <TextBlock x:Name="OcrEngineHint"
+                                           Margin="0,8,0,0"
+                                           Foreground="{DynamicResource Theme.TextMuted}"
+                                           FontSize="11.5"
+                                           TextWrapping="Wrap" />
+
+                                <StackPanel x:Name="LocalOcrPanel" Margin="0,14,0,0" Visibility="Collapsed">
+                                    <StackPanel.Resources>
+                                        <Style x:Key="OcrDownloadProgressBar" TargetType="ProgressBar">
+                                            <Setter Property="Height" Value="6" />
+                                            <Setter Property="Minimum" Value="0" />
+                                            <Setter Property="Maximum" Value="100" />
+                                            <Setter Property="BorderThickness" Value="0" />
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                            <Setter Property="Template">
+                                                <Setter.Value>
+                                                    <ControlTemplate TargetType="ProgressBar">
+                                                        <Border x:Name="PART_Track"
+                                                                Background="{DynamicResource Theme.Border}"
+                                                                CornerRadius="3"
+                                                                Height="6">
+                                                            <Border x:Name="PART_Indicator"
+                                                                    HorizontalAlignment="Left"
+                                                                    Background="{DynamicResource Theme.Accent}"
+                                                                    CornerRadius="3" />
+                                                        </Border>
+                                                    </ControlTemplate>
+                                                </Setter.Value>
+                                            </Setter>
+                                        </Style>
+                                    </StackPanel.Resources>
+                                    <TextBlock Text="选择模型包"
+                                               Foreground="{DynamicResource Theme.TextSecondary}"
+                                               FontSize="12"
+                                               Margin="0,0,0,8" />
+
+                                    <Border x:Name="OcrPackSmallCard"
+                                            Padding="12,10"
+                                            CornerRadius="8"
+                                            Cursor="Hand"
+                                            BorderThickness="1"
+                                            Background="{DynamicResource Theme.Search}"
+                                            BorderBrush="{DynamicResource Theme.Border}"
+                                            MouseLeftButtonUp="OnOcrPackCardClicked"
+                                            Tag="Small">
+                                        <Grid>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                            </Grid.RowDefinitions>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="均衡"
+                                                               Foreground="{DynamicResource Theme.Text}"
+                                                               FontSize="13"
+                                                               FontWeight="SemiBold" />
+                                                    <TextBlock Text="PP-OCRv6 Small"
+                                                               Margin="8,0,0,0"
+                                                               Foreground="{DynamicResource Theme.TextSecondary}"
+                                                               FontSize="12.5"
+                                                               VerticalAlignment="Center" />
+                                                </StackPanel>
+                                                <TextBlock Text="约 30 MB · 识别 81.3% · 检测 84.1%"
+                                                           Margin="0,4,0,0"
+                                                           Foreground="{DynamicResource Theme.TextMuted}"
+                                                           FontSize="11.5" />
+                                                <TextBlock Text="日常截图够用"
+                                                           Margin="0,2,0,0"
+                                                           Foreground="{DynamicResource Theme.TextSecondary}"
+                                                           FontSize="11.5" />
+                                                <TextBlock x:Name="OcrPackSmallStatus"
+                                                           Margin="0,4,0,0"
+                                                           Foreground="{DynamicResource Theme.TextMuted}"
+                                                           FontSize="11"
+                                                           TextWrapping="Wrap" />
+                                            </StackPanel>
+                                            <ui:Button x:Name="OcrPackSmallButton"
+                                                       Grid.Column="1"
+                                                       Appearance="Secondary"
+                                                       Height="32"
+                                                       Padding="12,0"
+                                                       VerticalAlignment="Center"
+                                                       Margin="12,0,0,0"
+                                                       Content="下载"
+                                                       Tag="Small"
+                                                       Click="OnOcrPackActionClicked" />
+                                            <ProgressBar x:Name="OcrPackSmallProgress"
+                                                         Grid.Row="1"
+                                                         Grid.ColumnSpan="2"
+                                                         Margin="0,8,0,0"
+                                                         Style="{StaticResource OcrDownloadProgressBar}" />
+                                        </Grid>
+                                    </Border>
+
+                                    <Border x:Name="OcrPackMediumCard"
+                                            Margin="0,8,0,0"
+                                            Padding="12,10"
+                                            CornerRadius="8"
+                                            Cursor="Hand"
+                                            BorderThickness="1"
+                                            Background="{DynamicResource Theme.Search}"
+                                            BorderBrush="{DynamicResource Theme.Border}"
+                                            MouseLeftButtonUp="OnOcrPackCardClicked"
+                                            Tag="Medium">
+                                        <Grid>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                            </Grid.RowDefinitions>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="高精度"
+                                                               Foreground="{DynamicResource Theme.Text}"
+                                                               FontSize="13"
+                                                               FontWeight="SemiBold" />
+                                                    <Border Margin="8,0,0,0"
+                                                            Padding="6,1"
+                                                            CornerRadius="4"
+                                                            Background="{DynamicResource Theme.AccentMuted}"
+                                                            VerticalAlignment="Center">
+                                                        <TextBlock Text="推荐"
+                                                                   FontSize="11"
+                                                                   FontWeight="SemiBold"
+                                                                   Foreground="{DynamicResource Theme.Accent}" />
+                                                    </Border>
+                                                    <TextBlock Text="PP-OCRv6 Medium"
+                                                               Margin="8,0,0,0"
+                                                               Foreground="{DynamicResource Theme.TextSecondary}"
+                                                               FontSize="12.5"
+                                                               VerticalAlignment="Center" />
+                                                </StackPanel>
+                                                <TextBlock Text="约 132 MB · 识别 83.2% · 检测 86.2%"
+                                                           Margin="0,4,0,0"
+                                                           Foreground="{DynamicResource Theme.TextMuted}"
+                                                           FontSize="11.5" />
+                                                <TextBlock Text="屏幕、混排更稳"
+                                                           Margin="0,2,0,0"
+                                                           Foreground="{DynamicResource Theme.TextSecondary}"
+                                                           FontSize="11.5" />
+                                                <TextBlock x:Name="OcrPackMediumStatus"
+                                                           Margin="0,4,0,0"
+                                                           Foreground="{DynamicResource Theme.TextMuted}"
+                                                           FontSize="11"
+                                                           TextWrapping="Wrap" />
+                                            </StackPanel>
+                                            <ui:Button x:Name="OcrPackMediumButton"
+                                                       Grid.Column="1"
+                                                       Appearance="Secondary"
+                                                       Height="32"
+                                                       Padding="12,0"
+                                                       VerticalAlignment="Center"
+                                                       Margin="12,0,0,0"
+                                                       Content="下载"
+                                                       Tag="Medium"
+                                                       Click="OnOcrPackActionClicked" />
+                                            <ProgressBar x:Name="OcrPackMediumProgress"
+                                                         Grid.Row="1"
+                                                         Grid.ColumnSpan="2"
+                                                         Margin="0,8,0,0"
+                                                         Style="{StaticResource OcrDownloadProgressBar}" />
+                                        </Grid>
+                                    </Border>
+
+                                    <Border x:Name="OcrPackCustomCard"
+                                            Margin="0,8,0,0"
+                                            Padding="12,10"
+                                            CornerRadius="8"
+                                            Cursor="Hand"
+                                            BorderThickness="1"
+                                            Background="{DynamicResource Theme.Search}"
+                                            BorderBrush="{DynamicResource Theme.Border}"
+                                            MouseLeftButtonUp="OnOcrPackCardClicked"
+                                            Tag="Custom">
+                                        <StackPanel>
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Text="自定义"
+                                                           Foreground="{DynamicResource Theme.Text}"
+                                                           FontSize="13"
+                                                           FontWeight="SemiBold" />
+                                                <TextBlock Text="自备 det + rec + 字典"
+                                                           Margin="8,0,0,0"
+                                                           Foreground="{DynamicResource Theme.TextSecondary}"
+                                                           FontSize="12.5"
+                                                           VerticalAlignment="Center" />
+                                            </StackPanel>
+                                            <TextBlock Text="大小按目录实际占用 · 精度自备"
+                                                       Margin="0,4,0,0"
+                                                       Foreground="{DynamicResource Theme.TextMuted}"
+                                                       FontSize="11.5" />
+                                            <Grid Margin="0,8,0,0">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBox x:Name="OcrCustomDirBox"
+                                                         Height="34"
+                                                         Padding="10,0"
+                                                         VerticalContentAlignment="Center"
+                                                         LostFocus="OnOcrCustomDirLostFocus" />
+                                                <ui:Button Grid.Column="1"
+                                                           Appearance="Secondary"
+                                                           Height="34"
+                                                           Padding="12,0"
+                                                           Margin="8,0,0,0"
+                                                           Content="浏览"
+                                                           Click="OnOcrCustomBrowseClicked" />
+                                            </Grid>
+                                            <TextBlock x:Name="OcrPackCustomStatus"
+                                                       Margin="0,6,0,0"
+                                                       Foreground="{DynamicResource Theme.TextMuted}"
+                                                       FontSize="11"
+                                                       TextWrapping="Wrap" />
+                                        </StackPanel>
+                                    </Border>
+
+                                    <TextBlock x:Name="OcrLocalActiveHint"
+                                               Margin="0,12,0,0"
+                                               Foreground="{DynamicResource Theme.Text}"
+                                               FontSize="12"
                                                TextWrapping="Wrap" />
                                 </StackPanel>
-                            </Border>
 
-                            <TextBlock x:Name="OcrLocalActiveHint"
-                                       Margin="0,12,0,0"
-                                       Foreground="{DynamicResource Theme.Text}"
-                                       FontSize="12"
-                                       TextWrapping="Wrap" />
-                        </StackPanel>
-
-                        <StackPanel x:Name="VisionApiPanel" Margin="0,14,0,0" Visibility="Collapsed">
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="100" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Text="模型配置"
-                                           Foreground="{DynamicResource Theme.TextSecondary}"
-                                           FontSize="13"
-                                           VerticalAlignment="Center" />
-                                <ComboBox x:Name="OcrProfileBox"
-                                          Grid.Column="1"
-                                          Height="34"
-                                          DisplayMemberPath="Name"
-                                          SelectionChanged="OnOcrProfileSelectionChanged"
-                                          PreviewMouseWheel="OnComboBoxPreviewMouseWheel" />
-                            </Grid>
-                            <Grid Margin="0,10,0,0">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="100" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Text="视觉模型"
-                                           Foreground="{DynamicResource Theme.TextSecondary}"
-                                           FontSize="13"
-                                           VerticalAlignment="Center" />
-                                <ComboBox x:Name="VisionApiModelBox"
-                                          Grid.Column="1"
-                                          Height="34"
-                                          IsEditable="False"
-                                          VerticalContentAlignment="Center"
-                                          PreviewMouseWheel="OnComboBoxPreviewMouseWheel"
-                                          SelectionChanged="OnVisionApiModelSelectionChanged"
-                                          LostFocus="OnOcrConfigLostFocus" />
-                                <ui:Button x:Name="OcrFetchModelsButton"
-                                           Grid.Column="2"
-                                           Height="34"
-                                           Width="34"
-                                           Margin="8,0,0,0"
-                                           Padding="0"
-                                           Appearance="Secondary"
-                                           ToolTip="拉取该配置下的模型"
-                                           Click="OnOcrFetchModelsClicked">
-                                    <ui:SymbolIcon Symbol="ArrowDownload24" FontSize="16" />
-                                </ui:Button>
-                            </Grid>
-                            <Grid Margin="0,10,0,0">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="100" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <StackPanel VerticalAlignment="Top" Margin="0,6,0,0">
-                                    <TextBlock Text="识别提示词"
-                                               Foreground="{DynamicResource Theme.TextSecondary}"
-                                               FontSize="13" />
-                                    <ui:Button x:Name="ResetVisionPromptButton"
-                                               Margin="0,6,0,0"
-                                               Padding="6,2"
-                                               FontSize="11"
-                                               Appearance="Transparent"
-                                               Foreground="{DynamicResource Theme.TextMuted}"
-                                               HorizontalAlignment="Left"
-                                               Content="恢复默认"
-                                               ToolTip="恢复推荐的 Markdown 结构化排版提示词"
-                                               Click="OnResetVisionPromptClicked" />
+                                <StackPanel x:Name="VisionApiPanel" Margin="0,14,0,0" Visibility="Collapsed">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="100" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="模型配置"
+                                                   Foreground="{DynamicResource Theme.TextSecondary}"
+                                                   FontSize="13"
+                                                   VerticalAlignment="Center" />
+                                        <ComboBox x:Name="OcrProfileBox"
+                                                  Grid.Column="1"
+                                                  Height="34"
+                                                  DisplayMemberPath="Name"
+                                                  SelectionChanged="OnOcrProfileSelectionChanged"
+                                                  PreviewMouseWheel="OnComboBoxPreviewMouseWheel" />
+                                    </Grid>
+                                    <Grid Margin="0,10,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="100" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="视觉模型"
+                                                   Foreground="{DynamicResource Theme.TextSecondary}"
+                                                   FontSize="13"
+                                                   VerticalAlignment="Center" />
+                                        <ComboBox x:Name="VisionApiModelBox"
+                                                  Grid.Column="1"
+                                                  Height="34"
+                                                  IsEditable="False"
+                                                  VerticalContentAlignment="Center"
+                                                  PreviewMouseWheel="OnComboBoxPreviewMouseWheel"
+                                                  SelectionChanged="OnVisionApiModelSelectionChanged"
+                                                  LostFocus="OnOcrConfigLostFocus" />
+                                        <ui:Button x:Name="OcrFetchModelsButton"
+                                                   Grid.Column="2"
+                                                   Height="34"
+                                                   Width="34"
+                                                   Margin="8,0,0,0"
+                                                   Padding="0"
+                                                   Appearance="Secondary"
+                                                   ToolTip="拉取该配置下的模型"
+                                                   Click="OnOcrFetchModelsClicked">
+                                            <ui:SymbolIcon Symbol="ArrowDownload24" FontSize="16" />
+                                        </ui:Button>
+                                    </Grid>
+                                    <Grid Margin="0,10,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="100" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel VerticalAlignment="Top" Margin="0,6,0,0">
+                                            <TextBlock Text="识别提示词"
+                                                       Foreground="{DynamicResource Theme.TextSecondary}"
+                                                       FontSize="13" />
+                                            <ui:Button x:Name="ResetVisionPromptButton"
+                                                       Margin="0,6,0,0"
+                                                       Padding="6,2"
+                                                       FontSize="11"
+                                                       Appearance="Transparent"
+                                                       Foreground="{DynamicResource Theme.TextMuted}"
+                                                       HorizontalAlignment="Left"
+                                                       Content="恢复默认"
+                                                       ToolTip="恢复推荐的 Markdown 结构化排版提示词"
+                                                       Click="OnResetVisionPromptClicked" />
+                                        </StackPanel>
+                                        <TextBox x:Name="VisionApiPromptBox"
+                                                 Grid.Column="1"
+                                                 MinHeight="68"
+                                                 MaxHeight="120"
+                                                 AcceptsReturn="True"
+                                                 TextWrapping="Wrap"
+                                                 VerticalScrollBarVisibility="Auto"
+                                                 Padding="10,6"
+                                                 LostFocus="OnOcrConfigLostFocus" />
+                                    </Grid>
                                 </StackPanel>
-                                <TextBox x:Name="VisionApiPromptBox"
-                                         Grid.Column="1"
-                                         MinHeight="68"
-                                         MaxHeight="120"
-                                         AcceptsReturn="True"
-                                         TextWrapping="Wrap"
-                                         VerticalScrollBarVisibility="Auto"
-                                         Padding="10,6"
-                                         LostFocus="OnOcrConfigLostFocus" />
-                            </Grid>
-                        </StackPanel>
-                    </StackPanel>
-                </Border>
+                            </StackPanel>
+                        </Border>
 
-                <!-- ========== 文本翻译 ========== -->
-                <TextBlock Text="文本翻译"
-                           Foreground="{DynamicResource Theme.Text}"
-                           FontSize="16"
-                           FontWeight="SemiBold"
-                           Margin="0,22,0,10" />
-                <Border Padding="16,14"
-                        CornerRadius="12"
-                        Background="{DynamicResource Theme.Card}"
-                        BorderBrush="{DynamicResource Theme.Border}"
-                        BorderThickness="1">
-                    <StackPanel>
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="100" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="翻译引擎"
-                                       Foreground="{DynamicResource Theme.TextSecondary}"
-                                       FontSize="13"
-                                       VerticalAlignment="Center" />
-                            <ComboBox x:Name="TranslationEngineBox"
-                                      Grid.Column="1"
-                                      Height="34"
-                                      SelectionChanged="OnTranslationEngineChanged"
-                                      PreviewMouseWheel="OnComboBoxPreviewMouseWheel">
-                                <ComboBoxItem Content="微软翻译" />
-                                <ComboBoxItem Content="Google 翻译" />
-                                <ComboBoxItem Content="AI 模型翻译" />
-                            </ComboBox>
-                            <ui:SymbolIcon x:Name="TranslationTipIcon"
-                                           Grid.Column="2"
-                                           Symbol="Info24"
-                                           FontSize="16"
-                                           Margin="8,0,0,0"
+                        <!-- 文本翻译 -->
+                        <TextBlock Text="文本翻译"
+                                   Foreground="{DynamicResource Theme.Text}"
+                                   FontSize="16"
+                                   FontWeight="SemiBold"
+                                   Margin="0,20,0,12" />
+                        <Border Padding="16,14"
+                                CornerRadius="12"
+                                Background="{DynamicResource Theme.Card}"
+                                BorderBrush="{DynamicResource Theme.Border}"
+                                BorderThickness="1">
+                            <StackPanel>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="100" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="翻译引擎"
+                                               Foreground="{DynamicResource Theme.TextSecondary}"
+                                               FontSize="13"
+                                               VerticalAlignment="Center" />
+                                    <ComboBox x:Name="TranslationEngineBox"
+                                              Grid.Column="1"
+                                              Height="34"
+                                              SelectionChanged="OnTranslationEngineChanged"
+                                              PreviewMouseWheel="OnComboBoxPreviewMouseWheel">
+                                        <ComboBoxItem Content="微软翻译" />
+                                        <ComboBoxItem Content="Google 翻译" />
+                                        <ComboBoxItem Content="AI 模型翻译" />
+                                    </ComboBox>
+                                    <ui:SymbolIcon x:Name="TranslationTipIcon"
+                                                   Grid.Column="2"
+                                                   Symbol="Info24"
+                                                   FontSize="16"
+                                                   Margin="8,0,0,0"
+                                                   Foreground="{DynamicResource Theme.TextMuted}"
+                                                   VerticalAlignment="Center" />
+                                </Grid>
+                                <TextBlock x:Name="TranslationEngineHint"
+                                           Margin="0,8,0,0"
                                            Foreground="{DynamicResource Theme.TextMuted}"
-                                           VerticalAlignment="Center" />
-                        </Grid>
-                        <TextBlock x:Name="TranslationEngineHint"
-                                   Margin="0,8,0,0"
-                                   Foreground="{DynamicResource Theme.TextMuted}"
-                                   FontSize="11.5"
-                                   TextWrapping="Wrap" />
+                                           FontSize="11.5"
+                                           TextWrapping="Wrap" />
 
-                        <StackPanel x:Name="AiTranslationPanel" Margin="0,14,0,0" Visibility="Collapsed">
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="100" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Text="模型配置"
-                                           Foreground="{DynamicResource Theme.TextSecondary}"
-                                           FontSize="13"
-                                           VerticalAlignment="Center" />
-                                <ComboBox x:Name="TranslationProfileBox"
-                                          Grid.Column="1"
-                                          Height="34"
-                                          DisplayMemberPath="Name"
-                                          SelectionChanged="OnTranslationProfileSelectionChanged"
-                                          PreviewMouseWheel="OnComboBoxPreviewMouseWheel" />
-                            </Grid>
-                            <Grid Margin="0,10,0,0">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="100" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Text="翻译模型"
-                                           Foreground="{DynamicResource Theme.TextSecondary}"
-                                           FontSize="13"
-                                           VerticalAlignment="Center" />
-                                <ComboBox x:Name="TranslationModelBox"
-                                          Grid.Column="1"
-                                          Height="34"
-                                          IsEditable="False"
-                                          VerticalContentAlignment="Center"
-                                          PreviewMouseWheel="OnComboBoxPreviewMouseWheel"
-                                          SelectionChanged="OnTranslationModelSelectionChanged"
-                                          LostFocus="OnTranslationConfigLostFocus" />
-                                <ui:Button x:Name="TranslationFetchModelsButton"
-                                           Grid.Column="2"
-                                           Height="34"
-                                           Width="34"
-                                           Margin="8,0,0,0"
-                                           Padding="0"
-                                           Appearance="Secondary"
-                                           ToolTip="拉取该配置下的模型"
-                                           Click="OnTranslationFetchModelsClicked">
-                                    <ui:SymbolIcon Symbol="ArrowDownload24" FontSize="16" />
-                                </ui:Button>
-                            </Grid>
-                            <Grid Margin="0,10,0,0">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="100" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <StackPanel VerticalAlignment="Top" Margin="0,6,0,0">
-                                    <TextBlock Text="翻译提示词"
-                                               Foreground="{DynamicResource Theme.TextSecondary}"
-                                               FontSize="13" />
-                                    <ui:Button x:Name="ResetTranslationPromptButton"
-                                               Margin="0,6,0,0"
-                                               Padding="6,2"
-                                               FontSize="11"
-                                               Appearance="Transparent"
-                                               Foreground="{DynamicResource Theme.TextMuted}"
-                                               HorizontalAlignment="Left"
-                                               Content="恢复默认"
-                                               ToolTip="恢复默认的翻译提示词"
-                                               Click="OnResetTranslationPromptClicked" />
+                                <StackPanel x:Name="AiTranslationPanel" Margin="0,14,0,0" Visibility="Collapsed">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="100" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="模型配置"
+                                                   Foreground="{DynamicResource Theme.TextSecondary}"
+                                                   FontSize="13"
+                                                   VerticalAlignment="Center" />
+                                        <ComboBox x:Name="TranslationProfileBox"
+                                                  Grid.Column="1"
+                                                  Height="34"
+                                                  DisplayMemberPath="Name"
+                                                  SelectionChanged="OnTranslationProfileSelectionChanged"
+                                                  PreviewMouseWheel="OnComboBoxPreviewMouseWheel" />
+                                    </Grid>
+                                    <Grid Margin="0,10,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="100" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="翻译模型"
+                                                   Foreground="{DynamicResource Theme.TextSecondary}"
+                                                   FontSize="13"
+                                                   VerticalAlignment="Center" />
+                                        <ComboBox x:Name="TranslationModelBox"
+                                                  Grid.Column="1"
+                                                  Height="34"
+                                                  IsEditable="False"
+                                                  VerticalContentAlignment="Center"
+                                                  PreviewMouseWheel="OnComboBoxPreviewMouseWheel"
+                                                  SelectionChanged="OnTranslationModelSelectionChanged"
+                                                  LostFocus="OnTranslationConfigLostFocus" />
+                                        <ui:Button x:Name="TranslationFetchModelsButton"
+                                                   Grid.Column="2"
+                                                   Height="34"
+                                                   Width="34"
+                                                   Margin="8,0,0,0"
+                                                   Padding="0"
+                                                   Appearance="Secondary"
+                                                   ToolTip="拉取该配置下的模型"
+                                                   Click="OnTranslationFetchModelsClicked">
+                                            <ui:SymbolIcon Symbol="ArrowDownload24" FontSize="16" />
+                                        </ui:Button>
+                                    </Grid>
+                                    <Grid Margin="0,10,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="100" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel VerticalAlignment="Top" Margin="0,6,0,0">
+                                            <TextBlock Text="翻译提示词"
+                                                       Foreground="{DynamicResource Theme.TextSecondary}"
+                                                       FontSize="13" />
+                                            <ui:Button x:Name="ResetTranslationPromptButton"
+                                                       Margin="0,6,0,0"
+                                                       Padding="6,2"
+                                                       FontSize="11"
+                                                       Appearance="Transparent"
+                                                       Foreground="{DynamicResource Theme.TextMuted}"
+                                                       HorizontalAlignment="Left"
+                                                       Content="恢复默认"
+                                                       ToolTip="恢复默认的翻译提示词"
+                                                       Click="OnResetTranslationPromptClicked" />
+                                        </StackPanel>
+                                        <TextBox x:Name="TranslationPromptBox"
+                                                 Grid.Column="1"
+                                                 MinHeight="68"
+                                                 MaxHeight="120"
+                                                 AcceptsReturn="True"
+                                                 TextWrapping="Wrap"
+                                                 VerticalScrollBarVisibility="Auto"
+                                                 Padding="10,6"
+                                                 LostFocus="OnTranslationConfigLostFocus" />
+                                    </Grid>
                                 </StackPanel>
-                                <TextBox x:Name="TranslationPromptBox"
-                                         Grid.Column="1"
-                                         MinHeight="68"
-                                         MaxHeight="120"
-                                         AcceptsReturn="True"
-                                         TextWrapping="Wrap"
-                                         VerticalScrollBarVisibility="Auto"
-                                         Padding="10,6"
-                                         LostFocus="OnTranslationConfigLostFocus" />
-                            </Grid>
-                        </StackPanel>
+                            </StackPanel>
+                        </Border>
                     </StackPanel>
-                </Border>
 
-                <!-- ========== 高级 ========== -->
-                <TextBlock Text="高级"
-                           Foreground="{DynamicResource Theme.Text}"
-                           FontSize="16"
-                           FontWeight="SemiBold"
-                           Margin="0,22,0,10" />
-                <Border Padding="16,14"
-                        CornerRadius="12"
-                        Background="{DynamicResource Theme.Card}"
-                        BorderBrush="{DynamicResource Theme.Border}"
-                        BorderThickness="1">
-                    <StackPanel>
-                        <CheckBox x:Name="TextOnlyCheck"
-                                  Foreground="{DynamicResource Theme.TextSecondary}"
-                                  FontSize="13"
-                                  Content="仅记录文本（忽略图片/文件）"
-                                  Checked="OnTextOnlyToggled"
-                                  Unchecked="OnTextOnlyToggled" />
-                        <Grid Margin="0,14,0,0">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="100" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="最大条数"
-                                       Foreground="{DynamicResource Theme.TextSecondary}"
-                                       FontSize="13"
-                                       VerticalAlignment="Center" />
-                            <TextBox x:Name="MaxHistoryBox"
-                                     Grid.Column="1"
-                                     Height="34"
-                                     Padding="10,0"
-                                     VerticalContentAlignment="Center"
-                                     LostFocus="OnMaxHistoryLostFocus" />
-                        </Grid>
+                    <!-- ========== 5. 关于面板 ========== -->
+                    <StackPanel x:Name="AboutPanel" Visibility="Collapsed" Margin="0,0,0,12">
+                        <TextBlock Text="关于 QuickClip"
+                                   Foreground="{DynamicResource Theme.Text}"
+                                   FontSize="16"
+                                   FontWeight="SemiBold"
+                                   Margin="0,4,0,12" />
+                        <Border Padding="16,14"
+                                CornerRadius="12"
+                                Background="{DynamicResource Theme.Card}"
+                                BorderBrush="{DynamicResource Theme.Border}"
+                                BorderThickness="1">
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="QuickClip · 版本 "
+                                               Foreground="{DynamicResource Theme.TextSecondary}"
+                                               FontSize="13"
+                                               VerticalAlignment="Center" />
+                                    <TextBlock x:Name="VersionText"
+                                               Foreground="{DynamicResource Theme.Text}"
+                                               FontSize="13"
+                                               FontWeight="SemiBold"
+                                               VerticalAlignment="Center" />
+                                </StackPanel>
+                                 <TextBlock x:Name="UpdateStatusText"
+                                            Margin="0,10,0,0"
+                                            MinHeight="32"
+                                            Foreground="{DynamicResource Theme.TextSecondary}"
+                                            FontSize="11.5"
+                                            TextWrapping="Wrap" />
+                                <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                                    <ui:Button Appearance="Secondary"
+                                               Height="34"
+                                               Padding="14,0"
+                                               Content="打开数据目录"
+                                               Click="OnOpenDataFolderClicked" />
+                                    <ui:Button x:Name="CheckUpdateButton"
+                                               Margin="10,0,0,0"
+                                               Appearance="Secondary"
+                                               Height="34"
+                                               Padding="14,0"
+                                               Content="检查更新…"
+                                               Click="OnCheckUpdateClicked" />
+                                    <ui:Button x:Name="InstallUpdateButton"
+                                               Margin="10,0,0,0"
+                                               Appearance="Primary"
+                                               Height="34"
+                                               Padding="14,0"
+                                               Content="立即更新"
+                                               Visibility="Collapsed"
+                                               Click="OnInstallUpdateClicked" />
+                                    <ui:Button x:Name="BrowserDownloadButton"
+                                               Margin="10,0,0,0"
+                                               Appearance="Secondary"
+                                               Height="34"
+                                               Padding="14,0"
+                                               Content="在浏览器中下载"
+                                               Visibility="Collapsed"
+                                               Click="OnBrowserDownloadClicked" />
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
                     </StackPanel>
-                </Border>
 
-                <!-- ========== 关于 ========== -->
-                <TextBlock Text="关于"
-                           Foreground="{DynamicResource Theme.Text}"
-                           FontSize="16"
-                           FontWeight="SemiBold"
-                           Margin="0,22,0,10" />
-                <Border Padding="16,14"
-                        CornerRadius="12"
-                        Background="{DynamicResource Theme.Card}"
-                        BorderBrush="{DynamicResource Theme.Border}"
-                        BorderThickness="1">
-                    <StackPanel>
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="QuickClip · 版本 "
-                                       Foreground="{DynamicResource Theme.TextSecondary}"
-                                       FontSize="13"
-                                       VerticalAlignment="Center" />
-                            <TextBlock x:Name="VersionText"
-                                       Foreground="{DynamicResource Theme.Text}"
-                                       FontSize="13"
-                                       FontWeight="SemiBold"
-                                       VerticalAlignment="Center" />
-                        </StackPanel>
-                        <TextBlock x:Name="ChannelText"
-                                   Margin="0,6,0,0"
-                                   Foreground="{DynamicResource Theme.TextMuted}"
-                                   FontSize="12" />
-                         <TextBlock x:Name="UpdateStatusText"
-                                    Margin="0,10,0,0"
-                                    MinHeight="32"
-                                    Foreground="{DynamicResource Theme.TextSecondary}"
-                                    FontSize="11.5"
-                                    TextWrapping="Wrap" />
-                        <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
-                            <ui:Button Appearance="Secondary"
-                                       Height="34"
-                                       Padding="14,0"
-                                       Content="打开数据目录"
-                                       Click="OnOpenDataFolderClicked" />
-                            <ui:Button x:Name="CheckUpdateButton"
-                                       Margin="10,0,0,0"
-                                       Appearance="Secondary"
-                                       Height="34"
-                                       Padding="14,0"
-                                       Content="检查更新…"
-                                       Click="OnCheckUpdateClicked" />
-                            <ui:Button x:Name="InstallUpdateButton"
-                                       Margin="10,0,0,0"
-                                       Appearance="Primary"
-                                       Height="34"
-                                       Padding="14,0"
-                                       Content="立即更新"
-                                       Visibility="Collapsed"
-                                       Click="OnInstallUpdateClicked" />
-                            <ui:Button x:Name="BrowserDownloadButton"
-                                       Margin="10,0,0,0"
-                                       Appearance="Secondary"
-                                       Height="34"
-                                       Padding="14,0"
-                                       Content="在浏览器中下载"
-                                       Visibility="Collapsed"
-                                       Click="OnBrowserDownloadClicked" />
-                        </StackPanel>
-                    </StackPanel>
-                </Border>
-
-            </StackPanel>
-        </ScrollViewer>
+                </Grid>
+            </ScrollViewer>
+        </Grid>
     </Grid>
 </Window>

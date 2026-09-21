@@ -12,9 +12,9 @@
     <Description>专为 Windows 打造的现代化、极速、纯离线剪贴板增强工具</Description>
     <RootNamespace>QuickClip</RootNamespace>
     <ApplicationIcon>Assets\quickclip.ico</ApplicationIcon>
-    <Version>1.4.3</Version>
-    <AssemblyVersion>1.4.3.0</AssemblyVersion>
-    <FileVersion>1.4.3.0</FileVersion>
+    <Version>1.4.4</Version>
+    <AssemblyVersion>1.4.4.0</AssemblyVersion>
+    <FileVersion>1.4.4.0</FileVersion>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">
@@ -32,6 +32,8 @@
 
   <ItemGroup>
     <Resource Include="Assets\quickclip.ico" />
+    <Resource Include="Assets\Fonts\JetBrainsMono-Regular.ttf" />
+    <None Update="Assets\Fonts\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <!-- RapidOcrNet 会把拉丁 v5 模型拷进输出目录；中文包按需下载，不随安装包分发 -->

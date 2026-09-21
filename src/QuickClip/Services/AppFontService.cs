@@ -1,3 +1,4 @@
+using System.IO;
 using System.Windows;
 using System.Windows.Markup;
 using MediaFontFamily = System.Windows.Media.FontFamily;
@@ -5,67 +6,144 @@ using MediaFontFamily = System.Windows.Media.FontFamily;
 namespace QuickClip.Services;
 
 /// <summary>
-/// 界面字体：只使用本机已安装字体，不内置字体文件。
-/// 空值表示系统默认（Segoe UI / Microsoft YaHei UI 回退链）。
+/// 界面字体服务：支持系统默认、内置 JetBrains Mono、Cascadia Mono，
+/// 以及通过文件路径加载自定义系统/外部字体文件。
 /// </summary>
 public static class AppFontService
 {
     public const string FontFamilyKey = "Theme.FontFamily";
+
+    // 存储标识
+    public const string KeyDefault = "";
+    public const string KeyJetBrainsMono = "JetBrains Mono";
+    public const string KeyCascadiaMono = "Cascadia Mono";
+
+    // 精炼展示名（无多余修饰）
     public const string DefaultDisplayName = "系统默认";
+    public const string JetBrainsMonoDisplayName = "JetBrains Mono";
+    public const string CascadiaMonoDisplayName = "Cascadia Mono";
+
     public const string FallbackChain = "Segoe UI, Microsoft YaHei UI, Microsoft YaHei, sans-serif";
+    public const string JetBrainsMonoPackPath = "pack://application:,,,/QuickClip;component/Assets/Fonts/#JetBrains Mono";
 
     public static readonly MediaFontFamily DefaultFamily = new(FallbackChain);
 
-    private static IReadOnlyList<string>? _cachedInstalledFamilies;
-    private static readonly object _lock = new();
-
-    public static IReadOnlyList<string> ListInstalledFamilies()
+    public static IReadOnlyList<string> GetPresetNames() => new[]
     {
-        if (_cachedInstalledFamilies != null)
+        DefaultDisplayName,
+        JetBrainsMonoDisplayName,
+        CascadiaMonoDisplayName
+    };
+
+    public static bool IsFontFilePath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
         {
-            return _cachedInstalledFamilies;
+            return false;
         }
 
-        lock (_lock)
+        try
         {
-            if (_cachedInstalledFamilies != null)
-            {
-                return _cachedInstalledFamilies;
-            }
-
-            var names = System.Windows.Media.Fonts.SystemFontFamilies
-                .Select(f =>
-                {
-                    if (f.FamilyNames.TryGetValue(XmlLanguage.GetLanguage("zh-cn"), out string? zh) &&
-                        !string.IsNullOrWhiteSpace(zh))
-                    {
-                        return zh;
-                    }
-
-                    return f.Source;
-                })
-                .Where(n => !string.IsNullOrWhiteSpace(n))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(n => n, StringComparer.CurrentCultureIgnoreCase)
-                .ToList();
-
-            names.Insert(0, DefaultDisplayName);
-            _cachedInstalledFamilies = names;
-            return _cachedInstalledFamilies;
+            string ext = Path.GetExtension(path);
+            return (ext.Equals(".ttf", StringComparison.OrdinalIgnoreCase) ||
+                    ext.Equals(".otf", StringComparison.OrdinalIgnoreCase) ||
+                    ext.Equals(".ttc", StringComparison.OrdinalIgnoreCase)) &&
+                   File.Exists(path);
+        }
+        catch
+        {
+            return false;
         }
     }
 
-    public static string NormalizeStoredName(string? storedName)
+    public static string GetFontFamilyNameFromFile(string filePath)
     {
-        if (string.IsNullOrWhiteSpace(storedName))
+        try
+        {
+            var families = System.Windows.Media.Fonts.GetFontFamilies(new Uri(filePath), "./");
+            foreach (var family in families)
+            {
+                if (family.FamilyNames.TryGetValue(XmlLanguage.GetLanguage("zh-cn"), out string? zh) &&
+                    !string.IsNullOrWhiteSpace(zh))
+                {
+                    return zh;
+                }
+
+                if (family.FamilyNames.TryGetValue(XmlLanguage.GetLanguage("en-us"), out string? en) &&
+                    !string.IsNullOrWhiteSpace(en))
+                {
+                    return en;
+                }
+
+                if (!string.IsNullOrWhiteSpace(family.Source))
+                {
+                    string source = family.Source;
+                    int hashIdx = source.IndexOf('#');
+                    return hashIdx >= 0 ? source[(hashIdx + 1)..] : Path.GetFileNameWithoutExtension(filePath);
+                }
+            }
+        }
+        catch
+        {
+            // 解析失败退化为文件名
+        }
+
+        return Path.GetFileNameWithoutExtension(filePath);
+    }
+
+    public static string NormalizeStoredName(string? input)
+    {
+        if (string.IsNullOrWhiteSpace(input))
         {
             return string.Empty;
         }
 
-        string trimmed = storedName.Trim();
-        return string.Equals(trimmed, DefaultDisplayName, StringComparison.OrdinalIgnoreCase)
-            ? string.Empty
-            : trimmed;
+        string trimmed = input.Trim();
+        if (string.Equals(trimmed, DefaultDisplayName, StringComparison.OrdinalIgnoreCase))
+        {
+            return string.Empty;
+        }
+
+        if (string.Equals(trimmed, JetBrainsMonoDisplayName, StringComparison.OrdinalIgnoreCase))
+        {
+            return KeyJetBrainsMono;
+        }
+
+        if (string.Equals(trimmed, CascadiaMonoDisplayName, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(trimmed, "Cascadia Code", StringComparison.OrdinalIgnoreCase))
+        {
+            return KeyCascadiaMono;
+        }
+
+        // 文件路径保持原样
+        return trimmed;
+    }
+
+    public static string ToDisplayName(string? storedName)
+    {
+        string normalized = NormalizeStoredName(storedName);
+        if (string.IsNullOrEmpty(normalized))
+        {
+            return DefaultDisplayName;
+        }
+
+        if (string.Equals(normalized, KeyJetBrainsMono, StringComparison.OrdinalIgnoreCase))
+        {
+            return JetBrainsMonoDisplayName;
+        }
+
+        if (string.Equals(normalized, KeyCascadiaMono, StringComparison.OrdinalIgnoreCase))
+        {
+            return CascadiaMonoDisplayName;
+        }
+
+        if (IsFontFilePath(normalized))
+        {
+            string familyName = GetFontFamilyNameFromFile(normalized);
+            return $"自定义：{familyName}";
+        }
+
+        return normalized;
     }
 
     public static MediaFontFamily Resolve(string? storedName)
@@ -78,7 +156,35 @@ public static class AppFontService
 
         try
         {
-            // 为自定义字体自动拼接西文与中文字体回退链，避免无中文字形时触发昂贵的系统全局字形回退搜寻
+            // 1. 自定义外部字体文件路径
+            if (IsFontFilePath(name))
+            {
+                string familyName = GetFontFamilyNameFromFile(name);
+                var fileUri = new Uri(name);
+                return new MediaFontFamily(fileUri, $"./#{familyName}, {FallbackChain}");
+            }
+
+            // 2. 内置 JetBrains Mono
+            if (string.Equals(name, KeyJetBrainsMono, StringComparison.OrdinalIgnoreCase))
+            {
+                string localFontPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets", "Fonts", "JetBrainsMono-Regular.ttf");
+                if (File.Exists(localFontPath))
+                {
+                    var folderUri = new Uri(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets", "Fonts") + "\\");
+                    return new MediaFontFamily(folderUri, $"./#JetBrains Mono, {FallbackChain}");
+                }
+
+                var packUri = new Uri("pack://application:,,,/Assets/Fonts/");
+                return new MediaFontFamily(packUri, $"./#JetBrains Mono, {FallbackChain}");
+            }
+
+            // 3. Cascadia Mono
+            if (string.Equals(name, KeyCascadiaMono, StringComparison.OrdinalIgnoreCase))
+            {
+                return new MediaFontFamily($"Cascadia Mono, Cascadia Code, {FallbackChain}");
+            }
+
+            // 4. 其他常规系统字体
             var family = new MediaFontFamily($"{name}, {FallbackChain}");
             if (family.FamilyNames.Count > 0 || family.Source.Length > 0)
             {
@@ -87,7 +193,7 @@ public static class AppFontService
         }
         catch
         {
-            // 字体已卸载则回退
+            // 字体异常则回退
         }
 
         return DefaultFamily;
@@ -111,10 +217,6 @@ public static class AppFontService
         app.Resources[FontFamilyKey] = family;
     }
 
-    /// <summary>
-    /// 仅在指定窗口覆盖 Theme.FontFamily，不改应用级资源。
-    /// 下拉浏览时避免主窗口历史列表跟着整树换字体。
-    /// </summary>
     public static void PreviewOn(Window window, string? storedName)
     {
         window.Resources[FontFamilyKey] = Resolve(storedName);

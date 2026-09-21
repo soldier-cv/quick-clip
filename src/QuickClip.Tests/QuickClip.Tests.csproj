@@ -16,9 +16,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\QuickClip\QuickClip.csproj">
-      <AdditionalProperties>BaseOutputPath=$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)obj\appout\'));UseAppHost=false</AdditionalProperties>
-    </ProjectReference>
+    <ProjectReference Include="..\QuickClip\QuickClip.csproj" />
   </ItemGroup>
 
 </Project>

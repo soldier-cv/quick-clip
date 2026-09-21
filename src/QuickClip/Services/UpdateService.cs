@@ -142,6 +142,43 @@ public sealed class UpdateService : IDisposable
     public static string FoundNotifyText(string tagName) =>
         $"发现新版本 {tagName}，正在下载";
 
+    public static string ReadyStatusText(string tagName) =>
+        $"新版本 {tagName} 已下载就绪。点击「立即更新」将退出并静默安装；下次手动启动也会自动安装。";
+
+    public static string DownloadFailedStatusText(string tagName) =>
+        $"发现新版本 {tagName}，自动下载失败。可点击右侧按钮直接在浏览器中下载安装包。";
+
+    /// <summary>设置页「关于」区更新状态文案；空字符串表示保持当前显示。</summary>
+    public static string ResolveStatusText(
+        PendingUpdate? pending,
+        bool pendingFileExists,
+        DownloadFailedInfo? failed,
+        UpdateActivity activity)
+    {
+        if (pending != null && pendingFileExists)
+        {
+            return ReadyStatusText(pending.TagName);
+        }
+
+        return activity.Phase switch
+        {
+            UpdatePhase.Checking => string.IsNullOrEmpty(activity.Message) ? "正在检查更新…" : activity.Message,
+            UpdatePhase.Downloading => string.IsNullOrEmpty(activity.Message)
+                ? FoundNotifyText(activity.TagName ?? "")
+                : activity.Message,
+            UpdatePhase.Failed => failed != null
+                ? DownloadFailedStatusText(failed.TagName)
+                : (string.IsNullOrEmpty(activity.Message) ? "检查更新失败" : activity.Message),
+            UpdatePhase.UpToDate => string.IsNullOrEmpty(activity.Message)
+                ? $"当前已是最新版本 v{CurrentVersion}"
+                : activity.Message,
+            UpdatePhase.Ready => activity.TagName != null
+                ? ReadyStatusText(activity.TagName)
+                : (string.IsNullOrEmpty(activity.Message) ? "新版本已下载就绪" : activity.Message),
+            _ => activity.Message
+        };
+    }
+
     public PendingUpdate? Pending { get; private set; }
 
     /// <summary>自动下载失败时的标记信息（为 null 表示无失败）。</summary>
@@ -455,6 +492,10 @@ public sealed class UpdateService : IDisposable
                         Phase = UpdatePhase.UpToDate,
                         Message = check.Message ?? $"当前已是最新版本 v{CurrentVersion}"
                     });
+                    if (interactive)
+                    {
+                        UserNotify?.Invoke("QuickClip", check.Message ?? $"当前已是最新版本 v{CurrentVersion}");
+                    }
                 }
                 else if (check.Status == UpdateCheckStatus.Failed)
                 {

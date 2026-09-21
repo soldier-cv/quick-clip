@@ -443,10 +443,7 @@ public sealed class SettingsService
     /// <summary>更新界面字体并立即应用到已打开窗口。</summary>
     public void SetUiFontFamily(string? family)
     {
-        string value = string.IsNullOrWhiteSpace(family) ||
-                       string.Equals(family, AppFontService.DefaultDisplayName, StringComparison.OrdinalIgnoreCase)
-            ? string.Empty
-            : family.Trim();
+        string value = AppFontService.NormalizeStoredName(family);
         if (UiFontFamily == value)
         {
             AppFontService.Apply(value);

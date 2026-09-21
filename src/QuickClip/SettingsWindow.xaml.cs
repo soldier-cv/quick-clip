@@ -30,6 +30,8 @@ public partial class SettingsWindow : Window
     private bool _themeBoxReady;
     private IReadOnlyList<string> _fontFamilies = Array.Empty<string>();
     private bool _suppressFontFilter;
+    private readonly DispatcherTimer _fontPreviewTimer;
+    private string? _pendingFontPreview;
 
     /// <summary>主题下拉项（色块 + 名称）。</summary>
     private sealed class ThemeOption
@@ -45,6 +47,8 @@ public partial class SettingsWindow : Window
         _services = services;
 
         WindowChromeHelper.Apply(this, RootGrid);
+        _fontPreviewTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(180) };
+        _fontPreviewTimer.Tick += OnFontPreviewTick;
         FontFamilyBox.AddHandler(TextBox.TextChangedEvent, new TextChangedEventHandler(OnFontFamilyTextChanged), true);
         FillThemeBox();
 
@@ -68,6 +72,9 @@ public partial class SettingsWindow : Window
             _services.OcrPacks.PacksChanged -= OnOcrPacksChanged;
             ThemeService.Changed -= OnThemeServiceChanged;
             Loaded -= OnSettingsWindowLoaded;
+            _fontPreviewTimer.Stop();
+            _fontPreviewTimer.Tick -= OnFontPreviewTick;
+            AppFontService.ClearPreview(this);
         };
     }
 
@@ -499,11 +506,13 @@ public partial class SettingsWindow : Window
         Dispatcher.BeginInvoke(() =>
         {
             RefreshUpdatePanel();
-            if (activity.Phase != UpdatePhase.Checking)
+            if (activity.Phase is UpdatePhase.Checking or UpdatePhase.Downloading)
             {
-                _busy = false;
-                CheckUpdateButton.IsEnabled = true;
+                return;
             }
+
+            _busy = false;
+            CheckUpdateButton.IsEnabled = true;
         });
     }
 
@@ -512,63 +521,32 @@ public partial class SettingsWindow : Window
         var pending = _services.Update.Pending;
         var failed = _services.Update.DownloadFailed;
         var activity = _services.Update.Activity;
-
         bool ready = pending != null && File.Exists(pending.LocalPath);
+
+        InstallUpdateButton.Visibility = ready ? Visibility.Visible : Visibility.Collapsed;
         if (ready)
         {
-            InstallUpdateButton.Visibility = Visibility.Visible;
             InstallUpdateButton.Content = UpdateService.ApplyActionLabel;
-            BrowserDownloadButton.Visibility = Visibility.Collapsed;
-            UpdateStatusText.Text = $"新版本 {pending!.TagName} 已下载就绪。点击「立即更新」将退出并静默安装；下次手动启动也会自动安装。";
-            if (FindResource("Theme.Accent") is MediaBrush accentBrush)
-            {
-                UpdateStatusText.Foreground = accentBrush;
-            }
-            return;
         }
 
-        InstallUpdateButton.Visibility = Visibility.Collapsed;
+        BrowserDownloadButton.Visibility = !ready && (failed != null || activity.Phase == UpdatePhase.Failed)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
 
-        if (activity.Phase == UpdatePhase.Checking)
+        string status = UpdateService.ResolveStatusText(pending, ready, failed, activity);
+        if (!string.IsNullOrEmpty(status))
         {
-            BrowserDownloadButton.Visibility = Visibility.Collapsed;
-            UpdateStatusText.Text = "正在检查更新…";
-            return;
+            UpdateStatusText.Text = status;
         }
 
-        if (activity.Phase == UpdatePhase.Downloading)
+        string brushKey = ready || activity.Phase is UpdatePhase.Downloading or UpdatePhase.Ready
+            ? "Theme.Accent"
+            : failed != null || activity.Phase == UpdatePhase.Failed
+                ? "Theme.Pin"
+                : "Theme.TextSecondary";
+        if (FindResource(brushKey) is MediaBrush brush)
         {
-            BrowserDownloadButton.Visibility = Visibility.Collapsed;
-            UpdateStatusText.Text = activity.Message;
-            if (FindResource("Theme.Accent") is MediaBrush accentBrush)
-            {
-                UpdateStatusText.Foreground = accentBrush;
-            }
-            return;
-        }
-
-        if (failed != null || activity.Phase == UpdatePhase.Failed)
-        {
-            BrowserDownloadButton.Visibility = Visibility.Visible;
-            UpdateStatusText.Text = failed != null
-                ? $"发现新版本 {failed.TagName}，自动下载失败。可点击右侧按钮直接在浏览器中下载安装包。"
-                : activity.Message;
-            if (FindResource("Theme.Pin") is MediaBrush pinBrush)
-            {
-                UpdateStatusText.Foreground = pinBrush;
-            }
-            return;
-        }
-
-        BrowserDownloadButton.Visibility = Visibility.Collapsed;
-        if (!string.IsNullOrEmpty(activity.Message) && activity.Phase is UpdatePhase.UpToDate or UpdatePhase.Idle)
-        {
-            UpdateStatusText.Text = activity.Message;
-        }
-
-        if (FindResource("Theme.TextSecondary") is MediaBrush textSecondaryBrush)
-        {
-            UpdateStatusText.Foreground = textSecondaryBrush;
+            UpdateStatusText.Foreground = brush;
         }
     }
 
@@ -652,7 +630,11 @@ public partial class SettingsWindow : Window
             return;
         }
 
-        _services.Settings.SetUiFontFamily(name);
+        QueueFontPreview(name);
+        if (!FontFamilyBox.IsDropDownOpen)
+        {
+            CommitFontFamily(name);
+        }
     }
 
     private void OnFontFamilyTextChanged(object sender, TextChangedEventArgs e)
@@ -712,7 +694,7 @@ public partial class SettingsWindow : Window
             return;
         }
 
-        ApplyFontFamilySelection(name);
+        CommitFontFamily(name);
         FontFamilyBox.IsDropDownOpen = false;
         e.Handled = true;
     }
@@ -734,7 +716,7 @@ public partial class SettingsWindow : Window
             string.Equals(n, typed, StringComparison.OrdinalIgnoreCase));
         if (match != null)
         {
-            ApplyFontFamilySelection(match);
+            CommitFontFamily(match);
             return;
         }
 
@@ -744,17 +726,41 @@ public partial class SettingsWindow : Window
         FilterFontFamilies(string.Empty);
         FontFamilyBox.SelectedItem = current;
         FontFamilyBox.Text = current;
+        AppFontService.ClearPreview(this);
     }
 
-    private void ApplyFontFamilySelection(string name)
+    private void QueueFontPreview(string name)
     {
+        _pendingFontPreview = name;
+        _fontPreviewTimer.Stop();
+        _fontPreviewTimer.Start();
+    }
+
+    private void OnFontPreviewTick(object? sender, EventArgs e)
+    {
+        _fontPreviewTimer.Stop();
+        if (_pendingFontPreview is not string name)
+        {
+            return;
+        }
+
+        AppFontService.PreviewOn(this, name);
+    }
+
+    private void CommitFontFamily(string name)
+    {
+        _fontPreviewTimer.Stop();
+        _pendingFontPreview = null;
         FilterFontFamilies(string.Empty);
         FontFamilyBox.SelectedItem = name;
         FontFamilyBox.Text = name;
-        if (!_suppressUiEvents && IsLoaded)
+        if (_suppressUiEvents || !IsLoaded)
         {
-            _services.Settings.SetUiFontFamily(name);
+            return;
         }
+
+        _services.Settings.SetUiFontFamily(name);
+        AppFontService.ClearPreview(this);
     }
 
     private void FilterFontFamilies(string query, int? caret = null)

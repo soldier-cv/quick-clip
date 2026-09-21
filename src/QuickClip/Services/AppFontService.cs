@@ -55,10 +55,23 @@ public static class AppFontService
         }
     }
 
+    public static string NormalizeStoredName(string? storedName)
+    {
+        if (string.IsNullOrWhiteSpace(storedName))
+        {
+            return string.Empty;
+        }
+
+        string trimmed = storedName.Trim();
+        return string.Equals(trimmed, DefaultDisplayName, StringComparison.OrdinalIgnoreCase)
+            ? string.Empty
+            : trimmed;
+    }
+
     public static MediaFontFamily Resolve(string? storedName)
     {
-        if (string.IsNullOrWhiteSpace(storedName) ||
-            string.Equals(storedName, DefaultDisplayName, StringComparison.OrdinalIgnoreCase))
+        string name = NormalizeStoredName(storedName);
+        if (string.IsNullOrEmpty(name))
         {
             return DefaultFamily;
         }
@@ -66,7 +79,7 @@ public static class AppFontService
         try
         {
             // 为自定义字体自动拼接西文与中文字体回退链，避免无中文字形时触发昂贵的系统全局字形回退搜寻
-            var family = new MediaFontFamily($"{storedName}, {FallbackChain}");
+            var family = new MediaFontFamily($"{name}, {FallbackChain}");
             if (family.FamilyNames.Count > 0 || family.Source.Length > 0)
             {
                 return family;
@@ -89,13 +102,29 @@ public static class AppFontService
         }
 
         var family = Resolve(storedName);
-        app.Resources[FontFamilyKey] = family;
-        foreach (System.Windows.Window window in app.Windows)
+        if (app.Resources[FontFamilyKey] is MediaFontFamily current &&
+            string.Equals(current.Source, family.Source, StringComparison.OrdinalIgnoreCase))
         {
-            if (!Equals(window.FontFamily, family))
-            {
-                window.FontFamily = family;
-            }
+            return;
+        }
+
+        app.Resources[FontFamilyKey] = family;
+    }
+
+    /// <summary>
+    /// 仅在指定窗口覆盖 Theme.FontFamily，不改应用级资源。
+    /// 下拉浏览时避免主窗口历史列表跟着整树换字体。
+    /// </summary>
+    public static void PreviewOn(Window window, string? storedName)
+    {
+        window.Resources[FontFamilyKey] = Resolve(storedName);
+    }
+
+    public static void ClearPreview(Window window)
+    {
+        if (window.Resources.Contains(FontFamilyKey))
+        {
+            window.Resources.Remove(FontFamilyKey);
         }
     }
 }

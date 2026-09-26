@@ -45,6 +45,7 @@
                      ShowMinimize="False"
                      ShowMaximize="False"
                      ShowClose="True"
+                     Foreground="{DynamicResource Theme.Text}"
                      CloseClicked="OnTitleBarCloseClicked">
             <ui:TitleBar.TrailingContent>
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">

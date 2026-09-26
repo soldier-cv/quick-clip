@@ -1,173 +1,179 @@
 # QuickClip
 
-Windows 本地剪贴板管理器。安装后按 `Win + V` 打开面板，复制过的文字、链接、图片都会记下来，再选一条贴回去。数据只存在本机，不上传。
-
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![.NET 8](https://img.shields.io/badge/.NET-8.0-512BD4.svg)](https://dotnet.microsoft.com/download/dotnet/8.0)
-[![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D6.svg)](docs/SPECIFICATION.md#五-系统兼容性渲染降级与运行环境)
-[![Gitee](https://img.shields.io/badge/Gitee-QuickClip-C71D23.svg)](https://gitee.com/huaxudong/quick-clip)
+<p align="center">
+  <strong>极速、纯粹、高颜值的 Windows 本地剪贴板管理器</strong>
+</p>
 
 <p align="center">
-  <img src="docs/assets/preview.png" width="560" alt="QuickClip 主面板">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
+  <a href="https://dotnet.microsoft.com/download/dotnet/8.0"><img src="https://img.shields.io/badge/.NET-8.0-512BD4.svg" alt=".NET 8"></a>
+  <a href="docs/SPECIFICATION.md#五-系统兼容性渲染降级与运行环境"><img src="https://img.shields.io/badge/Windows-10%20%7C%2011-0078D6.svg" alt="Windows 10 | 11"></a>
+  <a href="https://github.com/soldier-cv/quick-clip/stargazers"><img src="https://img.shields.io/github/stars/soldier-cv/quick-clip?style=flat&labelColor=100F0F&label=stars" alt="GitHub Stars"></a>
+  <a href="https://github.com/soldier-cv/quick-clip/releases/latest"><img src="https://img.shields.io/github/v/release/soldier-cv/quick-clip?style=flat&labelColor=100F0F&label=release" alt="Latest Release"></a>
+  <a href="https://gitee.com/huaxudong/quick-clip"><img src="https://gitee.com/huaxudong/quick-clip/badge/star.svg" alt="Gitee"></a>
+</p>
+
+<p align="center">
+  <img src="docs/assets/preview.png" width="600" alt="QuickClip 主面板预览">
 </p>
 
 ---
 
-## 下载安装
+## ✨ 核心特性
 
-1. 先装 [.NET 8 桌面运行时 x64](https://aka.ms/dotnet/8.0/windowsdesktop-runtime-win-x64.exe)（已装过可跳过）。
-2. 下载 `QuickClip-Setup-win-x64.exe`：
-   - [Gitee Releases](https://gitee.com/huaxudong/quick-clip/releases)（国内）
-   - [GitHub Releases](https://github.com/soldier-cv/quick-clip/releases)
-3. 安装后托盘会出现图标。关掉主窗口不会退出，要从托盘右键选「退出」。
+- 🚀 **极速响应，接管体验**  
+  原生 Win32 热键毫秒级唤起；无缝接管系统 `Win + V`；开机自启静默预热视觉树，杜绝冷启动卡顿；退出或卸载时 100% 自动还原系统剪贴板原始状态。
 
-需要开机自动运行时，打开设置勾选「开机自启动」。
+- 📋 **全能记录，格式无损**  
+  混合记录纯文本、超链接、图片与多选文件；捕获并写回 `CF_HTML` 与 `RTF` 原文，网页和 Word 排版不丢失；支持汉字模糊匹配与**拼音首字母**（如输入 `sjjg` 秒搜「设计架构」）；重要条目支持图钉置顶。
 
----
+- 🔄 **收集栈（顺次出栈粘贴）**  
+  跨表格、跨网页批量搬运多字段的效率神器。按复制顺序压入先进先出队列，在目标窗口按 `Ctrl + V` 依次粘贴出栈；提供迷你桌面磁吸 HUD，支持多行文本一键拆分为独立条目，出栈完毕自动启用防重复粘贴守卫。
 
-## 使用说明
+- 📝 **常用短语 & 动态模版**  
+  按分类整理常用回复、代码片段与办公模版；内置动态占位符引擎（`{date}`、`{time}`、`{guid}`、`{username}`、`{clipboard}` 等）；支持即用即走的「微调填入」，临时改几个字直接注入，不破坏原始模版。
 
-### 1. 日常复制粘贴
+- 📌 **桌面贴图置顶**  
+  将图片或截图一键钉在屏幕最前端；支持鼠标滚轮平滑缩放（20%~400%）与 `Ctrl + 滚轮` 调节透明度；按 `Esc` 或双击瞬时关闭，方便对照核对。
 
-1. 在任意软件里复制（`Ctrl + C`），QuickClip 会自动记下。
-2. 点要粘贴的位置，按 `Win + V` 打开面板。
-3. 点选一条，再 `Enter` 或双击，内容会贴进刚才那个窗口。
+- 🛠️ **实用集成工具**  
+  - **二维码**：悬停文本卡片一键生成高清二维码传给手机；复制含码图片后台自动解析，支持双击色块直接粘贴。
+  - **OCR 识别**：支持 Windows 系统本地离线 OCR 与 AI 视觉大模型双模，识别结果可在弹窗内就地校对纠错后复制。
+  - **卡片翻译**：抽屉式平滑展开译文，支持中英双向互译与一键替换粘贴。
 
-也可以：
-
-- 按 `1` ~ `9` 直接贴列表里第 1～9 条
-- `Shift + Enter` 只贴纯文本（不要网页/Word 的格式）
-- `Ctrl + C` 只把这条拷回系统剪贴板，不立刻粘贴
-- 搜索框输入关键字，或拼音首字母（如 `sjjg` 找「设计架构」）
-
-### 2. 窗口置顶（连续往同一个窗口贴）
-
-填表、对照文档时，先 `Ctrl + P` 或点标题栏图钉，让面板钉住。  
-之后失焦不会收起，粘贴后也不会自动关掉。贴完用方向键自己选下一条。
-
-不置顶时，粘贴后面板会收起，避免挡着工作。
-
-### 3. 收集栈（按复制顺序逐条粘贴）
-
-适合：从网页/表格里连续复制多个字段，再到另一个窗口按顺序填。
-
-1. 按 `Ctrl + Shift + S` 打开收集栈，桌面右下会出现小浮条。
-2. 依次复制要填的内容（或把一段多行文字「拆分」成多条）。
-3. 点目标输入框，按 `Ctrl + V`：每按一次贴下一条，贴完自动停。
-4. 再按一次 `Ctrl + Shift + S`，或点浮条退出。
-
-### 4. 常用短语
-
-面板顶部切到「常用短语」，用来存固定回复、代码片段、办公模板。
-
-- 粘贴时会自动替换占位符，例如 `{date}` `{time}` `{guid}` `{username}` `{clipboard}`
-- 需要临时改几个字时用「微调填入」，改完 `Ctrl + Enter` 贴出，原模板不变
-
-完整占位符见面板帮助或设置页说明。
-
-### 5. 图片、二维码、OCR、翻译、贴图
-
-| 你想做的事 | 怎么做 |
-| :--- | :--- |
-| 看大图 | 悬停图片卡片 |
-| 把图钉在桌面上对照 | 卡片「贴图」：滚轮缩放，`Ctrl + 滚轮` 调透明度，`Esc` 或双击关掉 |
-| 把文字发给手机 | 悬停文本/链接卡片，扫弹出的二维码 |
-| 识别截图里的二维码 | 复制那张图，卡片上会抽出链接/文本，可复制或双击色块直接粘贴 |
-| 图转文字 | 图片卡片点 OCR，结果可先改再复制 |
-| 翻译 | 文本卡片点翻译，展开译文后可替换粘贴 |
-
-OCR / 翻译可在设置里选系统自带、离线模型或自己的 AI 接口。不配也能用系统 OCR 和微软 / Google 翻译。
-
-### 6. 设置与托盘
-
-托盘右键：打开面板、暂停捕获、检查更新、退出。  
-复制密码等不想留下记录时，勾选「暂停捕获」；面板底部会显示「已暂停捕获」。
-
-设置里可改主题、字体、快捷键、历史条数上限，以及是否接管系统 `Win + V`。接管前会备份系统剪贴板相关设置，关闭接管、退出或卸载时按备份还原。
+- 🔒 **纯本地存储，极致隐私**  
+  数据 100% 存储在本机 SQLite 数据库中，不设云端服务器，绝不上传任何隐私；托盘菜单支持一键「暂停捕获」，保护敏感操作。
 
 ---
 
-## 快捷键
-
-除 `Win + V` 和 `1 ~ 9` 外，其余可在设置里改。
-
-| 按键 | 作用 |
-| :--- | :--- |
-| `Win + V` | 打开 / 隐藏面板 |
-| `Enter` | 粘贴选中项 |
-| `Shift + Enter` | 纯文本粘贴选中项 |
-| `1` ~ `9` | 粘贴第 1～9 条 |
-| `↑` / `↓` | 上下选择 |
-| `Ctrl + C` | 复制选中项到系统剪贴板 |
-| `Delete` | 删除选中项 |
-| `Ctrl + P` | 窗口置顶 |
-| `Ctrl + Shift + V` | 全局：把剪贴板最新内容以纯文本贴出 |
-| `Ctrl + Shift + S` | 开/关收集栈 |
-| `Ctrl + Enter` | 短语微调窗：应用并粘贴 |
-| `Esc` | 隐藏面板 / 退出收集栈 / 关掉贴图或弹窗 |
-
----
-
-## 常见问题
-
-**按 `Win + V` 没反应？**  
-看托盘有没有 QuickClip。没有就从开始菜单再开一次。若弹出的是 Windows 自带剪贴板，到设置里启用「接管系统剪贴板」。管理员窗口下系统可能拦热键，点一下目标窗口后再试。
-
-**手机复制的内容电脑上看不到？**  
-QuickClip 不自己做云同步。用微信输入法、系统互联等把内容同步到电脑剪贴板后，会自动出现在列表里。
-
-**数据在哪？会不会上传？**  
-全部在 `%LOCALAPPDATA%\QuickClip\`（历史库、缩略图、设置、更新包、日志）。不注册、不上传剪贴内容。
-
-**怎么彻底退出 / 卸载？**  
-退出：托盘右键「退出」。卸载用系统「应用和功能」，会按备份还原系统剪贴板设置。
-
-**更新怎么装？**  
-设置 → 关于 →「检查更新…」。发现新版本会自动下载，点「立即更新」后退出并静默安装。
-
----
-
-## 功能一览
-
-- 接管 `Win + V`，记录文本 / 链接 / 图片 / 文件，保留 HTML / RTF 格式
-- 拼音首字母搜索，条目可钉在列表顶部
-- 收集栈顺序粘贴，常用短语 + 动态占位符 + 微调填入
-- 桌面贴图、二维码生成与识别、OCR、翻译
-- 多套主题；开机自启会后台预热，减少第一次按 `Win + V` 的等待
+## 📸 视觉体验一览
 
 <p align="center">
-  <img src="docs/assets/preview-image.png" width="560" alt="图片预览">
+  <img src="docs/assets/themes.png" width="720" alt="多主题配色与视觉体验">
 </p>
 
 <p align="center">
-  <img src="docs/assets/qr-generate.png" width="360" alt="生成二维码">
-  &nbsp;
-  <img src="docs/assets/qr-decode.png" width="360" alt="识别二维码">
+  <img src="docs/assets/preview-image.png" width="560" alt="大图卡片预览">
 </p>
 
 <p align="center">
-  <img src="docs/assets/themes.png" width="720" alt="主题">
+  <img src="docs/assets/qr-generate.png" width="340" alt="文本一键生成二维码">
+  &nbsp;&nbsp;
+  <img src="docs/assets/qr-decode.png" width="340" alt="截图二维码自动识别提取">
 </p>
 
 ---
 
-## 从源码构建
+## ⌨️ 常用快捷键
 
-Windows 10 1809+ / 11，安装 [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)。
+> 除 `Win + V` 与数字直贴外，大部分快捷键均可在设置中自定义。
+
+| 按键 | 作用范围 | 说明 |
+| :--- | :--- | :--- |
+| `Win + V` | 全局 | 打开 / 隐藏 QuickClip 主面板 |
+| `Enter` | 主面板 | 粘贴选中条目（保留富文本样式与文件对象） |
+| `Shift + Enter` | 主面板 | 纯文本粘贴（剥离网页/Word 格式或提取文件纯路径） |
+| `1` ~ `9` | 主面板 | 极速直贴列表第 1～9 项 |
+| `↑` / `↓` | 主面板 | 顺次上下移动选中项 |
+| `Ctrl + C` | 主面板 | 仅将选中项复制回系统剪贴板，不触发自动粘贴 |
+| `Delete` | 主面板 | 删除选中条目（同步清理缩略图） |
+| `Ctrl + P` | 主面板 | 切换窗口置顶（保持面板常驻，适合连续填表） |
+| `Ctrl + Shift + V` | 全局 | 纯文本贴出当前剪贴板最新内容 |
+| `Ctrl + Shift + S` | 全局 | 开启 / 关闭收集栈（顺次粘贴会话） |
+| `Ctrl + V` | 收集栈激活时 | 按出栈顺序顺次贴出下一条 |
+| `Esc` | 任意窗口 | 隐藏面板 / 退出收集栈 / 关闭贴图或弹窗 |
+
+---
+
+## 📥 下载与极速上手
+
+### 1. 环境准备
+QuickClip 基于 .NET 8 开发，请先确保已安装 [.NET 8 桌面运行时 (x64)](https://aka.ms/dotnet/8.0/windowsdesktop-runtime-win-x64.exe)（已安装可直接跳过）。
+
+### 2. 下载安装
+下载最新版安装程序 `QuickClip-Setup-win-x64.exe`：
+- [Gitee Releases](https://gitee.com/huaxudong/quick-clip/releases)（国内高速直连）
+- [GitHub Releases](https://github.com/soldier-cv/quick-clip/releases)
+
+### 3. 三步极速上手
+1. **日常复制**：在任意软件中正常复制（`Ctrl + C`），QuickClip 后台自动记录入库。
+2. **呼出面板**：在需要输入的地方按下 `Win + V`。
+3. **选定粘贴**：键盘上下键选定后按 `Enter`（或鼠标双击、或按 `1`~`9`），内容即刻精准注入。
+
+---
+
+## ❓ 常见问题 (FAQ)
+
+<details>
+<summary><strong>按 Win + V 无法呼出或弹出了 Windows 自带剪贴板？</strong></summary>
+
+1. 检查桌面右下角系统托盘是否已有 QuickClip 图标；若未运行，从开始菜单启动。  
+2. 若弹出的是系统自带剪贴板，请打开 QuickClip「设置 → 常规」，勾选「接管系统剪贴板」。  
+3. 若目标窗口为管理员权限（高完整性级别），请将 QuickClip 也以管理员权限运行，以避免系统跨权限拦截快捷键。
+</details>
+
+<details>
+<summary><strong>手机复制的内容，电脑上可以自动看到吗？</strong></summary>
+
+QuickClip 坚守“纯本地，不上传云端”的隐私原则，不自建云同步服务器。  
+若您使用微信输入法、跨屏互联等工具，当手机内容流转到电脑系统剪贴板时，QuickClip 会在毫秒级自动捕获并存入本地历史。
+</details>
+
+<details>
+<summary><strong>剪贴板数据保存在哪里？如何彻底卸载？</strong></summary>
+
+- **数据存放**：所有配置、数据库与图片缓存均保存在 `%LOCALAPPDATA%\QuickClip\` 目录中，不污染其他路径。  
+- **安全卸载**：通过系统「应用和功能」正常卸载，卸载程序会自动按备份还原 Windows 系统自带剪贴板与注册表设置。
+</details>
+
+<details>
+<summary><strong>如何检查与获取版本更新？</strong></summary>
+
+在 QuickClip 托盘图标右键菜单中点击「检查更新…」，或在「设置 → 关于」中检查。发现新版本将通过国内高速镜像自动下载并无感升级。
+</details>
+
+---
+
+## 🛠️ 从源码构建
+
+开发运行环境需安装 [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) 及 Windows 10 (1809+) / Windows 11。
 
 ```powershell
+# 本地运行与调试
 dotnet run --project src/QuickClip/QuickClip.csproj
 
+# 本地发布 Release 独立包
 dotnet publish src/QuickClip/QuickClip.csproj -c Release -r win-x64 --self-contained false `
   -p:PublishSingleFile=false -o publish/fdd
 ```
 
-安装包用 Inno Setup 编译 `setup/QuickClip.iss`。规格与开发约定见 [docs/SPECIFICATION.md](docs/SPECIFICATION.md)、[AGENT.md](AGENT.md)，版本记录见 [CHANGELOG.md](CHANGELOG.md)。
+安装包使用 Inno Setup 编译 `setup/QuickClip.iss`。
 
 ---
 
-## 致谢
+## 📚 文档导航
 
-感谢 [@wlight](https://github.com/wlight) 以及所有反馈、Star 和推荐的朋友。交互上参考了 OneClip、Snipaste 与 [WPF-UI](https://github.com/lepoco/wpfui)。
+| 文档 | 内容 |
+| :-- | :-- |
+| [docs/SPECIFICATION.md](docs/SPECIFICATION.md) | 产品定位、功能全景矩阵、核心架构与系统兼容性基线 |
+| [AGENT.md](AGENT.md) | 开发准则、C# 编码规范与常用命令速查 |
+| [CHANGELOG.md](CHANGELOG.md) | 逐版本更新记录与修复明细 |
+| [docs/preview.html](docs/preview.html) | 界面结构与配色预览页 |
 
-本项目基于 [MIT 许可证](LICENSE)。
+---
+
+## 🤝 参与贡献
+
+欢迎提交缺陷修复与改进建议：
+
+- **反馈问题**：通过 [Issue 模板](.github/ISSUE_TEMPLATE) 提交缺陷报告或功能建议，请尽量附上复现步骤与系统版本。
+- **提交代码**：Fork 本仓库后开分支开发，按 [PR 模板](.github/pull_request_template.md) 提交 Pull Request，并确保本地 `dotnet build QuickClip.sln -c Debug` 零错误零警告。
+
+---
+
+## 🙏 致谢与开源协议
+
+感谢 [@wlight](https://github.com/wlight) 以及所有提出反馈、贡献 Star 的朋友。  
+在功能探索上，从 OneClip 了解并启发了收集栈（批量顺次粘贴）的使用需求；界面采用 [WPF-UI](https://github.com/lepoco/wpfui) 现代化控件库构建。
+
+本项目基于 [MIT 许可证](LICENSE) 开源发布。

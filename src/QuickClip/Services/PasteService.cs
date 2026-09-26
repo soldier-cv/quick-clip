@@ -38,28 +38,42 @@ public sealed class PasteService
     public void RememberTargetWindow(IntPtr candidate = default)
     {
         uint ownPid = (uint)Environment.ProcessId;
-        IntPtr hwnd = candidate;
-        if (hwnd != IntPtr.Zero)
+
+        // 显式候选（来自 WM_ACTIVATE / 失焦事件等）：优先采用；候选无效（自身浮层、任务栏、IME）
+        // 时保留既有目标，避免被瞬时窗口清空。
+        if (candidate != IntPtr.Zero)
         {
+            IntPtr hwnd = candidate;
             IntPtr root = NativeMethods.GetAncestor(hwnd, NativeMethods.GA_ROOT);
             if (root != IntPtr.Zero)
             {
                 hwnd = root;
             }
+
+            if (NativeMethods.IsEligiblePasteTarget(hwnd, ownPid))
+            {
+                SetTargetWindow(hwnd);
+            }
+
+            return;
         }
 
-        if (!NativeMethods.IsEligiblePasteTarget(hwnd, ownPid))
+        // 无候选 = 唤起窗口前主动记录：必须以「当前真实前台」为准，绝不能沿用过期目标。
+        // 否则用户切回飞书后按 Win+V，仍会把内容贴到上一次失焦时的浏览器窗口。
+        // 注意：WPF 激活时 WM_ACTIVATE(WA_ACTIVE) 的 lParam 恒为 0，无法作为第二道兜底，
+        // 所以这里必须强制刷新，而不能在既有目标仍有效时提前返回。
+        IntPtr fg = NativeMethods.GetForegroundWindow();
+        if (NativeMethods.IsEligiblePasteTarget(fg, ownPid))
         {
-            if (HasValidTargetWindow())
-            {
-                return;
-            }
+            SetTargetWindow(fg);
+        }
+    }
 
-            hwnd = NativeMethods.GetForegroundWindow();
-            if (!NativeMethods.IsEligiblePasteTarget(hwnd, ownPid))
-            {
-                return;
-            }
+    private void SetTargetWindow(IntPtr hwnd)
+    {
+        if (hwnd == _lastTargetWindow)
+        {
+            return;
         }
 
         NativeMethods.GetWindowThreadProcessId(hwnd, out uint pid);

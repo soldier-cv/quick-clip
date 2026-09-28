@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using QuickClip.Models;
+using QuickClip.Services;
 using Wpf.Ui.Controls;
 using MouseButtonEventArgs = System.Windows.Input.MouseButtonEventArgs;
 using MouseEventArgs = System.Windows.Input.MouseEventArgs;
@@ -17,6 +18,9 @@ public partial class ToastWindow : Window
     private readonly DispatcherTimer _hideTimer;
     private bool _isClosing;
     private double _remainingSeconds = 1.8;
+
+    /// <summary>点击提示要执行的动作（如「立即更新」）；为 null 时点击仅关闭提示。</summary>
+    private Action? _clickAction;
 
     public ToastWindow()
     {
@@ -66,12 +70,21 @@ public partial class ToastWindow : Window
         Reposition();
     }
 
-    public void UpdateContent(string title, string? message, SymbolRegular symbol, double durationSeconds = 1.8, ToastSize? size = null)
+    public void UpdateContent(
+        string title,
+        string? message,
+        SymbolRegular symbol,
+        double durationSeconds = 1.8,
+        ToastSize? size = null,
+        Action? onClick = null)
     {
         if (size.HasValue)
         {
             ApplySize(size.Value);
         }
+
+        // 每次刷新都重置点击动作：普通提示必须清掉上一次遗留的安装回调，避免点击误装
+        _clickAction = onClick;
 
         TitleText.Text = title;
         if (!string.IsNullOrWhiteSpace(message))
@@ -173,7 +186,24 @@ public partial class ToastWindow : Window
 
     private void OnMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        // 点击立即关闭
+        // 取出并清空，避免动画期间连点重复触发安装
+        var action = _clickAction;
+        _clickAction = null;
+
+        // 点击立即关闭，再执行动作（如启动静默安装并退出），保证点击反馈即时
         StartFadeOut();
+        if (action == null)
+        {
+            return;
+        }
+
+        try
+        {
+            action();
+        }
+        catch (Exception ex)
+        {
+            DebugLog.LogException("Toast 点击回调异常", ex);
+        }
     }
 }

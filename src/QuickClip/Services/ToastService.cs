@@ -38,7 +38,14 @@ public sealed class ToastService
     /// <param name="symbol">图标，默认为 Info24。</param>
     /// <param name="durationSeconds">停留秒数，默认 1.8 秒。</param>
     /// <param name="size">指定尺寸，未指定时采用当前设置。</param>
-    public void Show(string title, string? message = null, SymbolRegular symbol = SymbolRegular.Info24, double durationSeconds = 1.8, ToastSize? size = null)
+    /// <param name="onClick">点击提示要执行的动作（如「立即更新」）；为 null 时点击仅关闭提示。</param>
+    public void Show(
+        string title,
+        string? message = null,
+        SymbolRegular symbol = SymbolRegular.Info24,
+        double durationSeconds = 1.8,
+        ToastSize? size = null,
+        Action? onClick = null)
     {
         var actualSize = size ?? CurrentSize;
         RunOnUi(() =>
@@ -49,7 +56,7 @@ public sealed class ToastService
                 {
                     try
                     {
-                        _currentToast.UpdateContent(title, message, symbol, durationSeconds, actualSize);
+                        _currentToast.UpdateContent(title, message, symbol, durationSeconds, actualSize, onClick);
                         return;
                     }
                     catch
@@ -73,7 +80,7 @@ public sealed class ToastService
                 };
 
                 toast.Show();
-                toast.UpdateContent(title, message, symbol, durationSeconds, actualSize);
+                toast.UpdateContent(title, message, symbol, durationSeconds, actualSize, onClick);
             }
         });
     }

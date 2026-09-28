@@ -155,6 +155,29 @@ public sealed class TrayIconService : IDisposable
     }
 
     /// <summary>
+    /// 「更新已下载」专用提示：点击提示直接触发安装（无需再去托盘右键「立即更新」）。
+    /// 停留时间放宽到 8 秒（悬停仍会暂停倒计时），给用户足够的阅读与点击时间。
+    /// </summary>
+    public void ShowInstallReadyToast(string? tagName)
+    {
+        string tag = string.IsNullOrWhiteSpace(tagName) ? "新版本" : tagName;
+        string message = UpdateService.ReadyNotifyText(tag);
+
+        if (_toastService != null)
+        {
+            _toastService.Show(
+                "QuickClip",
+                message,
+                durationSeconds: 8,
+                onClick: () => InstallUpdateRequested?.Invoke());
+            return;
+        }
+
+        // 无应用内 Toast 时退回系统气泡：点击由 BalloonTipClicked 触发安装
+        ShowBalloonTip("QuickClip", message);
+    }
+
+    /// <summary>
     /// 加载托盘图标。系统托盘槽位尺寸固定，但默认常取 16px 且留白偏多会显得「小」：
     /// 取更大图源并在槽位内略放大绘制（约 1.22x），观感更大一圈且更清晰。
     /// </summary>

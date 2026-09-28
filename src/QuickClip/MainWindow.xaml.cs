@@ -2088,10 +2088,12 @@ public partial class MainWindow : FluentWindow
                 _services.Tray.ShowBalloonTip("QuickClip", result.Message ?? "检查更新失败");
                 break;
             case Services.UpdateCheckStatus.Ready:
+                // 已下载：提示可直接点击安装（无需再走托盘右键「立即更新」）
+                _services.Tray.ShowInstallReadyToast(
+                    result.Pending?.TagName ?? _services.Update.Pending?.TagName);
+                break;
             case Services.UpdateCheckStatus.UpdateAvailable:
-                _services.Tray.ShowBalloonTip(
-                    "QuickClip",
-                    (result.Message ?? "已下载新版本") + "。点击「立即更新」安装，或下次手动启动自动安装");
+                _services.Tray.ShowBalloonTip("QuickClip", result.Message ?? "正在处理更新…");
                 break;
         }
     }

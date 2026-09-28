@@ -154,12 +154,15 @@ public sealed class AppServices : IDisposable
             ui.BeginInvoke(() => Tray.SetInstallUpdateVisible(pending != null, pending?.TagName));
         Update.UserNotify += (title, message) =>
             ui.BeginInvoke(() => Tray.ShowBalloonTip(title, message));
+        // 更新已下载：提示可直接点击安装
+        Update.InstallReady += pending =>
+            ui.BeginInvoke(() => Tray.ShowInstallReadyToast(pending.TagName));
         if (Update.Pending != null)
         {
             Tray.SetInstallUpdateVisible(true, Update.Pending.TagName);
             if (fromAutostart)
             {
-                Tray.ShowBalloonTip("QuickClip", UpdateService.ReadyNotifyText(Update.Pending.TagName));
+                Tray.ShowInstallReadyToast(Update.Pending.TagName);
             }
         }
 

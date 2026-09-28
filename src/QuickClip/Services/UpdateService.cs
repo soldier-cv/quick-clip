@@ -198,6 +198,9 @@ public sealed class UpdateService : IDisposable
     /// <summary>需要提示用户时触发（title, message）。</summary>
     public event Action<string, string>? UserNotify;
 
+    /// <summary>已下载的更新就绪、可点击安装时触发（可能来自后台线程，订阅方需切回 UI）。</summary>
+    public event Action<PendingUpdate>? InstallReady;
+
     public void Attach(AppPaths paths, SettingsService settings)
     {
         _paths = paths;
@@ -243,7 +246,7 @@ public sealed class UpdateService : IDisposable
 
             if (result.Status == UpdateCheckStatus.Ready && result.Pending != null)
             {
-                UserNotify?.Invoke("QuickClip", ReadyNotifyText(result.Pending.TagName));
+                InstallReady?.Invoke(result.Pending);
             }
             return;
         }

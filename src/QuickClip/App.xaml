@@ -11,11 +11,19 @@
                 <!-- 必须在 WPF-UI 之后合并，覆盖其/系统默认白槽滚动条 -->
                 <ResourceDictionary Source="Themes/ThemeScrollBar.xaml" />
             </ResourceDictionary.MergedDictionaries>
-            <FontFamily x:Key="Theme.FontFamily">Segoe UI, Microsoft YaHei UI, Microsoft YaHei, sans-serif</FontFamily>
+            <FontFamily x:Key="Theme.FontFamily">Microsoft YaHei UI, Segoe UI, sans-serif</FontFamily>
             <Style TargetType="{x:Type Window}">
                 <Setter Property="FontFamily" Value="{DynamicResource Theme.FontFamily}" />
             </Style>
             <Style TargetType="{x:Type TextBlock}">
+                <Setter Property="FontFamily" Value="{DynamicResource Theme.FontFamily}" />
+            </Style>
+            <Style TargetType="{x:Type ComboBox}" BasedOn="{StaticResource {x:Type ComboBox}}">
+                <Setter Property="FontFamily" Value="{DynamicResource Theme.FontFamily}" />
+                <Setter Property="Padding" Value="10,0,10,0" />
+                <Setter Property="VerticalContentAlignment" Value="Center" />
+            </Style>
+            <Style TargetType="{x:Type ComboBoxItem}" BasedOn="{StaticResource {x:Type ComboBoxItem}}">
                 <Setter Property="FontFamily" Value="{DynamicResource Theme.FontFamily}" />
             </Style>
         </ResourceDictionary>

@@ -23,7 +23,7 @@ public static class AppFontService
     public const string JetBrainsMonoDisplayName = "JetBrains Mono";
     public const string CascadiaMonoDisplayName = "Cascadia Mono";
 
-    public const string FallbackChain = "Segoe UI, Microsoft YaHei UI, Microsoft YaHei, sans-serif";
+    public const string FallbackChain = "Microsoft YaHei UI, Segoe UI, sans-serif";
     public const string JetBrainsMonoPackPath = "pack://application:,,,/QuickClip;component/Assets/Fonts/#JetBrains Mono";
 
     public static readonly MediaFontFamily DefaultFamily = new(FallbackChain);

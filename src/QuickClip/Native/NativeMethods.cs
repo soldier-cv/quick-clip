@@ -565,7 +565,50 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     public static extern IntPtr GetAncestor(IntPtr hwnd, uint gaFlags);
 
+    public const uint GA_PARENT = 1;
     public const uint GA_ROOT = 2;
+    public const uint GA_ROOTOWNER = 3;
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RECT
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
+    /// <summary>
+    /// 将任意子窗口、渲染控件或弹出浮层句柄递归规范化为其所属的应用主根窗口。
+    /// 解决 Chrome/Edge/VSCode 等 Chromium 架构下 GetForegroundWindow() 得到的是 WS_CHILD 渲染窗的问题。
+    /// </summary>
+    public static IntPtr NormalizeToRoot(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero || !IsWindow(hwnd))
+        {
+            return IntPtr.Zero;
+        }
+
+        // 优先 GA_ROOTOWNER：同时回溯 Parent 父窗口链与 Owner 所有权链，直达宿主顶层窗
+        IntPtr root = GetAncestor(hwnd, GA_ROOTOWNER);
+        if (root != IntPtr.Zero && IsWindow(root))
+        {
+            return root;
+        }
+
+        // 次选 GA_ROOT：回溯 Parent 父窗口链
+        root = GetAncestor(hwnd, GA_ROOT);
+        if (root != IntPtr.Zero && IsWindow(root))
+        {
+            return root;
+        }
+
+        return hwnd;
+    }
 
     [DllImport("user32.dll", EntryPoint = "GetWindowLong")]
     private static extern int GetWindowLong32(IntPtr hWnd, int nIndex);
@@ -600,14 +643,35 @@ internal static class NativeMethods
         }
 
         GetWindowThreadProcessId(hwnd, out uint pid);
+        if (pid == 0 || pid == ownProcessId)
+        {
+            return false;
+        }
+
+        if (!IsWindowVisible(hwnd) || IsIconic(hwnd))
+        {
+            return false;
+        }
+
+        // 必须具备有效物理尺寸（排除后台 0x0 辅助窗口、系统哨兵窗与隐藏监听窗）
+        if (GetWindowRect(hwnd, out RECT rect))
+        {
+            int width = rect.Right - rect.Left;
+            int height = rect.Bottom - rect.Top;
+            if (width < 20 || height < 20)
+            {
+                return false;
+            }
+        }
+
         return PasteTargetFilter.IsEligibleTarget(
             pid,
             ownProcessId,
             GetWindowClassName(hwnd),
             GetWindowLong(hwnd, PasteTargetFilter.GWL_STYLE),
             GetWindowLong(hwnd, PasteTargetFilter.GWL_EXSTYLE),
-            IsWindowVisible(hwnd),
-            IsIconic(hwnd));
+            true,
+            false);
     }
 
     /// <summary>
@@ -620,9 +684,10 @@ internal static class NativeMethods
         int hops = 0;
         while (next != IntPtr.Zero && hops++ < maxHops)
         {
-            if (IsEligiblePasteTarget(next, ownProcessId))
+            IntPtr root = NormalizeToRoot(next);
+            if (IsEligiblePasteTarget(root, ownProcessId))
             {
-                return next;
+                return root;
             }
 
             next = GetWindow(next, GW_HWNDNEXT);

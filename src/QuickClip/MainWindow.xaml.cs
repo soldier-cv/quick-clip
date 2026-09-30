@@ -585,6 +585,10 @@ public partial class MainWindow : FluentWindow
         PreviewPopup.IsOpen = false;
         _viewModel.SuppressAutoSelect = false;
         Hide();
+        if (!_services.Paste.IsSelfPasting && !_services.Settings.WindowAlwaysOnTop)
+        {
+            _services.Paste.ClearTargetWindow();
+        }
         _services.StackPaste.SyncHudToPanel();
         DebugLog.Log("窗口已隐藏");
     }

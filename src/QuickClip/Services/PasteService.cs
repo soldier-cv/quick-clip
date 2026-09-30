@@ -39,33 +39,57 @@ public sealed class PasteService
     {
         uint ownPid = (uint)Environment.ProcessId;
 
-        // 显式候选（来自 WM_ACTIVATE / 失焦事件等）：优先采用；候选无效（自身浮层、任务栏、IME）
-        // 时保留既有目标，避免被瞬时窗口清空。
+        // 1. 显式候选（来自 WM_ACTIVATE / 失焦事件等）：递归规范化到根窗口
         if (candidate != IntPtr.Zero)
         {
-            IntPtr hwnd = candidate;
-            IntPtr root = NativeMethods.GetAncestor(hwnd, NativeMethods.GA_ROOT);
-            if (root != IntPtr.Zero)
+            IntPtr rootCandidate = NativeMethods.NormalizeToRoot(candidate);
+            if (NativeMethods.IsEligiblePasteTarget(rootCandidate, ownPid))
             {
-                hwnd = root;
+                SetTargetWindow(rootCandidate);
+                return;
             }
-
-            if (NativeMethods.IsEligiblePasteTarget(hwnd, ownPid))
-            {
-                SetTargetWindow(hwnd);
-            }
-
-            return;
         }
 
-        // 无候选 = 唤起窗口前主动记录：必须以「当前真实前台」为准，绝不能沿用过期目标。
-        // 否则用户切回飞书后按 Win+V，仍会把内容贴到上一次失焦时的浏览器窗口。
-        // 注意：WPF 激活时 WM_ACTIVATE(WA_ACTIVE) 的 lParam 恒为 0，无法作为第二道兜底，
-        // 所以这里必须强制刷新，而不能在既有目标仍有效时提前返回。
+        // 2. 主动获取当前真实前台并规范化到根窗口（关键修复：Chrome/Edge/VSCode 等子渲染窗 WS_CHILD 必须在此溯源到根窗）
         IntPtr fg = NativeMethods.GetForegroundWindow();
-        if (NativeMethods.IsEligiblePasteTarget(fg, ownPid))
+        if (fg != IntPtr.Zero)
         {
-            SetTargetWindow(fg);
+            IntPtr rootFg = NativeMethods.NormalizeToRoot(fg);
+            if (NativeMethods.IsEligiblePasteTarget(rootFg, ownPid))
+            {
+                SetTargetWindow(rootFg);
+                return;
+            }
+        }
+
+        // 3. 当前前台为自身窗口或任务栏（如从托盘唤起），沿 Z-order 向下寻找真实目标
+        IntPtr mainHwnd = _uiDispatcher?.Invoke(() =>
+        {
+            var win = System.Windows.Application.Current?.MainWindow;
+            return win != null ? new System.Windows.Interop.WindowInteropHelper(win).Handle : IntPtr.Zero;
+        }) ?? IntPtr.Zero;
+
+        if (mainHwnd != IntPtr.Zero)
+        {
+            IntPtr next = NativeMethods.FindNextPasteTarget(mainHwnd, ownPid);
+            if (next != IntPtr.Zero)
+            {
+                SetTargetWindow(next);
+                return;
+            }
+        }
+
+        // 4. 若无法识别当前会话的合法目标窗口，必须清理旧的幽灵目标，绝对不能把内容误贴到历史遗留窗口
+        ClearTargetWindow();
+    }
+
+    /// <summary>清空已记录的粘贴目标窗口（结束会话或目标无效时）。</summary>
+    public void ClearTargetWindow()
+    {
+        if (_lastTargetWindow != IntPtr.Zero)
+        {
+            DebugLog.Log($"清空粘贴目标窗口: {_lastTargetWindow}");
+            _lastTargetWindow = IntPtr.Zero;
         }
     }
 
@@ -262,10 +286,14 @@ public sealed class PasteService
         }
 
         IntPtr fg = NativeMethods.GetForegroundWindow();
-        if (NativeMethods.IsEligiblePasteTarget(fg, ownPid))
+        if (fg != IntPtr.Zero)
         {
-            _lastTargetWindow = fg;
-            return fg;
+            IntPtr rootFg = NativeMethods.NormalizeToRoot(fg);
+            if (NativeMethods.IsEligiblePasteTarget(rootFg, ownPid))
+            {
+                SetTargetWindow(rootFg);
+                return rootFg;
+            }
         }
 
         return IntPtr.Zero;
@@ -326,6 +354,12 @@ public sealed class PasteService
                     Volatile.Write(ref _ownSequence, (int)NativeClipboard.CurrentSequence);
                     DebugLog.Log("已还原剪贴板中的文件列表");
                 }
+            }
+
+            if (!stayOnForeground)
+            {
+                // 非置顶粘贴在隐藏后清除本次会话的目标窗口，避免污染后续不同应用的粘贴
+                ClearTargetWindow();
             }
         }
     }

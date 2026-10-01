@@ -593,21 +593,186 @@ internal static class NativeMethods
             return IntPtr.Zero;
         }
 
-        // 优先 GA_ROOTOWNER：同时回溯 Parent 父窗口链与 Owner 所有权链，直达宿主顶层窗
-        IntPtr root = GetAncestor(hwnd, GA_ROOTOWNER);
+        // 优先 GA_ROOT：沿 Parent 链（WS_CHILD）回溯至顶层窗口（如 Chrome/Edge/VSCode 渲染窗、Win32 对话框等）。
+        // 关键修复：绝不能盲目优先 GA_ROOTOWNER。对于模态对话框（如系统环境变量的“新建变量”弹窗），
+        // GA_ROOTOWNER 会直接跨过当前处于激活且可编辑状态的模态子弹窗，溯源到已被禁用的 Owner 宿主窗口（如被 WS_DISABLED 的父窗口或隐藏的 RunDLL 宿主），
+        // 导致弹窗被 IsEligiblePasteTarget 误判为不可粘贴，或导致焦点被错误激活到被禁用的父窗口上。
+        IntPtr root = GetAncestor(hwnd, GA_ROOT);
         if (root != IntPtr.Zero && IsWindow(root))
         {
-            return root;
+            int style = GetWindowLong(root, PasteTargetFilter.GWL_STYLE);
+            if ((style & PasteTargetFilter.WS_DISABLED) == 0)
+            {
+                return root;
+            }
         }
 
-        // 次选 GA_ROOT：回溯 Parent 父窗口链
-        root = GetAncestor(hwnd, GA_ROOT);
-        if (root != IntPtr.Zero && IsWindow(root))
+        // 次选 GA_ROOTOWNER：仅当普通顶层窗被禁用或不存在时，尝试回溯 Owner 所有权链
+        IntPtr rootOwner = GetAncestor(hwnd, GA_ROOTOWNER);
+        if (rootOwner != IntPtr.Zero && IsWindow(rootOwner))
         {
-            return root;
+            return rootOwner;
         }
 
-        return hwnd;
+        return root != IntPtr.Zero && IsWindow(root) ? root : hwnd;
+    }
+
+    public const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+    public const uint TOKEN_QUERY = 0x0008;
+    public const int ERROR_ACCESS_DENIED = 5;
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern IntPtr OpenProcess(uint processAccess, bool bInheritHandle, int processId);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool CloseHandle(IntPtr hObject);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool OpenProcessToken(IntPtr ProcessHandle, uint DesiredAccess, out IntPtr TokenHandle);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool GetTokenInformation(IntPtr tokenHandle, int tokenInformationClass, IntPtr tokenInformation, int tokenInformationLength, out int returnLength);
+
+    [DllImport("advapi32.dll")]
+    public static extern IntPtr GetSidSubAuthority(IntPtr pSid, uint nSubAuthority);
+
+    [DllImport("advapi32.dll")]
+    public static extern IntPtr GetSidSubAuthorityCount(IntPtr pSid);
+
+    private static int _ownIntegrityLevel = -1;
+
+    public static int GetCurrentProcessIntegrityLevel()
+    {
+        if (_ownIntegrityLevel != -1)
+        {
+            return _ownIntegrityLevel;
+        }
+
+        _ownIntegrityLevel = QueryProcessIntegrityLevel((uint)Environment.ProcessId);
+        if (_ownIntegrityLevel <= 0)
+        {
+            _ownIntegrityLevel = 0x2000; // 默认 Medium (8192)
+        }
+
+        return _ownIntegrityLevel;
+    }
+
+    private static int QueryProcessIntegrityLevel(uint pid)
+    {
+        IntPtr hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, (int)pid);
+        if (hProc == IntPtr.Zero)
+        {
+            return -1;
+        }
+
+        try
+        {
+            if (!OpenProcessToken(hProc, TOKEN_QUERY, out IntPtr hToken))
+            {
+                return -1;
+            }
+
+            try
+            {
+                GetTokenInformation(hToken, 25 /* TokenIntegrityLevel */, IntPtr.Zero, 0, out int len);
+                if (len <= 0)
+                {
+                    return 0;
+                }
+
+                IntPtr buf = Marshal.AllocHGlobal(len);
+                try
+                {
+                    if (GetTokenInformation(hToken, 25, buf, len, out len))
+                    {
+                        IntPtr pSid = Marshal.ReadIntPtr(buf);
+                        IntPtr pCount = GetSidSubAuthorityCount(pSid);
+                        int count = Marshal.ReadByte(pCount);
+                        IntPtr pSubAuth = GetSidSubAuthority(pSid, (uint)(count - 1));
+                        return Marshal.ReadInt32(pSubAuth);
+                    }
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(buf);
+                }
+            }
+            finally
+            {
+                CloseHandle(hToken);
+            }
+        }
+        finally
+        {
+            CloseHandle(hProc);
+        }
+
+        return 0;
+    }
+
+    /// <summary>
+    /// 检测目标进程是否具有高于当前进程的完整性级别（如目标为管理员窗口而本进程为普通权限），导致 Windows UIPI 拦截击键或前台激活。
+    /// </summary>
+    public static bool IsHigherIntegrityProcess(uint pid)
+    {
+        if (pid == 0 || pid == (uint)Environment.ProcessId)
+        {
+            return false;
+        }
+
+        IntPtr hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, (int)pid);
+        if (hProc == IntPtr.Zero)
+        {
+            return Marshal.GetLastWin32Error() == ERROR_ACCESS_DENIED;
+        }
+
+        try
+        {
+            if (!OpenProcessToken(hProc, TOKEN_QUERY, out IntPtr hToken))
+            {
+                return Marshal.GetLastWin32Error() == ERROR_ACCESS_DENIED;
+            }
+
+            try
+            {
+                GetTokenInformation(hToken, 25 /* TokenIntegrityLevel */, IntPtr.Zero, 0, out int len);
+                if (len <= 0)
+                {
+                    return false;
+                }
+
+                IntPtr buf = Marshal.AllocHGlobal(len);
+                try
+                {
+                    if (GetTokenInformation(hToken, 25, buf, len, out len))
+                    {
+                        IntPtr pSid = Marshal.ReadIntPtr(buf);
+                        IntPtr pCount = GetSidSubAuthorityCount(pSid);
+                        int count = Marshal.ReadByte(pCount);
+                        IntPtr pSubAuth = GetSidSubAuthority(pSid, (uint)(count - 1));
+                        int targetIl = Marshal.ReadInt32(pSubAuth);
+                        return targetIl > GetCurrentProcessIntegrityLevel();
+                    }
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(buf);
+                }
+            }
+            finally
+            {
+                CloseHandle(hToken);
+            }
+
+            return false;
+        }
+        finally
+        {
+            CloseHandle(hProc);
+        }
     }
 
     [DllImport("user32.dll", EntryPoint = "GetWindowLong")]

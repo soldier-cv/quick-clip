@@ -18,12 +18,12 @@
             <Style TargetType="{x:Type TextBlock}">
                 <Setter Property="FontFamily" Value="{DynamicResource Theme.FontFamily}" />
             </Style>
-            <Style TargetType="{x:Type ComboBox}" BasedOn="{StaticResource {x:Type ComboBox}}">
+            <Style TargetType="{x:Type ComboBox}" BasedOn="{StaticResource DefaultComboBoxStyle}">
                 <Setter Property="FontFamily" Value="{DynamicResource Theme.FontFamily}" />
                 <Setter Property="Padding" Value="10,0,10,0" />
                 <Setter Property="VerticalContentAlignment" Value="Center" />
             </Style>
-            <Style TargetType="{x:Type ComboBoxItem}" BasedOn="{StaticResource {x:Type ComboBoxItem}}">
+            <Style TargetType="{x:Type ComboBoxItem}" BasedOn="{StaticResource DefaultComboBoxItemStyle}">
                 <Setter Property="FontFamily" Value="{DynamicResource Theme.FontFamily}" />
             </Style>
         </ResourceDictionary>

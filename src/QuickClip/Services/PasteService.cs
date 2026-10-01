@@ -211,7 +211,8 @@ public sealed class PasteService
     {
         uint ownPid = (uint)Environment.ProcessId;
         IntPtr currentFg = NativeMethods.GetForegroundWindow();
-        if (stayOnForeground && NativeMethods.IsEligiblePasteTarget(currentFg, ownPid))
+        IntPtr rootCurrentFg = currentFg != IntPtr.Zero ? NativeMethods.NormalizeToRoot(currentFg) : IntPtr.Zero;
+        if (stayOnForeground && (NativeMethods.IsEligiblePasteTarget(currentFg, ownPid) || NativeMethods.IsEligiblePasteTarget(rootCurrentFg, ownPid)))
         {
             NativeMethods.SendCtrlV();
             return true;
@@ -221,10 +222,18 @@ public sealed class PasteService
         if (target == IntPtr.Zero)
         {
             DebugLog.Log("粘贴取消：没有有效的外部目标窗口");
+            ReportFailure("目标窗口未识别，已取消粘贴");
             return false;
         }
 
         NativeMethods.GetWindowThreadProcessId(target, out uint targetPid);
+        if (NativeMethods.IsHigherIntegrityProcess(targetPid))
+        {
+            DebugLog.Log($"粘贴取消：目标窗口以管理员权限运行 (target={target}, pid={targetPid})，当前进程受 UIPI 权限隔离限制");
+            ReportFailure("目标窗口以管理员权限运行，请以管理员身份启动 QuickClip 以支持在此窗口粘贴");
+            return false;
+        }
+
         ForceForegroundOnUi(target);
 
         var deadline = DateTime.UtcNow + TimeSpan.FromMilliseconds(450);
@@ -257,6 +266,7 @@ public sealed class PasteService
             IntPtr fg = NativeMethods.GetForegroundWindow();
             NativeMethods.GetWindowThreadProcessId(fg, out uint fgPid);
             DebugLog.Log($"粘贴取消：目标窗口未能成为前台 target={target} fg={fg} fgPid={fgPid}");
+            ReportFailure("目标窗口未激活，已取消粘贴");
             return false;
         }
 
@@ -332,10 +342,7 @@ public sealed class PasteService
             // 关键：剪贴板回填完成后，留出微小的系统前台焦点稳定缓冲（约 35ms），
             // 确保 QuickClip 隐藏后目标第三方窗口已完成 WM_ACTIVATE 获得键盘焦点，再执行 SendInput
             await Task.Delay(stayOnForeground ? 15 : 35);
-            if (!SimulatePaste(stayOnForeground))
-            {
-                ReportFailure("目标窗口未激活，已取消粘贴");
-            }
+            SimulatePaste(stayOnForeground);
         }
         catch (Exception ex)
         {

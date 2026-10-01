@@ -360,6 +360,9 @@
                  ItemsSource="{Binding Items}"
                  SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
                  SelectionMode="Single"
+                 PreviewMouseLeftButtonDown="OnItemListPreviewMouseLeftButtonDown"
+                 PreviewMouseMove="OnItemListPreviewMouseMove"
+                 PreviewMouseLeftButtonUp="OnItemListPreviewMouseLeftButtonUp"
                  MouseLeftButtonDown="OnItemListMouseLeftButtonDown"
                  MouseDoubleClick="OnItemListDoubleClick">
             <ListBox.ItemContainerStyle>
@@ -378,11 +381,18 @@
                             </ControlTemplate>
                         </Setter.Value>
                     </Setter>
+                    <Style.Triggers>
+                        <!-- 正在拖拽项提升最高 z-index，确保立体阴影与卡片不被相邻项遮挡 -->
+                        <DataTrigger Binding="{Binding IsDragging}" Value="True">
+                            <Setter Property="Panel.ZIndex" Value="999" />
+                        </DataTrigger>
+                    </Style.Triggers>
                 </Style>
             </ListBox.ItemContainerStyle>
 
             <ListBox.ItemTemplate>
                 <DataTemplate DataType="{x:Type vm:ClipboardItemViewModel}">
+                    <StackPanel>
                     <!--
                       用 Border 而非 ui:Card：完全自控 Background/Border，
                       悬停/选中用各主题专用色（Theme.CardHover / CardSelected），
@@ -531,6 +541,13 @@
                                         <Setter Property="BorderBrush" Value="{DynamicResource Theme.Accent}" />
                                         <Setter Property="BorderThickness" Value="2" />
                                     </MultiDataTrigger>
+                                    <!-- 正在被拖拽的卡片在原列表中呈现为等待放入的半透明占位槽 -->
+                                    <DataTrigger Binding="{Binding IsDragging}" Value="True">
+                                        <Setter Property="Opacity" Value="0.2" />
+                                        <Setter Property="Background" Value="Transparent" />
+                                        <Setter Property="BorderBrush" Value="{DynamicResource Theme.Accent}" />
+                                        <Setter Property="BorderThickness" Value="1.5" />
+                                    </DataTrigger>
                                 </Style.Triggers>
                             </Style>
                         </Border.Style>
@@ -823,9 +840,94 @@
                                 </Border>
                             </Grid>
                     </Border>
-                </DataTemplate>
+
+                    <!-- 置顶调序有效范围截止分割线（拖拽时在最后一个置顶项下方显示） -->
+                    <Border Visibility="{Binding IsRangeBoundaryVisible, Converter={StaticResource BoolToVis}}"
+                            Margin="4,8,4,6"
+                            HorizontalAlignment="Stretch"
+                            IsHitTestVisible="False">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Rectangle Grid.Column="0" Height="1" Fill="{DynamicResource Theme.Accent}" Opacity="0.5" VerticalAlignment="Center" Margin="8,0" />
+                            <Border Grid.Column="1"
+                                    Background="{DynamicResource Theme.CardSelected}"
+                                    BorderBrush="{DynamicResource Theme.Accent}"
+                                    BorderThickness="1"
+                                    CornerRadius="9"
+                                    Padding="10,3">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <ui:SymbolIcon Symbol="Dismiss24" FontSize="11" Foreground="{DynamicResource Theme.Accent}" Margin="0,0,4,0"/>
+                                    <TextBlock Text="置顶范围截止 · 下方不可拖入" FontSize="10.5" FontWeight="SemiBold"
+                                               Foreground="{DynamicResource Theme.Accent}" />
+                                </StackPanel>
+                            </Border>
+                            <Rectangle Grid.Column="2" Height="1" Fill="{DynamicResource Theme.Accent}" Opacity="0.5" VerticalAlignment="Center" Margin="8,0" />
+                        </Grid>
+                    </Border>
+                </StackPanel>
+            </DataTemplate>
             </ListBox.ItemTemplate>
         </ListBox>
+
+        <!-- 真实悬浮抓起卡片（拖拽调序时跟随鼠标垂直浮动） -->
+        <Border x:Name="FloatingDragCard"
+                Visibility="Collapsed"
+                VerticalAlignment="Top"
+                HorizontalAlignment="Stretch"
+                Margin="2,0"
+                Padding="0"
+                CornerRadius="12"
+                Background="{DynamicResource Theme.CardSelected}"
+                BorderBrush="{DynamicResource Theme.Accent}"
+                BorderThickness="2"
+                Opacity="0.98"
+                IsHitTestVisible="False"
+                Panel.ZIndex="2000">
+            <Border.Effect>
+                <DropShadowEffect BlurRadius="32" ShadowDepth="12" Direction="270" Color="#000000" Opacity="0.65" />
+            </Border.Effect>
+            <Border.RenderTransform>
+                <TransformGroup>
+                    <ScaleTransform ScaleX="1.025" ScaleY="1.025" />
+                    <TranslateTransform x:Name="FloatingDragTransform" />
+                </TransformGroup>
+            </Border.RenderTransform>
+            <Grid Margin="14,12">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <Grid Grid.Row="0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="26" />
+                        <ColumnDefinition Width="30" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Border Width="20" Height="20" CornerRadius="6" VerticalAlignment="Center" Background="{DynamicResource Theme.Badge}">
+                        <TextBlock Text="{Binding IndexText}" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{DynamicResource Theme.TextSecondary}" />
+                    </Border>
+                    <ui:SymbolIcon Grid.Column="1" Symbol="{Binding TypeIcon}" FontSize="16" Foreground="{DynamicResource Theme.Accent}" VerticalAlignment="Center" />
+                    <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding PreviewText}" Foreground="{DynamicResource Theme.Text}" FontSize="14" LineHeight="22" TextTrimming="CharacterEllipsis" MaxHeight="48" />
+                        <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                            <ui:SymbolIcon Symbol="Pin24" FontSize="11" Foreground="{DynamicResource Theme.Pin}" Margin="0,0,5,0" VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding TypeLabel}" Foreground="{DynamicResource Theme.TextSecondary}" FontSize="11" />
+                            <TextBlock Text=" · " Foreground="{DynamicResource Theme.TextMuted}" FontSize="11" Visibility="{Binding HasSizeText, Converter={StaticResource BoolToVis}}" />
+                            <TextBlock Text="{Binding SizeText}" Foreground="{DynamicResource Theme.TextSecondary}" FontSize="11" Visibility="{Binding HasSizeText, Converter={StaticResource BoolToVis}}" />
+                            <TextBlock Text=" · " Foreground="{DynamicResource Theme.TextMuted}" FontSize="11" />
+                            <TextBlock Text="{Binding TimeText}" Foreground="{DynamicResource Theme.TextSecondary}" FontSize="11" />
+                        </StackPanel>
+                    </StackPanel>
+                </Grid>
+                <Border Grid.Row="1" Margin="56,8,0,0" CornerRadius="8" ClipToBounds="True" Background="#0DFFFFFF" Visibility="{Binding IsImage, Converter={StaticResource BoolToVis}}">
+                    <Image Source="{Binding Thumbnail}" MaxHeight="120" Stretch="Uniform" Margin="4" />
+                </Border>
+            </Grid>
+        </Border>
 
         <!-- 空状态 -->
         <StackPanel VerticalAlignment="Center"

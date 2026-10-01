@@ -35,5 +35,8 @@ public sealed class ClipboardItem
 
     public bool IsPinned { get; set; }
 
+    /// <summary>置顶条目自定义排序序号（数字越小越靠前）。</summary>
+    public int PinnedOrder { get; set; }
+
     public DateTime CreatedAt { get; set; } = DateTime.Now;
 }

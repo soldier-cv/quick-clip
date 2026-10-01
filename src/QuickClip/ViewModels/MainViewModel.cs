@@ -431,6 +431,95 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         await RefreshAsync();
     }
 
+    /// <summary>
+    /// 在置顶项之间调换顺序（拖拽调序）。仅在无搜索过滤的全量列表下有效。
+    /// </summary>
+    public async Task ReorderPinnedItemsAsync(int oldIndex, int newIndex)
+    {
+        if (!string.IsNullOrWhiteSpace(_searchText) || FilterIndex != 0)
+        {
+            return;
+        }
+
+        int pinnedCount = Items.Count(x => x.IsPinned);
+        if (pinnedCount <= 1)
+        {
+            return;
+        }
+
+        if (oldIndex < 0 || oldIndex >= pinnedCount || newIndex < 0 || newIndex >= pinnedCount)
+        {
+            return;
+        }
+
+        if (oldIndex == newIndex)
+        {
+            return;
+        }
+
+        Items.Move(oldIndex, newIndex);
+
+        for (int i = 0; i < Items.Count; i++)
+        {
+            Items[i].Index = i + 1;
+        }
+
+        var orderedIds = Items.Take(pinnedCount).Select(x => x.Item.Id).ToList();
+        await _services.Database.UpdatePinnedOrderAsync(orderedIds);
+        StatusText = "置顶顺序已调整";
+    }
+
+    private bool _isReorderingPinned;
+    /// <summary>是否正处于置顶条目拖拽排序模式（用于驱动界面显示可拖拽范围）。</summary>
+    public bool IsReorderingPinned
+    {
+        get => _isReorderingPinned;
+        set
+        {
+            if (_isReorderingPinned != value)
+            {
+                _isReorderingPinned = value;
+                OnPropertyChanged();
+            }
+        }
+    }
+
+    /// <summary>
+    /// 更新置顶条目拖拽时的视觉范围状态：
+    /// 1. 被抓起的条目标记为 IsDragging（在列表中呈现为半透明占位槽）
+    /// 2. 最后一个置顶条目下方显示截止线 IsRangeBoundaryVisible
+    /// </summary>
+    public void UpdateReorderVisualStates(ClipboardItemViewModel? draggedItem)
+    {
+        if (draggedItem == null)
+        {
+            IsReorderingPinned = false;
+            foreach (var item in Items)
+            {
+                item.IsDragging = false;
+                item.IsRangeBoundaryVisible = false;
+            }
+            return;
+        }
+
+        IsReorderingPinned = true;
+        int lastPinnedIndex = -1;
+        for (int i = 0; i < Items.Count; i++)
+        {
+            if (Items[i].IsPinned)
+            {
+                lastPinnedIndex = i;
+            }
+        }
+
+        for (int i = 0; i < Items.Count; i++)
+        {
+            var item = Items[i];
+            item.IsDragging = ReferenceEquals(item, draggedItem);
+            item.IsRangeBoundaryVisible = (i == lastPinnedIndex && Items.Count > lastPinnedIndex + 1);
+        }
+    }
+
     public async Task GenerateQrForSelectedAsync()
     {
         var selected = SelectedItem;

@@ -104,6 +104,7 @@ public sealed class DatabaseService : IDisposable
                     qr_content TEXT,
                     char_count INTEGER,
                     is_pinned INTEGER DEFAULT 0,
+                    pinned_order INTEGER DEFAULT 0,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 );
                 CREATE INDEX IF NOT EXISTS idx_created_at ON clipboard_items(created_at);
@@ -125,6 +126,7 @@ public sealed class DatabaseService : IDisposable
         // 老库补列（SQLite 不支持 ADD COLUMN IF NOT EXISTS）
         EnsureColumn(connection, "html_content", "TEXT");
         EnsureColumn(connection, "rtf_content", "TEXT");
+        EnsureColumn(connection, "pinned_order", "INTEGER DEFAULT 0");
     }
 
     private static void EnsureColumn(SqliteConnection connection, string column, string type)
@@ -277,9 +279,9 @@ public sealed class DatabaseService : IDisposable
             using var cmd = _connection.CreateCommand();
             cmd.CommandText = """
                 SELECT id, content_type, text_content, html_content, rtf_content,
-                       preview_path, qr_content, char_count, is_pinned, created_at
+                       preview_path, qr_content, char_count, is_pinned, created_at, pinned_order
                 FROM clipboard_items
-                ORDER BY is_pinned DESC, created_at DESC, id DESC
+                ORDER BY is_pinned DESC, pinned_order ASC, created_at DESC, id DESC
                 LIMIT $limit;
                 """;
             cmd.Parameters.AddWithValue("$limit", limit);
@@ -338,7 +340,12 @@ public sealed class DatabaseService : IDisposable
             using var cmd = _connection.CreateCommand();
             if (pinned)
             {
-                cmd.CommandText = "UPDATE clipboard_items SET is_pinned = 1 WHERE id = $id;";
+                cmd.CommandText = """
+                    UPDATE clipboard_items 
+                    SET is_pinned = 1,
+                        pinned_order = (SELECT COALESCE(MIN(pinned_order), 0) - 1 FROM clipboard_items WHERE is_pinned = 1)
+                    WHERE id = $id;
+                    """;
             }
             else
             {
@@ -347,6 +354,7 @@ public sealed class DatabaseService : IDisposable
                 cmd.CommandText = """
                     UPDATE clipboard_items
                     SET is_pinned = 0,
+                        pinned_order = 0,
                         created_at = CASE
                             WHEN (SELECT MAX(created_at) FROM clipboard_items WHERE is_pinned = 0 AND id != $id) >= $now
                             THEN (SELECT strftime('%Y-%m-%d %H:%M:%f', MAX(created_at), '+0.001 seconds') FROM clipboard_items WHERE is_pinned = 0 AND id != $id)
@@ -359,6 +367,46 @@ public sealed class DatabaseService : IDisposable
 
             cmd.Parameters.AddWithValue("$id", id);
             await cmd.ExecuteNonQueryAsync();
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <summary>
+    /// 批量更新置顶条目的自定义排序序号（事务内执行）。
+    /// </summary>
+    public async Task UpdatePinnedOrderAsync(IReadOnlyList<long> orderedIds)
+    {
+        if (orderedIds == null || orderedIds.Count == 0)
+        {
+            return;
+        }
+
+        await _gate.WaitAsync();
+        try
+        {
+            using var tx = _connection.BeginTransaction();
+            using var cmd = _connection.CreateCommand();
+            cmd.Transaction = tx;
+            cmd.CommandText = "UPDATE clipboard_items SET pinned_order = $order WHERE id = $id AND is_pinned = 1;";
+            var pOrder = cmd.Parameters.Add("$order", Microsoft.Data.Sqlite.SqliteType.Integer);
+            var pId = cmd.Parameters.Add("$id", Microsoft.Data.Sqlite.SqliteType.Integer);
+
+            for (int i = 0; i < orderedIds.Count; i++)
+            {
+                pOrder.Value = i + 1;
+                pId.Value = orderedIds[i];
+                await cmd.ExecuteNonQueryAsync();
+            }
+
+            await tx.CommitAsync();
+            DebugLog.Log($"已持久化 {orderedIds.Count} 条置顶项顺序");
+        }
+        catch (Exception ex)
+        {
+            DebugLog.LogException("更新置顶顺序失败", ex);
         }
         finally
         {
@@ -760,7 +808,8 @@ public sealed class DatabaseService : IDisposable
             QrContent = reader.IsDBNull(6) ? null : reader.GetString(6),
             CharCount = reader.GetInt64(7),
             IsPinned = reader.GetInt64(8) != 0,
-            CreatedAt = reader.IsDBNull(9) ? DateTime.Now : ParseDate(reader.GetString(9))
+            CreatedAt = reader.IsDBNull(9) ? DateTime.Now : ParseDate(reader.GetString(9)),
+            PinnedOrder = reader.FieldCount > 10 && !reader.IsDBNull(10) ? reader.GetInt32(10) : 0
         };
     }
 

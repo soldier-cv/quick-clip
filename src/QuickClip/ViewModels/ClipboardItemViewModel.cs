@@ -55,6 +55,78 @@ public sealed class ClipboardItemViewModel : INotifyPropertyChanged
 
     public bool IsPinned => Item.IsPinned;
 
+    public int PinnedOrder
+    {
+        get => Item.PinnedOrder;
+        set
+        {
+            if (Item.PinnedOrder != value)
+            {
+                Item.PinnedOrder = value;
+                OnPropertyChanged(nameof(PinnedOrder));
+            }
+        }
+    }
+
+    private bool _isDragging;
+    public bool IsDragging
+    {
+        get => _isDragging;
+        set
+        {
+            if (_isDragging != value)
+            {
+                _isDragging = value;
+                OnPropertyChanged(nameof(IsDragging));
+            }
+        }
+    }
+
+    private bool _isDropTargetCandidate;
+    /// <summary>是否为拖拽置顶时的有效可放置候选目标（其他置顶项）。</summary>
+    public bool IsDropTargetCandidate
+    {
+        get => _isDropTargetCandidate;
+        set
+        {
+            if (_isDropTargetCandidate != value)
+            {
+                _isDropTargetCandidate = value;
+                OnPropertyChanged(nameof(IsDropTargetCandidate));
+            }
+        }
+    }
+
+    private bool _isOutOfReorderRange;
+    /// <summary>是否超出置顶拖拽调序范围（非置顶条目在置顶调序期间半透明弱化显示）。</summary>
+    public bool IsOutOfReorderRange
+    {
+        get => _isOutOfReorderRange;
+        set
+        {
+            if (_isOutOfReorderRange != value)
+            {
+                _isOutOfReorderRange = value;
+                OnPropertyChanged(nameof(IsOutOfReorderRange));
+            }
+        }
+    }
+
+    private bool _isRangeBoundaryVisible;
+    /// <summary>是否在当前条目下方显示置顶拖拽范围截止分割线（置顶条目末尾）。</summary>
+    public bool IsRangeBoundaryVisible
+    {
+        get => _isRangeBoundaryVisible;
+        set
+        {
+            if (_isRangeBoundaryVisible != value)
+            {
+                _isRangeBoundaryVisible = value;
+                OnPropertyChanged(nameof(IsRangeBoundaryVisible));
+            }
+        }
+    }
+
     public bool IsImage => Item.ContentType == ClipboardContentType.Image;
 
     private bool _isOcrBusy;

@@ -25,6 +25,7 @@ public sealed class StackPasteService : IDisposable
     private volatile bool _lastPasteInFlight;
     private volatile bool _shouldSuppressPostStackPaste;
     private int _session;
+    private int _suppressPush;
     private Window? _panelWindow;
 
     public bool IsActive => _isActive;
@@ -268,7 +269,7 @@ public sealed class StackPasteService : IDisposable
     /// <summary>将条目压入收集栈。</summary>
     public void Push(ClipboardItem item)
     {
-        if (!IsActive || item == null)
+        if (!IsActive || item == null || Volatile.Read(ref _suppressPush) > 0)
         {
             return;
         }
@@ -284,81 +285,86 @@ public sealed class StackPasteService : IDisposable
     }
 
     /// <summary>将收集栈内最新多行条目或剪贴板多行文本按换行拆分成多项。</summary>
-    public void SplitClipboardLines()
+    public void SplitClipboardLines() => _ = SplitClipboardLinesAsync();
+
+    private async Task SplitClipboardLinesAsync()
     {
         string? text = null;
+        ClipboardItem? source = null;
         int targetIndex = -1;
 
         lock (_lock)
         {
-            // 1. 优先在当前栈内查找包含换行的条目（从最后入栈的一项往前找）
-            for (int i = _items.Count - 1; i >= 0; i--)
+            // 先取出，避免入库触发的 ItemAdded 把拆分行追加到原条目后面。
+            targetIndex = FindSplittableIndex(_items);
+            if (targetIndex >= 0)
             {
-                var content = _items[i].TextContent;
-                if (!string.IsNullOrWhiteSpace(content) && (content.Contains('\n') || content.Contains('\r')))
-                {
-                    text = content;
-                    targetIndex = i;
-                    break;
-                }
+                source = _items[targetIndex];
+                text = source.TextContent;
+                _items.RemoveAt(targetIndex);
             }
         }
 
-        // 2. 若栈内没有多行条目，则尝试从系统剪贴板读取
+        // 2. 若栈内没有多行条目，则在 STA 线程读取系统剪贴板，避免卡住 HUD 点击线程
         if (string.IsNullOrWhiteSpace(text))
         {
-            text = NativeClipboard.TryGetText();
+            text = await StaTask.Run(NativeClipboard.TryGetText);
         }
 
         if (string.IsNullOrWhiteSpace(text))
         {
+            RestoreSplitSource(source, targetIndex);
             _hud?.ShowTransientFeedback("无可拆分的文本内容", 1.2);
             return;
         }
 
-        // 按行拆分（去除空行与首尾空白）
-        string[] lines = text.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.RemoveEmptyEntries)
-                             .Select(l => l.Trim())
-                             .Where(l => !string.IsNullOrEmpty(l))
-                             .ToArray();
+        string[] lines = SplitLines(text);
 
         if (lines.Length <= 1)
         {
+            RestoreSplitSource(source, targetIndex);
             _hud?.ShowTransientFeedback("文本仅有一行，无需拆分", 1.2);
             return;
         }
 
-        lock (_lock)
+        // 入库会同步触发 ItemAdded → Push。拆分要按原位置展开，不能再追加到队尾。
+        ClipboardItem[] recorded = new ClipboardItem[lines.Length];
+        Interlocked.Increment(ref _suppressPush);
+        try
         {
-            // 若是从栈内某一项拆分出来的，先移除该多行项，并在原位置展开各行
-            if (targetIndex >= 0 && targetIndex < _items.Count)
+            if (_pipeline != null)
             {
-                _items.RemoveAt(targetIndex);
-                int insertPos = targetIndex;
-                foreach (string line in lines)
+                for (int i = 0; i < lines.Length; i++)
                 {
-                    _items.Insert(insertPos++, new ClipboardItem
-                    {
-                        ContentType = ClipboardContentType.Text,
-                        TextContent = line,
-                        CharCount = line.Length,
-                        CreatedAt = DateTime.Now
-                    });
+                    recorded[i] = await _pipeline.RecordTextAsync(lines[i]) ?? NewSplitLine(lines[i]);
                 }
             }
             else
             {
-                // 若栈内原本没有该多行项（如直接读取自剪贴板），直接追加到栈末尾
-                foreach (string line in lines)
+                for (int i = 0; i < lines.Length; i++)
                 {
-                    _items.Add(new ClipboardItem
-                    {
-                        ContentType = ClipboardContentType.Text,
-                        TextContent = line,
-                        CharCount = line.Length,
-                        CreatedAt = DateTime.Now
-                    });
+                    recorded[i] = NewSplitLine(lines[i]);
                 }
+            }
+        }
+        catch (Exception ex)
+        {
+            RestoreSplitSource(source, targetIndex);
+            DebugLog.LogException("收集栈按行拆分入库失败", ex);
+            _hud?.ShowTransientFeedback("拆分失败", 1.2);
+            return;
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _suppressPush);
+        }
+
+        lock (_lock)
+        {
+            int insertPos = targetIndex >= 0 ? Math.Min(targetIndex, _items.Count) : _items.Count;
+            for (int i = 0; i < recorded.Length; i++)
+            {
+                _items.Insert(insertPos + i, recorded[i]);
             }
         }
 
@@ -374,6 +380,63 @@ public sealed class StackPasteService : IDisposable
 
         _hud?.ShowTransientFeedback($"已按行拆分（{lines.Length} 项）", 1.2);
     }
+
+    /// <summary>从队尾找第一条可按行拆分的非文件文本。找不到返回 -1。</summary>
+    public static int FindSplittableIndex(IReadOnlyList<ClipboardItem> items)
+    {
+        for (int i = items.Count - 1; i >= 0; i--)
+        {
+            if (items[i].ContentType == ClipboardContentType.File)
+            {
+                continue;
+            }
+
+            string? content = items[i].TextContent;
+            if (!string.IsNullOrWhiteSpace(content) && (content.Contains('\n') || content.Contains('\r')))
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    /// <summary>按换行拆分并去掉空行与首尾空白。文件路径不走这里。</summary>
+    public static string[] SplitLines(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return [];
+        }
+
+        return text.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(line => line.Trim())
+            .Where(line => !string.IsNullOrEmpty(line))
+            .ToArray();
+    }
+
+    /// <summary>拆分读不到内容时，把刚才取出的原条目放回原位。</summary>
+    private void RestoreSplitSource(ClipboardItem? source, int targetIndex)
+    {
+        if (source == null)
+        {
+            return;
+        }
+
+        lock (_lock)
+        {
+            int insertPos = Math.Clamp(targetIndex, 0, _items.Count);
+            _items.Insert(insertPos, source);
+        }
+    }
+
+    private static ClipboardItem NewSplitLine(string line) => new()
+    {
+        ContentType = ClipboardContentType.Text,
+        TextContent = line,
+        CharCount = line.Length,
+        CreatedAt = DateTime.Now
+    };
 
     /// <summary>
     /// 出栈一个条目并模拟粘贴到目标窗口。
@@ -405,7 +468,7 @@ public sealed class StackPasteService : IDisposable
             ClipboardContentType.Image =>
                 _pasteService.PasteImageAsync(item.PreviewPath, stayOnForeground: true),
             ClipboardContentType.File when !string.IsNullOrEmpty(item.TextContent) =>
-                _pasteService.PasteFilesAsync(new[] { item.TextContent }, stayOnForeground: true),
+                _pasteService.PasteFilesAsync(ClipboardItem.SplitFilePaths(item.TextContent), stayOnForeground: true),
             _ => _pasteService.PasteTextAsync(
                 item.TextContent, plainOnly: false, item.HtmlContent, item.RtfContent, stayOnForeground: true)
         };

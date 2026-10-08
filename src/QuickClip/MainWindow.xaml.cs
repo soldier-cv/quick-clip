@@ -130,6 +130,7 @@ public partial class MainWindow : FluentWindow
             LocationChanged -= OnWindowLocationChanged;
             SizeChanged -= OnWindowSizeChanged;
             _services.Paste.PasteFailed -= OnPasteFailed;
+            _services.Paste.SetForegroundTracking(false);
             _services.Settings.Changed -= OnSettingsChanged;
             ThemeService.Changed -= OnThemeChanged;
         };
@@ -374,7 +375,9 @@ public partial class MainWindow : FluentWindow
                 return;
             }
 
-            // 置顶便签：用户点到 Notepad++ 等外部窗口时立刻记下粘贴目标
+            // 置顶便签：用户点到外部窗口时记下粘贴目标。
+            // 任务栏点击的过渡前台不合法，RememberTargetWindow 会保留上一个目标，
+            // 真正切到新程序后由前台跟踪改写。
             if (_services.Settings.WindowAlwaysOnTop)
             {
                 _services.Paste.RememberTargetWindow(fg);
@@ -546,6 +549,10 @@ public partial class MainWindow : FluentWindow
         }
 
         DebugLog.Log("窗口已显示");
+        if (_services.Settings.WindowAlwaysOnTop)
+        {
+            _services.Paste.SetForegroundTracking(true);
+        }
     }
 
     /// <summary>宽限结束后按「窗口置顶」设置恢复 z-order，避免一直抢在所有窗口之上。</summary>
@@ -603,6 +610,7 @@ public partial class MainWindow : FluentWindow
         PreviewPopup.IsOpen = false;
         _viewModel.SuppressAutoSelect = false;
         Hide();
+        _services.Paste.SetForegroundTracking(false);
         if (!_services.Paste.IsSelfPasting && !_services.Settings.WindowAlwaysOnTop)
         {
             _services.Paste.ClearTargetWindow();
@@ -919,7 +927,7 @@ public partial class MainWindow : FluentWindow
         {
             if (_viewModel.SelectedSnippet != null)
             {
-                _ = _viewModel.PasteSnippetAsync(_viewModel.SelectedSnippet, plainOnly);
+                _ = _viewModel.PasteSnippetAsync(_viewModel.SelectedSnippet, plainOnly, stayOnForeground: pinned);
                 if (pinned)
                 {
                     _viewModel.StatusText = "已粘贴短语（置顶中，面板保持打开）";
@@ -929,7 +937,7 @@ public partial class MainWindow : FluentWindow
             return;
         }
 
-        _viewModel.PasteSelected(plainOnly);
+        _viewModel.PasteSelected(plainOnly, stayOnForeground: pinned);
         if (pinned)
         {
             _viewModel.StatusText = "已粘贴（置顶中，面板保持打开）";
@@ -2073,7 +2081,7 @@ public partial class MainWindow : FluentWindow
 
         bool pinned = PreparePasteSession();
 
-        _services.Paste.PasteText(text, plainOnly: false);
+        _services.Paste.PasteText(text, plainOnly: false, stayOnForeground: pinned);
 
         if (pinned)
         {
@@ -2191,7 +2199,25 @@ public partial class MainWindow : FluentWindow
 
     private static ClipboardItemViewModel? GetCardViewModel(object sender)
     {
-        return sender is FrameworkElement { DataContext: ClipboardItemViewModel vm } ? vm : null;
+        if (sender is FrameworkElement { DataContext: ClipboardItemViewModel direct })
+        {
+            return direct;
+        }
+
+        if (sender is not FrameworkElement element)
+        {
+            return null;
+        }
+
+        var menu = element as System.Windows.Controls.ContextMenu
+            ?? (element.Parent as System.Windows.Controls.ContextMenu)
+            ?? FindAncestor<System.Windows.Controls.ContextMenu>(element);
+        if (menu?.PlacementTarget is FrameworkElement { DataContext: ClipboardItemViewModel placed })
+        {
+            return placed;
+        }
+
+        return null;
     }
 
     // ---------- 覆盖层 ----------
@@ -2315,6 +2341,8 @@ public partial class MainWindow : FluentWindow
     {
         bool pinned = _services.Settings.WindowAlwaysOnTop;
         Topmost = pinned;
+        // 置顶且面板开着才跟踪前台：点任务栏切程序不会让面板失焦，否则粘贴目标停在上一个程序。
+        _services.Paste.SetForegroundTracking(pinned && IsVisible);
         // 窗口已创建时同步 Win32 z-order，防止 WPF Topmost 属性短路导致置顶不生效
         if (System.Windows.Interop.HwndSource.FromVisual(this) is System.Windows.Interop.HwndSource hwndSource &&
             hwndSource.Handle != IntPtr.Zero)
@@ -2581,7 +2609,7 @@ public partial class MainWindow : FluentWindow
         if (GetCardViewModel(sender) is { } vm && !string.IsNullOrWhiteSpace(vm.TranslatedText))
         {
             bool pinned = PreparePasteSession();
-            _services.Paste.PasteText(vm.TranslatedText, plainOnly: false);
+            _services.Paste.PasteText(vm.TranslatedText, plainOnly: false, stayOnForeground: pinned);
             if (pinned)
             {
                 _viewModel.StatusText = "已粘贴译文（置顶中，面板保持打开）";
@@ -2688,17 +2716,21 @@ public partial class MainWindow : FluentWindow
         }
     }
 
-    /// <summary>右键菜单动作前先选中被右键的卡片，避免误操作到上一次选中项。</summary>
+    /// <summary>
+    /// 右键菜单动作前先选中被右键的卡片。
+    /// 菜单项不继承卡片 DataContext，必须沿 PlacementTarget 找回卡片；找不到就放弃，不能退回上一次选中项。
+    /// </summary>
     private ClipboardItemViewModel? ResolveMenuTarget(object sender)
     {
         var vm = GetCardViewModel(sender);
-        if (vm != null)
+        if (vm == null)
         {
-            _viewModel.SelectedItem = vm;
-            ItemList.ScrollIntoView(vm);
+            return null;
         }
 
-        return vm ?? _viewModel.SelectedItem;
+        _viewModel.SelectedItem = vm;
+        ItemList.ScrollIntoView(vm);
+        return vm;
     }
 
     private Views.SnippetEditWindow? _activeSnippetDialog;
@@ -2808,7 +2840,7 @@ public partial class MainWindow : FluentWindow
             string finalText = Models.SnippetItem.ResolveText(rawText, currentClip);
 
             bool pinned = PreparePasteSession();
-            _services.Paste.PasteText(finalText, plainOnly: false);
+            _services.Paste.PasteText(finalText, plainOnly: false, stayOnForeground: pinned);
 
             if (pinned)
             {
@@ -2917,8 +2949,8 @@ public partial class MainWindow : FluentWindow
     {
         if (sender is FrameworkElement { DataContext: Models.SnippetItem snippet })
         {
-            PreparePasteSession();
-            _ = _viewModel.PasteSnippetAsync(snippet, plainOnly: false);
+            bool pinned = PreparePasteSession();
+            _ = _viewModel.PasteSnippetAsync(snippet, plainOnly: false, stayOnForeground: pinned);
         }
     }
 

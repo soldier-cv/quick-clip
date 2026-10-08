@@ -4,6 +4,7 @@
                   xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
                   Title="微调填入"
                   Width="480" Height="380"
+                  MinWidth="420"
                   WindowStartupLocation="CenterScreen"
                   Topmost="True"
                   ResizeMode="CanResizeWithGrip"
@@ -66,7 +67,7 @@
                 BorderBrush="{DynamicResource Theme.Border}"
                 BorderThickness="0,1,0,0"
                 Padding="20,12">
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+            <WrapPanel Orientation="Horizontal" HorizontalAlignment="Right">
                 <ui:Button Appearance="Secondary"
                            Content="取消"
                            Width="68"
@@ -99,7 +100,7 @@
                            Foreground="{DynamicResource Theme.Accent}"
                            ToolTip="解析占位符并立即自动粘贴到目标页面"
                            Click="OnApplyAndPasteClicked" />
-            </StackPanel>
+            </WrapPanel>
         </Border>
     </Grid>
 </ui:FluentWindow>

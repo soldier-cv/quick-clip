@@ -560,17 +560,22 @@
                                 </Grid.RowDefinitions>
 
                                 <Grid Grid.Row="0">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="26" />
+                                        <ColumnDefinition Width="36" />
                                         <ColumnDefinition Width="30" />
                                         <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
 
                                     <!-- 序号：始终中性 Badge，选中不染色 -->
-                                    <Border Width="20" Height="20"
+                                    <Border MinWidth="20" Height="20"
+                                            Padding="3,0"
                                             CornerRadius="6"
                                             VerticalAlignment="Center"
+                                            HorizontalAlignment="Left"
                                             Background="{DynamicResource Theme.Badge}">
                                         <TextBlock Text="{Binding IndexText}"
                                                    FontSize="11"
@@ -618,12 +623,12 @@
                                         </StackPanel>
                                     </StackPanel>
 
-                                    <!-- 快捷动作（悬停条目时显示） -->
-                                    <StackPanel Grid.Column="3"
-                                                Orientation="Horizontal"
-                                                VerticalAlignment="Center">
-                                        <StackPanel.Style>
-                                            <Style TargetType="StackPanel">
+                                    <!-- 快捷动作放在标题下方，避免窄列表把正文挤没 -->
+                                    <WrapPanel Grid.Row="1"
+                                               Grid.Column="2"
+                                               Margin="0,4,0,0">
+                                        <WrapPanel.Style>
+                                            <Style TargetType="WrapPanel">
                                                 <Setter Property="Visibility" Value="Collapsed" />
                                                 <Style.Triggers>
                                                     <DataTrigger Binding="{Binding IsMouseOver, ElementName=ItemCard}"
@@ -635,7 +640,7 @@
                                                     </DataTrigger>
                                                 </Style.Triggers>
                                             </Style>
-                                        </StackPanel.Style>
+                                        </WrapPanel.Style>
                                         <ui:Button Appearance="Transparent"
                                                    Padding="5"
                                                    Margin="2,0"
@@ -763,14 +768,14 @@
                                                    Click="OnDeleteClicked">
                                             <ui:SymbolIcon Symbol="Delete24" FontSize="15" />
                                         </ui:Button>
-                                    </StackPanel>
+                                    </WrapPanel>
                                 </Grid>
 
                                 <Border Grid.Row="1"
                                         Margin="56,8,0,0"
                                         CornerRadius="8"
                                         ClipToBounds="True"
-                                        Background="#0DFFFFFF"
+                                        Background="{DynamicResource Theme.Search}"
                                         Visibility="{Binding IsImage, Converter={StaticResource BoolToVis}}">
                                     <Image Source="{Binding Thumbnail}"
                                            MaxHeight="170"
@@ -903,11 +908,11 @@
                 </Grid.RowDefinitions>
                 <Grid Grid.Row="0">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="26" />
+                        <ColumnDefinition Width="36" />
                         <ColumnDefinition Width="30" />
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
-                    <Border Width="20" Height="20" CornerRadius="6" VerticalAlignment="Center" Background="{DynamicResource Theme.Badge}">
+                    <Border MinWidth="20" Height="20" Padding="3,0" CornerRadius="6" VerticalAlignment="Center" HorizontalAlignment="Left" Background="{DynamicResource Theme.Badge}">
                         <TextBlock Text="{Binding IndexText}" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{DynamicResource Theme.TextSecondary}" />
                     </Border>
                     <ui:SymbolIcon Grid.Column="1" Symbol="{Binding TypeIcon}" FontSize="16" Foreground="{DynamicResource Theme.Accent}" VerticalAlignment="Center" />
@@ -923,7 +928,7 @@
                         </StackPanel>
                     </StackPanel>
                 </Grid>
-                <Border Grid.Row="1" Margin="56,8,0,0" CornerRadius="8" ClipToBounds="True" Background="#0DFFFFFF" Visibility="{Binding IsImage, Converter={StaticResource BoolToVis}}">
+                <Border Grid.Row="1" Margin="56,8,0,0" CornerRadius="8" ClipToBounds="True" Background="{DynamicResource Theme.Search}" Visibility="{Binding IsImage, Converter={StaticResource BoolToVis}}">
                     <Image Source="{Binding Thumbnail}" MaxHeight="120" Stretch="Uniform" Margin="4" />
                 </Border>
             </Grid>

@@ -332,7 +332,7 @@
                                            TextWrapping="Wrap"
                                            Text="Win+V 固定唤起面板；系统剪贴板历史已释放，由 QuickClip 独占接管。" />
 
-                                <Rectangle Height="1" Fill="#12FFFFFF" Margin="16,8,16,8" />
+                                <Rectangle Height="1" Fill="{DynamicResource Theme.Border}" Margin="16,8,16,8" />
 
                                 <!-- 全局纯文本粘贴：固定 Ctrl+Shift+V，仅启用/禁用 -->
                                 <Grid Margin="16,4,16,4">
@@ -367,7 +367,7 @@
                                           Unchecked="OnPlainPasteEnabledToggled" />
 
                                 <!-- 分区：面板内 -->
-                                <Rectangle Height="1" Fill="#12FFFFFF" Margin="16,10,16,4" />
+                                <Rectangle Height="1" Fill="{DynamicResource Theme.Border}" Margin="16,10,16,4" />
                                 <TextBlock Text="面板内"
                                            Foreground="{DynamicResource Theme.TextSecondary}"
                                            FontSize="11"
@@ -767,15 +767,15 @@
                                             <Setter Property="Template">
                                                 <Setter.Value>
                                                     <ControlTemplate TargetType="ProgressBar">
-                                                        <Border x:Name="PART_Track"
-                                                                Background="{DynamicResource Theme.Border}"
-                                                                CornerRadius="3"
-                                                                Height="6">
+                                                        <Grid x:Name="PART_Track"
+                                                              Height="6"
+                                                              ClipToBounds="True">
+                                                            <Border Background="{DynamicResource Theme.Border}" CornerRadius="3" />
                                                             <Border x:Name="PART_Indicator"
                                                                     HorizontalAlignment="Left"
                                                                     Background="{DynamicResource Theme.Accent}"
                                                                     CornerRadius="3" />
-                                                        </Border>
+                                                        </Grid>
                                                     </ControlTemplate>
                                                 </Setter.Value>
                                             </Setter>

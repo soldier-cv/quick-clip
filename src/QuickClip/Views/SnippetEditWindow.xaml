@@ -3,10 +3,11 @@
                   xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                   xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
                   Title="编辑常用短语"
-                  Width="450" Height="560"
+                  Width="450" Height="640"
+                  MinHeight="480"
                   WindowStartupLocation="CenterScreen"
                   Topmost="True"
-                  ResizeMode="NoResize"
+                  ResizeMode="CanResize"
                   ExtendsContentIntoTitleBar="True"
                   WindowBackdropType="None"
                   Background="{DynamicResource Theme.Panel}"
@@ -62,7 +63,8 @@
                      ShowMaximize="False"
                      ShowClose="True" />
 
-        <StackPanel Grid.Row="1" Margin="20,10,20,10">
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel Margin="20,10,20,10">
             <!-- 标题 -->
             <TextBlock Text="短语标题" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource Theme.Text}" Margin="0,0,0,6" />
             <ui:TextBox x:Name="TitleBox"
@@ -144,6 +146,7 @@
                      Foreground="{DynamicResource Theme.Text}"
                      CaretBrush="{DynamicResource Theme.Text}" />
         </StackPanel>
+        </ScrollViewer>
 
         <!-- 底部按钮 -->
         <Border Grid.Row="2" Background="{DynamicResource Theme.Search}" BorderBrush="{DynamicResource Theme.Border}" BorderThickness="0,1,0,0" Padding="20,12">

@@ -1513,10 +1513,22 @@ public partial class SettingsWindow : Window
         }
 
         var live = _ocrDownloadProgress ?? _services.OcrPacks.CurrentProgress;
-        bar.IsIndeterminate = live?.IsIndeterminate == true;
-        bar.Value = live is { Pack: var livePack } && livePack == pack
+        bool indeterminate = live?.IsIndeterminate == true;
+        double percent = live is { Pack: var livePack } && livePack == pack
             ? live.Percent
             : 0;
+        bar.IsIndeterminate = indeterminate;
+        bar.Value = percent;
+
+        // 模板里的指示块不会随 Value 拉伸，按轨道实际宽度写死。
+        if (bar.Template.FindName("PART_Indicator", bar) is FrameworkElement indicator &&
+            bar.Template.FindName("PART_Track", bar) is FrameworkElement track)
+        {
+            double width = track.ActualWidth > 0 ? track.ActualWidth : bar.ActualWidth;
+            indicator.Width = indeterminate || width <= 0
+                ? double.NaN
+                : Math.Clamp(width * percent / 100.0, 0, width);
+        }
     }
 
     private void SetOfficialButton(

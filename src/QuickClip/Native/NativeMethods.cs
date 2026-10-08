@@ -194,6 +194,35 @@ internal static class NativeMethods
     /// <summary>低级键盘钩子回调委托。</summary>
     public delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
 
+    /// <summary>前台窗口变化。置顶面板点任务栏切到另一个程序时不会失焦，只能靠这条事件改粘贴目标。</summary>
+    public const uint EVENT_SYSTEM_FOREGROUND = 0x0003;
+
+    public const uint WINEVENT_OUTOFCONTEXT = 0x0000;
+    public const uint WINEVENT_SKIPOWNPROCESS = 0x0002;
+
+    public delegate void WinEventProc(
+        IntPtr hWinEventHook,
+        uint eventType,
+        IntPtr hwnd,
+        int idObject,
+        int idChild,
+        uint dwEventThread,
+        uint dwmsEventTime);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr SetWinEventHook(
+        uint eventMin,
+        uint eventMax,
+        IntPtr hmodWinEventProc,
+        WinEventProc lpfnWinEventProc,
+        uint idProcess,
+        uint idThread,
+        uint dwFlags);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool UnhookWinEvent(IntPtr hWinEventHook);
+
     [StructLayout(LayoutKind.Sequential)]
     public struct KBDLLHOOKSTRUCT
     {
@@ -308,13 +337,11 @@ internal static class NativeMethods
             return true;
         }
 
+        // 只有最小化才还原。对已经处于显示状态（含最大化）的窗口再调用 ShowWindow，
+        // 外部应用（如浏览器）会重置窗口尺寸。对可见窗口仅做前台激活提升 Z 序，不更改其显示状态。
         if (IsIconic(hwnd))
         {
             ShowWindowApi(hwnd, SW_RESTORE);
-        }
-        else
-        {
-            ShowWindowApi(hwnd, SW_SHOW);
         }
 
         BringWindowToTop(hwnd);

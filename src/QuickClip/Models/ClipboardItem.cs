@@ -39,4 +39,21 @@ public sealed class ClipboardItem
     public int PinnedOrder { get; set; }
 
     public DateTime CreatedAt { get; set; } = DateTime.Now;
+
+    /// <summary>
+    /// 文件条目的路径分隔符是入库时的换行。粘贴与复制必须同时认 <c>\r\n</c> 和 <c>\n</c>，
+    /// 否则旧库或非 Windows 换行会被当成一条不存在的路径。
+    /// </summary>
+    public static readonly string[] FilePathSeparators = ["\r\n", "\n"];
+
+    /// <summary>把文件条目的文本拆成路径列表；空行丢弃。</summary>
+    public static string[] SplitFilePaths(string? text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return [];
+        }
+
+        return text.Split(FilePathSeparators, StringSplitOptions.RemoveEmptyEntries);
+    }
 }

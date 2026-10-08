@@ -22,13 +22,18 @@ public sealed class PasteService
 
     private IntPtr _lastTargetWindow = IntPtr.Zero;
 
+    /// <summary>前台变化钩子。委托必须由字段握住，否则会被回收，回调进已释放的桩。</summary>
+    private NativeMethods.WinEventProc? _foregroundProc;
+
+    private IntPtr _foregroundHook = IntPtr.Zero;
+
     /// <summary>创建时所在 UI 调度器：置顶粘贴必须在 UI 线程转交前台，后台 STA 线程会被前台锁拒绝。</summary>
     private readonly Dispatcher? _uiDispatcher = Dispatcher.FromThread(Thread.CurrentThread);
 
     /// <summary>纯文本粘贴路径下、粘贴完成后需要还原的文件列表。</summary>
     private string[]? _filesToRestore;
 
-    /// <summary>是否正在写剪贴板（捕获侧据此跳过同步竞态窗口）。</summary>
+    /// <summary>是否正在写剪贴板。捕获侧只用来忽略写入过程中读到的半成品，不能用来丢掉通知。</summary>
     public bool IsSelfPasting => _isSelfWriting;
 
     /// <summary>粘贴/复制失败原因（剪贴板被占用、目标窗口未激活、内容缺失等），供托盘气泡提示。</summary>
@@ -39,15 +44,19 @@ public sealed class PasteService
     {
         uint ownPid = (uint)Environment.ProcessId;
 
-        // 1. 显式候选（来自 WM_ACTIVATE / 失焦事件等）：递归规范化到根窗口
+        // 1. 显式候选（来自 WM_ACTIVATE / 失焦事件等）：递归规范化到根窗口。
+        // 候选不合法（任务栏、切换过渡窗）时必须停在这里。
+        // 点任务栏切回另一个程序的瞬间，前台常常还是任务栏或旧窗口；
+        // 再顺着 Z 序猜，会把目标锁回上一个程序。
         if (candidate != IntPtr.Zero)
         {
             IntPtr rootCandidate = NativeMethods.NormalizeToRoot(candidate);
             if (NativeMethods.IsEligiblePasteTarget(rootCandidate, ownPid))
             {
                 SetTargetWindow(rootCandidate);
-                return;
             }
+
+            return;
         }
 
         // 2. 主动获取当前真实前台并规范化到根窗口（关键修复：Chrome/Edge/VSCode 等子渲染窗 WS_CHILD 必须在此溯源到根窗）
@@ -105,6 +114,99 @@ public sealed class PasteService
         DebugLog.Log($"记录粘贴目标窗口: {hwnd}, pid={pid}, class={NativeMethods.GetWindowClassName(hwnd)}");
     }
 
+    /// <summary>
+    /// 置顶且面板可见时跟踪前台。点任务栏切到另一个程序不会让面板失焦，
+    /// 只有前台真的变成可粘贴窗口时才替换目标；任务栏和自身窗口不覆盖旧目标。
+    /// </summary>
+    public void SetForegroundTracking(bool enabled)
+    {
+        if (enabled)
+        {
+            StartForegroundTracking();
+            return;
+        }
+
+        StopForegroundTracking();
+    }
+
+    private void StartForegroundTracking()
+    {
+        if (_foregroundHook != IntPtr.Zero)
+        {
+            return;
+        }
+
+        _foregroundProc ??= OnForegroundChanged;
+        _foregroundHook = NativeMethods.SetWinEventHook(
+            NativeMethods.EVENT_SYSTEM_FOREGROUND,
+            NativeMethods.EVENT_SYSTEM_FOREGROUND,
+            IntPtr.Zero,
+            _foregroundProc,
+            0,
+            0,
+            NativeMethods.WINEVENT_OUTOFCONTEXT | NativeMethods.WINEVENT_SKIPOWNPROCESS);
+        if (_foregroundHook == IntPtr.Zero)
+        {
+            DebugLog.Log("安装前台跟踪失败");
+            return;
+        }
+
+        DebugLog.Log("已跟踪前台窗口（置顶粘贴目标）");
+        NoteEligibleForeground(NativeMethods.GetForegroundWindow());
+    }
+
+    private void StopForegroundTracking()
+    {
+        if (_foregroundHook == IntPtr.Zero)
+        {
+            return;
+        }
+
+        NativeMethods.UnhookWinEvent(_foregroundHook);
+        _foregroundHook = IntPtr.Zero;
+        DebugLog.Log("已停止跟踪前台窗口");
+    }
+
+    private void OnForegroundChanged(
+        IntPtr hWinEventHook,
+        uint eventType,
+        IntPtr hwnd,
+        int idObject,
+        int idChild,
+        uint dwEventThread,
+        uint dwmsEventTime)
+    {
+        if (hwnd == IntPtr.Zero)
+        {
+            return;
+        }
+
+        if (_uiDispatcher == null || _uiDispatcher.CheckAccess())
+        {
+            NoteEligibleForeground(hwnd);
+            return;
+        }
+
+        _uiDispatcher.BeginInvoke(() => NoteEligibleForeground(hwnd));
+    }
+
+    /// <summary>只接受可粘贴的外部窗口。任务栏、IME、自身窗口一律留着上一个目标。</summary>
+    private void NoteEligibleForeground(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero)
+        {
+            return;
+        }
+
+        IntPtr root = NativeMethods.NormalizeToRoot(hwnd);
+        if (!NativeMethods.IsEligiblePasteTarget(root, (uint)Environment.ProcessId))
+        {
+            return;
+        }
+
+        SetTargetWindow(root);
+    }
+
     /// <summary>当前已记录的粘贴目标是否仍有效。</summary>
     public bool HasValidTargetWindow()
     {
@@ -124,10 +226,7 @@ public sealed class PasteService
 
     // ---------- 粘贴（后台回填剪贴板后模拟 Ctrl+V，异常仅记录日志） ----------
 
-    public void PasteText(string? text, bool plainOnly = false, string? html = null, string? rtf = null) =>
-        _ = PasteTextAsync(text, plainOnly, html, rtf, stayOnForeground: false);
-
-    public void PasteText(string? text, bool plainOnly, string? html, string? rtf, bool stayOnForeground) =>
+    public void PasteText(string? text, bool plainOnly = false, string? html = null, string? rtf = null, bool stayOnForeground = false) =>
         _ = PasteTextAsync(text, plainOnly, html, rtf, stayOnForeground);
 
     public Task PasteTextAsync(string? text, bool plainOnly, string? html, string? rtf, bool stayOnForeground)
@@ -500,8 +599,9 @@ public sealed class PasteService
     }
 
     /// <summary>
-    /// 写入剪贴板并记录自身序列号：捕获侧用序列号判断「是不是自己写的」，
-    /// 因此这里不再需要长时间抑制窗口。
+    /// 写入剪贴板并记录自身序列号：捕获侧用序列号判断「是不是自己写的」。
+    /// <see cref="_isSelfWriting"/> 只覆盖 OpenClipboard 到 CloseClipboard 这一小段，
+    /// 捕获侧不得据此丢掉通知，否则用户在这段窗口里的真实复制不会再有第二次通知。
     /// </summary>
     private bool SetClipboard(Func<bool> setter)
     {

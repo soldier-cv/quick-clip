@@ -50,26 +50,20 @@ public sealed class ClipboardPipeline
     /// </summary>
     public async void OnClipboardUpdated()
     {
-        // 用户主动暂停捕获（复制敏感内容时）：不读、不入库
-        if (_settings.CapturePaused)
+        // 暂停捕获才丢通知。自身正在写剪贴板不能丢：这次通知可能就是用户紧接着的复制，没有第二次。
+        if (ShouldDropClipboardNotification(_settings.CapturePaused))
         {
             DebugLog.LogDetail("捕获已暂停，跳过本次剪贴板通知");
             return;
         }
 
-        // 自身正在写剪贴板（同步竞态窗口）：直接跳过
-        if (_paste.IsSelfPasting)
+        if (!await _captureGate.WaitAsync(TimeSpan.FromMilliseconds(CaptureTimeoutMilliseconds)))
         {
+            DebugLog.Log("剪贴板捕获排队超时，本次跳过");
             return;
         }
 
-        // 串行化：上一个捕获还没结束时直接跳过，避免重复入库 / 预览文件互相覆盖
-        if (!await _captureGate.WaitAsync(0))
-        {
-            DebugLog.LogDetail("已有捕获在处理，跳过本次剪贴板通知");
-            return;
-        }
-
+        bool reread = false;
         try
         {
             // 剪贴板读取（只读 Capture，不写回系统剪贴板）
@@ -107,10 +101,11 @@ public sealed class ClipboardPipeline
                 return;
             }
 
-            // await 之后再判一次：抑制窗口可能覆盖异步空档
+            // 序列号还没记下，说明读到的是写入过程中的半成品，闸门释放后补读。
             if (_paste.IsSelfPasting)
             {
                 TryDeletePreview(data.PreviewPath);
+                reread = true;
                 return;
             }
 
@@ -174,6 +169,14 @@ public sealed class ClipboardPipeline
         {
             _captureGate.Release();
         }
+
+        // 读的时候自身写入还没记下序列号。闸门释放后再补读一次：
+        // 补读若已是自身序列号会被比较丢掉；若用户已写入新内容则正常入库。
+        if (reread)
+        {
+            await Task.Delay(40);
+            OnClipboardUpdated();
+        }
     }
 
     /// <summary>将一条纯文本记入历史（收集栈拆分行）；不改系统剪贴板。</summary>
@@ -197,6 +200,12 @@ public sealed class ClipboardPipeline
         ItemAdded?.Invoke(item);
         return item;
     }
+
+    /// <summary>
+    /// 通知到达时是否直接丢弃。只看用户是否暂停捕获。
+    /// 自身正在写剪贴板时不能丢：这次通知可能就是用户紧接着的复制，没有第二次，靠序列号比较过滤自身回写。
+    /// </summary>
+    public static bool ShouldDropClipboardNotification(bool capturePaused) => capturePaused;
 
     private static void TryDeletePreview(string? path)
     {

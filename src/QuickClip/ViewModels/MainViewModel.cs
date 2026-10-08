@@ -333,7 +333,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         await RefreshAsync();
     }
 
-    public void PasteSelected(bool plainOnly)
+    public void PasteSelected(bool plainOnly, bool stayOnForeground = false)
     {
         var selected = SelectedItem;
         if (selected == null)
@@ -346,18 +346,16 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         switch (item.ContentType)
         {
             case ClipboardContentType.Image:
-                _services.Paste.PasteImage(item.PreviewPath);
+                _services.Paste.PasteImage(item.PreviewPath, stayOnForeground);
                 break;
             case ClipboardContentType.File:
                 if (plainOnly)
                 {
-                    _services.Paste.PasteText(item.TextContent, plainOnly: true);
+                    _services.Paste.PasteText(item.TextContent, plainOnly: true, stayOnForeground: stayOnForeground);
                 }
                 else
                 {
-                    var files = item.TextContent?.Split(
-                        new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries);
-                    _services.Paste.PasteFiles(files);
+                    _services.Paste.PasteFiles(ClipboardItem.SplitFilePaths(item.TextContent), stayOnForeground);
                 }
                 break;
             default:
@@ -366,7 +364,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                     item.TextContent,
                     plainOnly,
                     plainOnly ? null : item.HtmlContent,
-                    plainOnly ? null : item.RtfContent);
+                    plainOnly ? null : item.RtfContent,
+                    stayOnForeground);
                 break;
         }
     }
@@ -632,8 +631,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             {
                 ClipboardContentType.Image => await _services.Paste.CopyImageAsync(item.PreviewPath),
                 ClipboardContentType.File => await _services.Paste.CopyFilesAsync(
-                    item.TextContent?.Split(
-                        new[] { Environment.NewLine }, StringSplitOptions.RemoveEmptyEntries)),
+                    ClipboardItem.SplitFilePaths(item.TextContent)),
                 _ => await _services.Paste.CopyTextAsync(
                     item.TextContent,
                     plainOnly: false,
@@ -664,7 +662,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             return;
         }
 
-        var paths = item.TextContent.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries);
+        var paths = ClipboardItem.SplitFilePaths(item.TextContent);
         var names = paths.Select(p =>
         {
             string? n = Path.GetFileName(p);
@@ -857,12 +855,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
-    public Task PasteSnippetAsync(SnippetItem snippet, bool plainOnly = false)
+    public Task PasteSnippetAsync(SnippetItem snippet, bool plainOnly = false, bool stayOnForeground = false)
     {
         if (snippet == null) return Task.CompletedTask;
 
         string text = ResolveSnippetText(snippet);
-        _services.Paste.PasteText(text, plainOnly);
+        _services.Paste.PasteText(text, plainOnly, stayOnForeground: stayOnForeground);
         return Task.CompletedTask;
     }
 

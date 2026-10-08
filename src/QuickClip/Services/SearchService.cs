@@ -37,12 +37,11 @@ public static class SearchService
             return true;
         }
 
-        // 拼音首字母匹配：如 "sjjg" 匹配 "设计架构"
-        string queryInitials = GetInitialsCached(q);
-        if (queryInitials.Length > 0)
+        // 拼音首字母：sjjg 匹配「设计架构」。单字符不走这条，避免 a 命中 applesj 这类首字母串。
+        if (q.Length >= 2)
         {
-            string textInitials = GetInitialsCached(lower);
-            if (textInitials.Contains(queryInitials, StringComparison.Ordinal))
+            string textInitials = HanInitials(lower);
+            if (textInitials.Contains(q, StringComparison.Ordinal))
             {
                 return true;
             }
@@ -71,5 +70,20 @@ public static class SearchService
 
         InitialsCache.TryAdd(text, initials);
         return initials;
+    }
+
+    /// <summary>只保留汉字的拼音首字母。拉丁字符留给上面的字面匹配，不再混进首字母串。</summary>
+    private static string HanInitials(string text)
+    {
+        var sb = new System.Text.StringBuilder(text.Length);
+        foreach (char ch in text)
+        {
+            if (ch is >= '\u4E00' and <= '\u9FFF')
+            {
+                sb.Append(ch);
+            }
+        }
+
+        return sb.Length == 0 ? string.Empty : GetInitialsCached(sb.ToString());
     }
 }

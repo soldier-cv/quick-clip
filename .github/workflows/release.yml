@@ -89,28 +89,71 @@ jobs:
             publish/setup/QuickClip-Setup-win-x64.exe
           if-no-files-found: error
 
+      - name: Resolve release notes
+        id: notes
+        shell: pwsh
+        run: |
+          $ver = "${{ steps.ver.outputs.version }}"
+          $notes = ""
+          if (Test-Path "CHANGELOG.md") {
+            $lines = Get-Content "CHANGELOG.md" -Encoding utf8
+            $in = $false
+            $buf = @()
+            foreach ($l in $lines) {
+              if ($l.Trim().StartsWith("## [$ver]")) {
+                $in = $true
+                continue
+              }
+              if ($in) {
+                if ($l.Trim() -match "^##\s+\[") { break }
+                $buf += $l
+              }
+            }
+            $notes = ($buf -join [Environment]::NewLine).Trim()
+          }
+          if ([string]::IsNullOrWhiteSpace($notes)) {
+            $notes = (git log -1 --pretty=%B).Trim()
+          }
+
+          $bodyFile = Join-Path $env:RUNNER_TEMP "release_body.md"
+          $giteeBodyFile = Join-Path $env:RUNNER_TEMP "gitee_body.md"
+
+          Set-Content -Path $giteeBodyFile -Value $notes -Encoding utf8
+
+          $ghFullBody = @"
+          ## 📝 更新内容
+
+          $notes
+
+          ## 🌟 特别致谢
+          衷心感谢开源社区所有贡献者、Star 支持者以及向身边朋友推荐 QuickClip 的伙伴们！你们的每一份反馈、测试与推广，都是 QuickClip 追求极致纯净与极速体验的最大动力。
+
+          ## 下载
+
+          | 文件 | 说明 |
+          | --- | --- |
+          | `QuickClip-Setup-win-x64.exe` | 安装版（体积小，需 [.NET 8 桌面运行时 x64](https://aka.ms/dotnet/8.0/windowsdesktop-runtime-win-x64.exe)） |
+
+          国内用户可在 [Gitee 镜像 Releases](https://gitee.com/huaxudong/quick-clip/releases) 页面高速下载。
+          详细变更见 [CHANGELOG.md](https://github.com/soldier-cv/quick-clip/blob/master/CHANGELOG.md)。
+          "@
+
+          Set-Content -Path $bodyFile -Value $ghFullBody -Encoding utf8
+
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "body_file=$bodyFile"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "gitee_body_file=$giteeBodyFile"
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: |
             publish/setup/QuickClip-Setup-win-x64.exe
-          generate_release_notes: true
+          body_path: ${{ steps.notes.outputs.body_file }}
+          generate_release_notes: false
           fail_on_unmatched_files: true
           draft: false
           prerelease: false
-          body: |
-            ## 🌟 特别致谢
-            衷心感谢开源社区所有贡献者、Star 支持者以及向身边朋友推荐 QuickClip 的伙伴们！你们的每一份反馈、测试与推广，都是 QuickClip 追求极致纯净与极速体验的最大动力。
-
-            ## 下载
-
-            | 文件 | 说明 |
-            | --- | --- |
-            | `QuickClip-Setup-win-x64.exe` | 安装版（体积小，需 [.NET 8 桌面运行时 x64](https://aka.ms/dotnet/8.0/windowsdesktop-runtime-win-x64.exe)） |
-
-            国内用户可在 [Gitee 镜像 Releases](https://gitee.com/huaxudong/quick-clip/releases) 页面高速下载。
-            详细变更见 [CHANGELOG.md](https://github.com/soldier-cv/quick-clip/blob/master/CHANGELOG.md)。
 
       - name: Sync Release to Gitee
         if: startsWith(github.ref, 'refs/tags/') && github.repository == 'soldier-cv/quick-clip'
@@ -129,6 +172,12 @@ jobs:
           $repo = "quick-clip"
           $token = $env:GITEE_TOKEN
           $setupExe = (Resolve-Path "publish/setup/QuickClip-Setup-win-x64.exe").Path
+          $giteeBodyPath = "${{ steps.notes.outputs.gitee_body_file }}"
+          $giteeBody = if (Test-Path $giteeBodyPath) {
+            Get-Content $giteeBodyPath -Raw -Encoding utf8
+          } else {
+            "Windows 极速、纯净的本地剪贴板管理工具。国内用户高速下载安装包。"
+          }
 
           Write-Host "正在准备同步 Release 到 Gitee ($owner/$repo, Tag: $tag)..."
 
@@ -154,7 +203,7 @@ jobs:
               -F "tag_name=$tag" `
               -F "target_commitish=master" `
               -F "name=QuickClip $tag" `
-              -F "body=Windows 极速、纯净的本地剪贴板管理工具。国内用户高速下载安装包。" `
+              -F "body=$giteeBody" `
               -F "prerelease=false"
             Write-Host "Gitee 创建 Release 响应: $createJson"
             if ($createJson) {

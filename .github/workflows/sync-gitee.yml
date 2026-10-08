@@ -1,15 +1,15 @@
 name: Sync to Gitee
 
+# 仅在推送 master 分支或手动触发时同步源码镜像；
+# 打 Tag 时的发版由 release.yml 统一交付，避免双重推送与并发冲突。
 on:
   push:
     branches:
       - master
-    tags:
-      - 'v*'
   workflow_dispatch:
 
 concurrency:
-  group: sync-gitee-${{ github.ref }}
+  group: sync-gitee-master
   cancel-in-progress: true
 
 jobs:
@@ -41,18 +41,9 @@ jobs:
           echo "配置 Gitee 远端仓库..."
           git remote add gitee "https://huaxudong:${GITEE_TOKEN}@gitee.com/huaxudong/quick-clip.git"
 
-          if [ "${{ github.ref_type }}" = "branch" ]; then
-            echo "对齐并推送 master 分支到 Gitee..."
-            git fetch origin master
-            git checkout -B master origin/master
-            git push -u gitee master:master --force
-          elif [ "${{ github.ref_type }}" = "tag" ]; then
-            echo "推送标签 ${{ github.ref_name }} 到 Gitee..."
-            git push gitee "${{ github.ref_name }}" --force
-          else
-            echo "全量同步分支与标签到 Gitee..."
-            git push -u gitee master:master --force
-            git push gitee --tags --force
-          fi
+          echo "对齐并推送 master 分支到 Gitee..."
+          git fetch origin master
+          git checkout -B master origin/master
+          git push -u gitee master:master --force
 
-          echo "✅ Gitee 镜像同步完成！"
+          echo "✅ Gitee master 镜像同步完成！"

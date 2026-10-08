@@ -222,11 +222,19 @@ jobs:
             try {
               $queryUrl = "$releasesUrl/tags/$tag`?access_token=$token"
               Write-Host "正在查询已有 Release: $queryUrl"
-              $headers = @{ "Authorization" = "token $token" }
-              $existing = Invoke-RestMethod -Uri $queryUrl -Method Get -Headers $headers
               if ($existing -and $existing.id) {
                 $releaseId = $existing.id
-                Write-Host "找到已有 Gitee Release ID: $releaseId"
+                Write-Host "找到已有 Gitee Release ID: $releaseId，正在更新版本说明..."
+                try {
+                  $patchJson = & curl.exe -s -S -X PATCH "$releasesUrl/$releaseId" `
+                    -F "access_token=$token" `
+                    -F "tag_name=$tag" `
+                    -F "name=QuickClip $tag" `
+                    -F "body=$giteeBody"
+                  Write-Host "Gitee Release 描述已刷新为最新说明"
+                } catch {
+                  Write-Host "Gitee Release 描述更新提示: $_"
+                }
               }
             } catch {
               $errDetail = if ($_.ErrorDetails) { $_.ErrorDetails.Message } else { $_.Exception.Message }

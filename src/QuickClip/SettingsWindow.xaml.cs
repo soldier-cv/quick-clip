@@ -196,6 +196,7 @@ public partial class SettingsWindow : Window
 
             AutoStartCheck.IsChecked = s.AutoStart;
             AutoCheckUpdatesCheck.IsChecked = s.AutoCheckUpdates;
+            FillWindowPositionBox(s.WindowOpenPosition);
             TextOnlyCheck.IsChecked = s.TextOnlyCapture;
             MaxHistoryBox.Text = s.MaxHistoryItems.ToString();
 
@@ -469,6 +470,58 @@ public partial class SettingsWindow : Window
         // 启用状态只以勾选框为准；组合固定为 Ctrl+Shift+V
         _services.Settings.SetPlainPasteEnabled(PlainPasteEnabledCheck.IsChecked == true);
         SetHotkeyHint(null);
+    }
+
+    /// <summary>唤起位置下拉项。</summary>
+    private sealed class WindowPositionOption
+    {
+        public WindowOpenPosition Value { get; init; }
+        public string Name { get; init; } = string.Empty;
+
+        // 下拉项以文本呈现，同时让无障碍工具读到可读名称
+        public override string ToString() => Name;
+    }
+
+    /// <summary>填充唤起位置下拉并选中当前值。</summary>
+    private void FillWindowPositionBox(WindowOpenPosition current)
+    {
+        WindowPositionBox.Items.Clear();
+        WindowPositionBox.Items.Add(new WindowPositionOption
+        {
+            Value = WindowOpenPosition.RememberLast,
+            Name = "记住上次位置"
+        });
+        WindowPositionBox.Items.Add(new WindowPositionOption
+        {
+            Value = WindowOpenPosition.AtCursor,
+            Name = "鼠标处"
+        });
+        WindowPositionBox.Items.Add(new WindowPositionOption
+        {
+            Value = WindowOpenPosition.RightSide,
+            Name = "屏幕右侧"
+        });
+
+        foreach (WindowPositionOption option in WindowPositionBox.Items)
+        {
+            if (option.Value == current)
+            {
+                WindowPositionBox.SelectedItem = option;
+                return;
+            }
+        }
+
+        WindowPositionBox.SelectedIndex = 0;
+    }
+
+    private void OnWindowPositionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressUiEvents || WindowPositionBox.SelectedItem is not WindowPositionOption option)
+        {
+            return;
+        }
+
+        _services.Settings.SetWindowOpenPosition(option.Value);
     }
 
     private void OnAutoStartToggled(object sender, RoutedEventArgs e)

@@ -535,6 +535,22 @@
                                           Content="自动检查并下载更新"
                                           Checked="OnAutoCheckUpdatesToggled"
                                           Unchecked="OnAutoCheckUpdatesToggled" />
+                                <Grid Margin="0,14,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="100" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="唤起位置"
+                                               Foreground="{DynamicResource Theme.TextSecondary}"
+                                               FontSize="13"
+                                               VerticalAlignment="Center" />
+                                    <ComboBox x:Name="WindowPositionBox"
+                                              Grid.Column="1"
+                                              Height="34"
+                                              DisplayMemberPath="Name"
+                                              SelectionChanged="OnWindowPositionChanged"
+                                              PreviewMouseWheel="OnComboBoxPreviewMouseWheel" />
+                                </Grid>
                             </StackPanel>
                         </Border>
 

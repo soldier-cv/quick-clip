@@ -6,6 +6,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using QuickClip.Models;
 using QuickClip.Services;
 using QuickClip.ViewModels;
 using Wpf.Ui.Controls;
@@ -140,8 +141,9 @@ public partial class MainWindow : FluentWindow
 
     private void OnWindowLocationChanged(object? sender, EventArgs e)
     {
-        // 仅在窗口可见且坐标正常（排除预热 -32000）且启用了记忆位置时持久化保存
-        if (IsVisible && Left > -10000 && Top > -10000 && _services.Settings.RememberWindowPosition)
+        // 仅在窗口可见、坐标正常（排除预热 -32000）且启用「记住上次位置」时持久化坐标
+        if (IsVisible && Left > -10000 && Top > -10000 &&
+            _services.Settings.WindowOpenPosition == WindowOpenPosition.RememberLast)
         {
             _services.Settings.SetWindowPosition(Left, Top);
         }
@@ -151,9 +153,9 @@ public partial class MainWindow : FluentWindow
 
     private void OnWindowSizeChanged(object sender, SizeChangedEventArgs e)
     {
+        // 尺寸与唤起位置无关，任何模式下都记住用户调过的宽高
         if (IsVisible && ActualWidth > 1 && ActualHeight > 1 &&
-            Left > -10000 && Top > -10000 &&
-            _services.Settings.RememberWindowPosition)
+            Left > -10000 && Top > -10000)
         {
             _services.Settings.SetWindowSize(ActualWidth, ActualHeight);
         }
@@ -647,14 +649,19 @@ public partial class MainWindow : FluentWindow
     }
 
     /// <summary>
-    /// 主面板停靠与定位：优先恢复记忆的位置（经多显示器安全检测），否则停靠到当前显示器工作区右侧并垂直居中（仿 Win+V）。
+    /// <summary>
+    /// 主面板定位：
+    /// 记住上次（默认，经多显示器安全检测）/ 鼠标处 / 屏幕右侧垂直居中（仿 Win+V）。
     /// 小分辨率时收缩宽高，避免超出屏幕。
     /// </summary>
     private void PositionWindow()
     {
-        var workArea = GetWindowWorkArea();
-        const double margin = 12;
         var settings = _services.Settings;
+        const double margin = 12;
+
+        var workArea = settings.WindowOpenPosition == WindowOpenPosition.AtCursor
+            ? GetCursorWorkArea()
+            : GetWindowWorkArea();
 
         Width = StackHudLayout.ClampPanelWidth(
             settings.WindowWidth ?? Width,
@@ -664,9 +671,74 @@ public partial class MainWindow : FluentWindow
             settings.WindowHeight ?? Height,
             workArea.Height,
             margin);
-        if (settings.RememberWindowPosition &&
-            settings.WindowPositionX.HasValue &&
-            settings.WindowPositionY.HasValue)
+
+        switch (settings.WindowOpenPosition)
+        {
+            case WindowOpenPosition.AtCursor:
+                PositionAtCursor(workArea, margin);
+                return;
+
+            case WindowOpenPosition.RightSide:
+                PositionAtRightSide(workArea, margin);
+                return;
+
+            default:
+                PositionRemembered(workArea, margin);
+                return;
+        }
+    }
+
+    /// <summary>在鼠标指针处弹出；靠近右/下边缘时向内翻转，最后按工作区钳制。</summary>
+    private void PositionAtCursor(System.Windows.Rect area, double margin)
+    {
+        System.Drawing.Point cursor;
+        try
+        {
+            cursor = System.Windows.Forms.Cursor.Position;
+        }
+        catch
+        {
+            PositionAtRightSide(area, margin);
+            return;
+        }
+
+        GetDpiScale(out double dpiX, out double dpiY);
+        double cursorX = cursor.X / dpiX;
+        double cursorY = cursor.Y / dpiY;
+
+        // 面板左上角相对指针留一点偏移，避免指针压住第一张卡片
+        const double offset = 8;
+        double left = cursorX + offset;
+        double top = cursorY + offset;
+
+        if (left + Width > area.Right - margin)
+        {
+            left = cursorX - Width - offset;
+        }
+
+        if (top + Height > area.Bottom - margin)
+        {
+            top = cursorY - Height - offset;
+        }
+
+        Left = Math.Clamp(left, area.Left + margin, Math.Max(area.Left + margin, area.Right - Width - margin));
+        Top = Math.Clamp(top, area.Top + margin, Math.Max(area.Top + margin, area.Bottom - Height - margin));
+    }
+
+    private void PositionAtRightSide(System.Windows.Rect area, double margin)
+    {
+        Left = area.Right - Width - margin;
+        Top = area.Top + (area.Height - Height) / 2;
+
+        // 钳制在工作区内（多显示器 / 极端 DPI）
+        Left = Math.Clamp(Left, area.Left + margin, Math.Max(area.Left + margin, area.Right - Width - margin));
+        Top = Math.Clamp(Top, area.Top + margin, Math.Max(area.Top + margin, area.Bottom - Height - margin));
+    }
+
+    private void PositionRemembered(System.Windows.Rect area, double margin)
+    {
+        var settings = _services.Settings;
+        if (settings.WindowPositionX.HasValue && settings.WindowPositionY.HasValue)
         {
             double targetLeft = settings.WindowPositionX.Value;
             double targetTop = settings.WindowPositionY.Value;
@@ -680,12 +752,27 @@ public partial class MainWindow : FluentWindow
             }
         }
 
-        Left = workArea.Right - Width - margin;
-        Top = workArea.Top + (workArea.Height - Height) / 2;
+        PositionAtRightSide(area, margin);
+    }
 
-        // 钳制在工作区内（多显示器 / 极端 DPI）
-        Left = Math.Clamp(Left, workArea.Left + margin, Math.Max(workArea.Left + margin, workArea.Right - Width - margin));
-        Top = Math.Clamp(Top, workArea.Top + margin, Math.Max(workArea.Top + margin, workArea.Bottom - Height - margin));
+    /// <summary>鼠标所在显示器的工作区（DIP），用于「鼠标处弹出」。</summary>
+    private System.Windows.Rect GetCursorWorkArea()
+    {
+        try
+        {
+            var screen = System.Windows.Forms.Screen.FromPoint(System.Windows.Forms.Cursor.Position);
+            var bounds = screen.WorkingArea;
+            GetDpiScale(out double dpiX, out double dpiY);
+            return new System.Windows.Rect(
+                bounds.Left / dpiX,
+                bounds.Top / dpiY,
+                bounds.Width / dpiX,
+                bounds.Height / dpiY);
+        }
+        catch
+        {
+            return GetWindowWorkArea();
+        }
     }
 
     private static bool IsPointWithinVirtualScreen(double x, double y)

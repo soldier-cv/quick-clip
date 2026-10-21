@@ -54,8 +54,11 @@ public sealed class SettingsService
     /// <summary>主窗口是否前端置顶（固定在最前，失焦不自动隐藏）。仅由 Ctrl+P / 图钉切换，设置页不再暴露。</summary>
     public bool WindowAlwaysOnTop { get; private set; }
 
-    /// <summary>是否记忆面板拖拽后的位置（默认 true）。</summary>
-    public bool RememberWindowPosition { get; private set; } = true;
+    /// <summary>
+    /// 面板唤起位置：记住上次 / 鼠标处 / 屏幕右侧。
+    /// 旧配置的 RememberWindowPosition 为 false 时迁移到 RightSide。
+    /// </summary>
+    public WindowOpenPosition WindowOpenPosition { get; private set; } = WindowOpenPosition.RememberLast;
 
     /// <summary>上次面板位置 X 坐标（null 表示默认屏幕右侧）。</summary>
     public double? WindowPositionX { get; private set; }
@@ -359,7 +362,7 @@ public sealed class SettingsService
             AutoStart = dto.AutoStart ?? false;
             TakeOverSystemClipboard = dto.TakeOverSystemClipboard ?? true;
             WindowAlwaysOnTop = dto.WindowAlwaysOnTop ?? false;
-            RememberWindowPosition = dto.RememberWindowPosition ?? true;
+            WindowOpenPosition = ParseOpenPosition(dto.WindowOpenPosition, dto.RememberWindowPosition);
             WindowPositionX = dto.WindowPositionX;
             WindowPositionY = dto.WindowPositionY;
             WindowWidth = dto.WindowWidth;
@@ -414,6 +417,38 @@ public sealed class SettingsService
         {
             DebugLog.LogException("加载设置失败，使用默认值", ex);
         }
+    }
+
+    /// <summary>
+    /// 解析唤起位置。新字段优先；没有时按旧的 RememberWindowPosition 推断（false → 屏幕右侧）。
+    /// </summary>
+    private static WindowOpenPosition ParseOpenPosition(string? name, bool? legacyRemember)
+    {
+        if (!string.IsNullOrWhiteSpace(name) &&
+            Enum.TryParse(name, ignoreCase: true, out WindowOpenPosition position) &&
+            Enum.IsDefined(position))
+        {
+            return position;
+        }
+
+        return legacyRemember == false ? WindowOpenPosition.RightSide : WindowOpenPosition.RememberLast;
+    }
+
+    /// <summary>更新面板唤起位置并持久化。</summary>
+    public void SetWindowOpenPosition(WindowOpenPosition position)
+    {
+        if (!Enum.IsDefined(position))
+        {
+            position = WindowOpenPosition.RememberLast;
+        }
+
+        if (WindowOpenPosition == position)
+        {
+            return;
+        }
+
+        WindowOpenPosition = position;
+        Save();
     }
 
     /// <summary>解析主题；未知或已移除的 Dracula 回退 Terminal。</summary>
@@ -1179,7 +1214,7 @@ public sealed class SettingsService
                 AutoStart = AutoStart,
                 TakeOverSystemClipboard = TakeOverSystemClipboard,
                 WindowAlwaysOnTop = WindowAlwaysOnTop,
-                RememberWindowPosition = RememberWindowPosition,
+                WindowOpenPosition = WindowOpenPosition.ToString(),
                 WindowPositionX = WindowPositionX,
                 WindowPositionY = WindowPositionY,
                 WindowWidth = WindowWidth,
@@ -1261,6 +1296,8 @@ public sealed class SettingsData
     public bool? AutoStart { get; set; }
     public bool? TakeOverSystemClipboard { get; set; }
     public bool? WindowAlwaysOnTop { get; set; }
+    public string? WindowOpenPosition { get; set; }
+    /// <summary>旧字段，仅用于迁移到 WindowOpenPosition。</summary>
     public bool? RememberWindowPosition { get; set; }
     public double? WindowPositionX { get; set; }
     public double? WindowPositionY { get; set; }

@@ -200,7 +200,8 @@ public partial class SettingsWindow : Window
             MaxHistoryBox.Text = s.MaxHistoryItems.ToString();
 
             QuickSaveImageCheck.IsChecked = s.ImageQuickSaveEnabled;
-            ImageSaveDirBox.Text = s.ImageSaveDirectory;
+            // 直接显示实际生效的目录：未配置时就是默认目录，避免输入框空白让人不知道图片存到哪
+            ImageSaveDirBox.Text = ImageSaveService.ResolveDirectory(s.ImageSaveDirectory, _services.Paths);
             ImageFileNameBox.Text = s.ImageFileNamePattern;
             RefreshImageSavePanel(s);
             VersionText.Text = "v" + UpdateService.CurrentVersion;
@@ -677,25 +678,19 @@ public partial class SettingsWindow : Window
     /// <summary>刷新图片保存区的示例文件名。</summary>
     private void RefreshImageSavePanel(SettingsService settings)
     {
-        string defaultDir = ImageSaveService.ResolveDirectory(null, _services.Paths);
-        ImageSaveDirBox.ToolTip = string.IsNullOrWhiteSpace(settings.ImageSaveDirectory)
-            ? $"默认目录：{defaultDir}"
-            : "留空使用默认目录";
-
         string preview = ImageSaveService.BuildFileName(
             settings.ImageFileNamePattern,
             1,
             new ClipboardItem { Id = 1 },
             null,
             ".png");
-        ImageSaveHintText.Text = string.IsNullOrWhiteSpace(settings.ImageSaveDirectory)
-            ? $"{preview}   ·   默认目录 {defaultDir}"
-            : preview;
+        ImageSaveHintText.Text = preview;
     }
 
     private void OnImageSaveDirLostFocus(object sender, RoutedEventArgs e)
     {
         if (_suppressUiEvents) return;
+
         string value = ImageSaveDirBox.Text.Trim();
         if (value.Length > 0)
         {
@@ -711,15 +706,25 @@ public partial class SettingsWindow : Window
 
             if (!Path.IsPathRooted(expanded))
             {
-                // 相对路径会随启动目录漂移：保留原值并提示，不落盘错误配置
-                ImageSaveDirBox.Text = _services.Settings.ImageSaveDirectory;
+                // 相对路径会随启动目录漂移：还原为当前生效目录，不落盘错误配置
+                ImageSaveDirBox.Text = ImageSaveService.ResolveDirectory(
+                    _services.Settings.ImageSaveDirectory, _services.Paths);
                 ImageSaveHintText.Text = "请填写绝对路径";
                 return;
             }
         }
 
-        _services.Settings.SetImageSaveDirectory(value);
-        ImageSaveDirBox.Text = _services.Settings.ImageSaveDirectory;
+        // 与默认目录一致时存空值，保持「跟随默认」语义
+        string defaultDir = _services.Paths.DefaultImageSaveDir;
+        bool isDefault = value.Length == 0 ||
+                         string.Equals(
+                             value.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                             defaultDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                             StringComparison.OrdinalIgnoreCase);
+
+        _services.Settings.SetImageSaveDirectory(isDefault ? null : value);
+        ImageSaveDirBox.Text = ImageSaveService.ResolveDirectory(
+            _services.Settings.ImageSaveDirectory, _services.Paths);
         RefreshImageSavePanel(_services.Settings);
     }
 

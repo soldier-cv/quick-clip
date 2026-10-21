@@ -116,4 +116,34 @@ public class ImageSavePersistenceTests
         Assert.NotEqual(paths.PreviewDir, paths.DefaultImageSaveDir);
         Assert.False(paths.DefaultImageSaveDir.StartsWith(paths.PreviewDir + Path.DirectorySeparatorChar));
     }
+
+    [Fact]
+    public void Empty_setting_resolves_to_the_default_directory()
+    {
+        var paths = new AppPaths();
+
+        Assert.Equal(paths.DefaultImageSaveDir, ImageSaveService.ResolveDirectory(null, paths));
+        Assert.Equal(paths.DefaultImageSaveDir, ImageSaveService.ResolveDirectory("   ", paths));
+    }
+
+    [Fact]
+    public void Explicit_absolute_directory_wins_over_default()
+    {
+        var paths = new AppPaths();
+        string custom = Path.Combine(Path.GetTempPath(), "qc-custom");
+
+        Assert.Equal(custom, ImageSaveService.ResolveDirectory(custom, paths));
+    }
+
+    [Fact]
+    public void Relative_or_preview_cache_directory_falls_back_to_default()
+    {
+        var paths = new AppPaths();
+
+        Assert.Equal(paths.DefaultImageSaveDir, ImageSaveService.ResolveDirectory("relative\\dir", paths));
+        Assert.Equal(paths.DefaultImageSaveDir, ImageSaveService.ResolveDirectory(paths.PreviewDir, paths));
+        Assert.Equal(
+            paths.DefaultImageSaveDir,
+            ImageSaveService.ResolveDirectory(Path.Combine(paths.PreviewDir, "nested"), paths));
+    }
 }

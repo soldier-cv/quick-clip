@@ -121,16 +121,18 @@ public sealed class DatabaseService : IDisposable, IImageSaveIndexStore
                 );
                 CREATE INDEX IF NOT EXISTS idx_snippets_category ON snippets(category);
 
-                -- 图片保存序号：按「目录 + 命名骨架 + 扩展名」维护，避免每次保存都扫描整个目录
+                -- 图片保存序号：按「目录 + 日期」记账，每天从 1 开始（与命名规则无关）
                 CREATE TABLE IF NOT EXISTS image_save_counters (
-                    scope_key TEXT PRIMARY KEY,
-                    last_index INTEGER NOT NULL DEFAULT 0
+                    save_dir TEXT NOT NULL,
+                    save_date TEXT NOT NULL,
+                    last_index INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (save_dir, save_date)
                 );
                 """;
             cmd.ExecuteNonQuery();
         }
 
-        // 老库补列（SQLite 不支持 ADD COLUMN IF NOT EXISTS）
+        // 已发布版本的库没有这些列，启动时补齐（SQLite 不支持 ADD COLUMN IF NOT EXISTS）
         EnsureColumn(connection, "html_content", "TEXT");
         EnsureColumn(connection, "rtf_content", "TEXT");
         EnsureColumn(connection, "pinned_order", "INTEGER DEFAULT 0");
@@ -359,15 +361,19 @@ public sealed class DatabaseService : IDisposable, IImageSaveIndexStore
         }
     }
 
-    /// <summary>读取图片保存序号的当前值；没有记录时返回 0。</summary>
-    public async Task<int> GetImageSaveIndexAsync(string scopeKey)
+    /// <summary>读取某目录某天的图片保存序号；没有记录时返回 0。</summary>
+    public async Task<int> GetImageSaveIndexAsync(string saveDir, DateOnly saveDate)
     {
         await _gate.WaitAsync();
         try
         {
             using var cmd = _connection.CreateCommand();
-            cmd.CommandText = "SELECT last_index FROM image_save_counters WHERE scope_key = $key;";
-            cmd.Parameters.AddWithValue("$key", scopeKey);
+            cmd.CommandText = """
+                SELECT last_index FROM image_save_counters
+                WHERE save_dir = $dir AND save_date = $date;
+                """;
+            cmd.Parameters.AddWithValue("$dir", saveDir);
+            cmd.Parameters.AddWithValue("$date", saveDate.ToString("yyyy-MM-dd"));
             object? value = await cmd.ExecuteScalarAsync();
             return value is long n ? (int)n : 0;
         }
@@ -377,8 +383,8 @@ public sealed class DatabaseService : IDisposable, IImageSaveIndexStore
         }
     }
 
-    /// <summary>把图片保存序号推进到指定值（只增不减，避免外部状态回退导致重号）。</summary>
-    public async Task SetImageSaveIndexAsync(string scopeKey, int index)
+    /// <summary>把某目录某天的序号推进到指定值（只增不减，避免外部状态回退导致重号）。</summary>
+    public async Task SetImageSaveIndexAsync(string saveDir, DateOnly saveDate, int index)
     {
         if (index <= 0)
         {
@@ -390,10 +396,13 @@ public sealed class DatabaseService : IDisposable, IImageSaveIndexStore
         {
             using var cmd = _connection.CreateCommand();
             cmd.CommandText = """
-                INSERT INTO image_save_counters (scope_key, last_index) VALUES ($key, $index)
-                ON CONFLICT(scope_key) DO UPDATE SET last_index = MAX(last_index, excluded.last_index);
+                INSERT INTO image_save_counters (save_dir, save_date, last_index)
+                VALUES ($dir, $date, $index)
+                ON CONFLICT(save_dir, save_date)
+                DO UPDATE SET last_index = MAX(last_index, excluded.last_index);
                 """;
-            cmd.Parameters.AddWithValue("$key", scopeKey);
+            cmd.Parameters.AddWithValue("$dir", saveDir);
+            cmd.Parameters.AddWithValue("$date", saveDate.ToString("yyyy-MM-dd"));
             cmd.Parameters.AddWithValue("$index", index);
             await cmd.ExecuteNonQueryAsync();
         }
@@ -404,10 +413,12 @@ public sealed class DatabaseService : IDisposable, IImageSaveIndexStore
     }
 
     /// <inheritdoc />
-    Task<int> IImageSaveIndexStore.GetIndexAsync(string scopeKey) => GetImageSaveIndexAsync(scopeKey);
+    Task<int> IImageSaveIndexStore.GetIndexAsync(string saveDir, DateOnly saveDate) =>
+        GetImageSaveIndexAsync(saveDir, saveDate);
 
     /// <inheritdoc />
-    Task IImageSaveIndexStore.SetIndexAsync(string scopeKey, int index) => SetImageSaveIndexAsync(scopeKey, index);
+    Task IImageSaveIndexStore.SetIndexAsync(string saveDir, DateOnly saveDate, int index) =>
+        SetImageSaveIndexAsync(saveDir, saveDate, index);
 
     public async Task TogglePinAsync(long id, bool pinned)
     {

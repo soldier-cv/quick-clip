@@ -97,12 +97,37 @@ public class ImageSaveCounterDatabaseTests
         try
         {
             using var db = new DatabaseService(dbPath);
-            const string key = "scope";
+            var day = new DateOnly(2026, 10, 21);
+            const string dirKey = @"c:\shots";
 
-            await db.SetImageSaveIndexAsync(key, 5);
-            await db.SetImageSaveIndexAsync(key, 3);
+            await db.SetImageSaveIndexAsync(dirKey, day, 5);
+            await db.SetImageSaveIndexAsync(dirKey, day, 3);
 
-            Assert.Equal(5, await db.GetImageSaveIndexAsync(key));
+            Assert.Equal(5, await db.GetImageSaveIndexAsync(dirKey, day));
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Each_day_gets_its_own_row()
+    {
+        string dir = TempDir();
+        string dbPath = Path.Combine(dir, "test.db");
+        try
+        {
+            using var db = new DatabaseService(dbPath);
+            const string dirKey = @"c:\shots";
+
+            await db.SetImageSaveIndexAsync(dirKey, new DateOnly(2026, 10, 21), 4);
+            await db.SetImageSaveIndexAsync(dirKey, new DateOnly(2026, 10, 22), 1);
+
+            Assert.Equal(4, await db.GetImageSaveIndexAsync(dirKey, new DateOnly(2026, 10, 21)));
+            Assert.Equal(1, await db.GetImageSaveIndexAsync(dirKey, new DateOnly(2026, 10, 22)));
+            Assert.Equal(0, await db.GetImageSaveIndexAsync(dirKey, new DateOnly(2026, 10, 23)));
         }
         finally
         {

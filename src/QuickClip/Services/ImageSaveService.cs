@@ -8,12 +8,12 @@ using QuickClip.Models;
 namespace QuickClip.Services;
 
 /// <summary>
-/// 图片保存序号存储（由数据库实现）。序号只增不减，避免外部文件变动导致重号。
+/// 图片保存序号存储（由数据库实现）。序号只增不减，按「目录 + 日期」每天从 1 开始。
 /// </summary>
 public interface IImageSaveIndexStore
 {
-    Task<int> GetIndexAsync(string scopeKey);
-    Task SetIndexAsync(string scopeKey, int index);
+    Task<int> GetIndexAsync(string saveDir, DateOnly saveDate);
+    Task SetIndexAsync(string saveDir, DateOnly saveDate, int index);
 }
 
 /// <summary>
@@ -560,9 +560,12 @@ public static class ImageSaveService
 
         string ext = NormalizeExtension(Path.GetExtension(sourcePath));
         var (prefix, suffix) = BuildIndexSkeleton(pattern, item, sourcePath, ext);
-        string scopeKey = BuildScopeKey(directory, prefix, suffix, ext);
 
-        int last = counters == null ? 0 : await counters.GetIndexAsync(scopeKey).ConfigureAwait(false);
+        // 序号按「目录 + 日期」记账：每天从 1 重新开始，与命名规则解耦（改规则不会丢记忆）
+        string saveDir = NormalizeDirKey(directory);
+        DateOnly today = DateOnly.FromDateTime(DateTime.Now);
+
+        int last = counters == null ? 0 : await counters.GetIndexAsync(saveDir, today).ConfigureAwait(false);
         int candidate = last + 1;
 
         // 序号表缺失，或算出来的名字已被外部文件占用：扫描目录修正一次
@@ -584,16 +587,30 @@ public static class ImageSaveService
             int used = ExtractIndex(Path.GetFileNameWithoutExtension(target), prefix, suffix);
             if (used > 0)
             {
-                await counters.SetIndexAsync(scopeKey, used).ConfigureAwait(false);
+                await counters.SetIndexAsync(saveDir, today, used).ConfigureAwait(false);
             }
         }
 
         return target;
     }
 
-    /// <summary>序号记录的作用域键：目录 + 骨架前缀 + 后缀 + 扩展名。</summary>
-    internal static string BuildScopeKey(string directory, string prefix, string suffix, string ext) =>
-        string.Join('\u001f', directory.ToLowerInvariant(), prefix, suffix, ext.ToLowerInvariant());
+    /// <summary>目录键：去尾部分隔符并统一小写，让同一目录的不同写法命中同一行。</summary>
+    internal static string NormalizeDirKey(string directory)
+    {
+        string dir = string.IsNullOrWhiteSpace(directory) ? string.Empty : directory.Trim();
+        try
+        {
+            dir = Path.GetFullPath(dir);
+        }
+        catch
+        {
+            // 非法路径按原样使用
+        }
+
+        return dir
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            .ToLowerInvariant();
+    }
 
     private static string ComposeFileName(string prefix, int index, string suffix, string ext) =>
         Sanitize(prefix + index + suffix) + ext;

@@ -9,21 +9,22 @@ public class ImageSaveIndexTests
 {
     private sealed class MemoryStore : IImageSaveIndexStore
     {
-        private readonly Dictionary<string, int> _map = new();
+        private readonly Dictionary<(string Dir, DateOnly Date), int> _map = new();
 
         public int Reads { get; private set; }
         public int Writes { get; private set; }
 
-        public Task<int> GetIndexAsync(string scopeKey)
+        public Task<int> GetIndexAsync(string saveDir, DateOnly saveDate)
         {
             Reads++;
-            return Task.FromResult(_map.TryGetValue(scopeKey, out int v) ? v : 0);
+            return Task.FromResult(_map.TryGetValue((saveDir, saveDate), out int v) ? v : 0);
         }
 
-        public Task SetIndexAsync(string scopeKey, int index)
+        public Task SetIndexAsync(string saveDir, DateOnly saveDate, int index)
         {
             Writes++;
-            _map[scopeKey] = Math.Max(_map.TryGetValue(scopeKey, out int v) ? v : 0, index);
+            var key = (saveDir, saveDate);
+            _map[key] = Math.Max(_map.TryGetValue(key, out int v) ? v : 0, index);
             return Task.CompletedTask;
         }
     }
@@ -113,7 +114,7 @@ public class ImageSaveIndexTests
             string source = await PrepareSourceAsync(dir);
             string today = DateTime.Now.ToString("yyyyMMdd");
 
-            // 目录里已有 7 张历史图片，但序号表是空的（例如升级前保存的）
+            // 目录里已有 7 张手工放入的图片，序号表为空时按目录现状推算
             for (int i = 1; i <= 7; i++)
             {
                 await File.WriteAllBytesAsync(Path.Combine(saveDir, $"QC_{today}_{i}.png"), [9]);
@@ -169,17 +170,18 @@ public class ImageSaveIndexTests
         {
             string source = await PrepareSourceAsync(dir);
             var store = new MemoryStore();
+            string dirKey = ImageSaveService.NormalizeDirKey(saveDir);
+            var today = DateOnly.FromDateTime(DateTime.Now);
 
-            string scopeKey = ImageSaveService.BuildScopeKey(
-                saveDir, $"QC_{DateTime.Now:yyyyMMdd}_", string.Empty, ".png");
+            // 昨天用了 5 个号
+            await store.SetIndexAsync(dirKey, today.AddDays(-1), 5);
+            Assert.Equal(5, await store.GetIndexAsync(dirKey, today.AddDays(-1)));
 
-            await store.SetIndexAsync(scopeKey, 5);
-            Assert.Equal(5, await store.GetIndexAsync(scopeKey));
-
-            // 换一天前缀就变了，键不同
-            string otherDayKey = ImageSaveService.BuildScopeKey(
-                saveDir, "QC_19990101_", string.Empty, ".png");
-            Assert.Equal(0, await store.GetIndexAsync(otherDayKey));
+            // 今天没有记录，第一次保存从 1 开始
+            Assert.Equal(0, await store.GetIndexAsync(dirKey, today));
+            string next = await ImageSaveService.SaveWithIndexAsync(
+                source, saveDir, "QC_yyyyMMdd_{index}", Item(), store);
+            Assert.Equal($"QC_{DateTime.Now:yyyyMMdd}_1.png", Path.GetFileName(next));
         }
         finally
         {
@@ -188,10 +190,32 @@ public class ImageSaveIndexTests
     }
 
     [Fact]
-    public void Scope_key_is_case_insensitive_on_directory()
+    public async Task Changing_the_naming_pattern_keeps_the_daily_counter()
     {
-        string a = ImageSaveService.BuildScopeKey(@"C:\Shots", "QC_", string.Empty, ".png");
-        string b = ImageSaveService.BuildScopeKey(@"c:\shots", "QC_", string.Empty, ".png");
+        string dir = TempDir();
+        string saveDir = Path.Combine(dir, "out");
+        try
+        {
+            string source = await PrepareSourceAsync(dir);
+            var store = new MemoryStore();
+
+            await ImageSaveService.SaveWithIndexAsync(source, saveDir, "QC_yyyyMMdd_{index}", Item(), store);
+            // 用户改了命名规则：序号仍按当日继续，不会退回 1
+            string second = await ImageSaveService.SaveWithIndexAsync(source, saveDir, "SHOT_{index}", Item(), store);
+
+            Assert.Equal("SHOT_2.png", Path.GetFileName(second));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Directory_key_is_case_insensitive_and_ignores_trailing_separator()
+    {
+        string a = ImageSaveService.NormalizeDirKey(@"C:\Shots");
+        string b = ImageSaveService.NormalizeDirKey(@"c:\shots\");
 
         Assert.Equal(a, b);
     }

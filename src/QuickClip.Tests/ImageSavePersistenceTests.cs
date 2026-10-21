@@ -16,43 +16,26 @@ public class ImageSavePersistenceTests
     }
 
     [Fact]
-    public async Task Old_database_gains_saved_path_column_and_round_trips()
+    public async Task Saved_path_is_stored_and_read_back()
     {
         string dir = CreateTempDir();
-        string dbPath = Path.Combine(dir, "old.db");
+        string dbPath = Path.Combine(dir, "test.db");
         try
         {
-            // 构造旧版库：没有 saved_path 列
-            using (var connection = new SqliteConnection($"Data Source={dbPath}"))
-            {
-                connection.Open();
-                using var cmd = connection.CreateCommand();
-                cmd.CommandText = """
-                    CREATE TABLE clipboard_items (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        content_type TEXT NOT NULL,
-                        text_content TEXT,
-                        html_content TEXT,
-                        rtf_content TEXT,
-                        preview_path TEXT,
-                        qr_content TEXT,
-                        char_count INTEGER,
-                        is_pinned INTEGER DEFAULT 0,
-                        pinned_order INTEGER DEFAULT 0,
-                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                    );
-                    INSERT INTO clipboard_items (content_type, preview_path, char_count)
-                    VALUES ('Image', 'C:\\preview\\a.png', 10);
-                    """;
-                cmd.ExecuteNonQuery();
-            }
-
             using var db = new DatabaseService(dbPath);
-            var items = await db.GetRecentAsync(10);
-            Assert.Single(items);
-            Assert.Null(items[0].SavedPath);
+            var item = new ClipboardItem
+            {
+                ContentType = ClipboardContentType.Image,
+                PreviewPath = @"C:\preview\a.png",
+                CharCount = 10
+            };
 
-            await db.UpdateSavedPathAsync(items[0].Id, @"C:\saved\QC_20261021_1.png");
+            await db.UpsertRecentAsync(item);
+            var loaded = await db.GetRecentAsync(10);
+            Assert.Single(loaded);
+            Assert.Null(loaded[0].SavedPath);
+
+            await db.UpdateSavedPathAsync(item.Id, @"C:\saved\QC_20261021_1.png");
             var reloaded = await db.GetRecentAsync(10);
             Assert.Equal(@"C:\saved\QC_20261021_1.png", reloaded[0].SavedPath);
         }

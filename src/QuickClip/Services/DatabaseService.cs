@@ -91,6 +91,9 @@ public sealed class DatabaseService : IDisposable, IImageSaveIndexStore
 
     private static void EnsureSchema(SqliteConnection connection)
     {
+        // 序号表是纯缓存：结构不匹配就重建，序号会按当日文件重新推算
+        EnsureImageCountersSchema(connection);
+
         using (var cmd = connection.CreateCommand())
         {
             cmd.CommandText = """
@@ -120,14 +123,6 @@ public sealed class DatabaseService : IDisposable, IImageSaveIndexStore
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 );
                 CREATE INDEX IF NOT EXISTS idx_snippets_category ON snippets(category);
-
-                -- 图片保存序号：按「目录 + 日期」记账，每天从 1 开始（与命名规则无关）
-                CREATE TABLE IF NOT EXISTS image_save_counters (
-                    save_dir TEXT NOT NULL,
-                    save_date TEXT NOT NULL,
-                    last_index INTEGER NOT NULL DEFAULT 0,
-                    PRIMARY KEY (save_dir, save_date)
-                );
                 """;
             cmd.ExecuteNonQuery();
         }
@@ -137,6 +132,53 @@ public sealed class DatabaseService : IDisposable, IImageSaveIndexStore
         EnsureColumn(connection, "rtf_content", "TEXT");
         EnsureColumn(connection, "pinned_order", "INTEGER DEFAULT 0");
         EnsureColumn(connection, "saved_path", "TEXT");
+    }
+
+    /// <summary>
+    /// 序号表是纯缓存，结构不符时直接重建：反正是从当日文件重新数，不需要保留数据。
+    /// </summary>
+    private static void EnsureImageCountersSchema(SqliteConnection connection)
+    {
+        bool recreate = false;
+
+        using (var check = connection.CreateCommand())
+        {
+            check.CommandText = "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'image_save_counters';";
+            if (check.ExecuteScalar() != null)
+            {
+                var columns = new List<string>();
+                using (var info = connection.CreateCommand())
+                {
+                    info.CommandText = "PRAGMA table_info(image_save_counters);";
+                    using var reader = info.ExecuteReader();
+                    while (reader.Read())
+                    {
+                        columns.Add(reader.GetString(1));
+                    }
+                }
+
+                // 只有 (save_date, last_index) 两列才是当前结构
+                recreate = columns.Count != 2 ||
+                           !columns.Contains("save_date", StringComparer.OrdinalIgnoreCase) ||
+                           !columns.Contains("last_index", StringComparer.OrdinalIgnoreCase);
+            }
+        }
+
+        if (recreate)
+        {
+            using var drop = connection.CreateCommand();
+            drop.CommandText = "DROP TABLE image_save_counters;";
+            drop.ExecuteNonQuery();
+        }
+
+        using var create = connection.CreateCommand();
+        create.CommandText = """
+            CREATE TABLE IF NOT EXISTS image_save_counters (
+                save_date TEXT PRIMARY KEY,
+                last_index INTEGER NOT NULL DEFAULT 0
+            );
+            """;
+        create.ExecuteNonQuery();
     }
 
     private static void EnsureColumn(SqliteConnection connection, string column, string type)
@@ -361,18 +403,14 @@ public sealed class DatabaseService : IDisposable, IImageSaveIndexStore
         }
     }
 
-    /// <summary>读取某目录某天的图片保存序号；没有记录时返回 0。</summary>
-    public async Task<int> GetImageSaveIndexAsync(string saveDir, DateOnly saveDate)
+    /// <summary>读取某天的图片保存序号；没有记录时返回 0。</summary>
+    public async Task<int> GetImageSaveIndexAsync(DateOnly saveDate)
     {
         await _gate.WaitAsync();
         try
         {
             using var cmd = _connection.CreateCommand();
-            cmd.CommandText = """
-                SELECT last_index FROM image_save_counters
-                WHERE save_dir = $dir AND save_date = $date;
-                """;
-            cmd.Parameters.AddWithValue("$dir", saveDir);
+            cmd.CommandText = "SELECT last_index FROM image_save_counters WHERE save_date = $date;";
             cmd.Parameters.AddWithValue("$date", saveDate.ToString("yyyy-MM-dd"));
             object? value = await cmd.ExecuteScalarAsync();
             return value is long n ? (int)n : 0;
@@ -383,8 +421,8 @@ public sealed class DatabaseService : IDisposable, IImageSaveIndexStore
         }
     }
 
-    /// <summary>把某目录某天的序号推进到指定值（只增不减，避免外部状态回退导致重号）。</summary>
-    public async Task SetImageSaveIndexAsync(string saveDir, DateOnly saveDate, int index)
+    /// <summary>把某天的序号推进到指定值（只增不减，避免外部状态回退导致重号）。</summary>
+    public async Task SetImageSaveIndexAsync(DateOnly saveDate, int index)
     {
         if (index <= 0)
         {
@@ -396,12 +434,9 @@ public sealed class DatabaseService : IDisposable, IImageSaveIndexStore
         {
             using var cmd = _connection.CreateCommand();
             cmd.CommandText = """
-                INSERT INTO image_save_counters (save_dir, save_date, last_index)
-                VALUES ($dir, $date, $index)
-                ON CONFLICT(save_dir, save_date)
-                DO UPDATE SET last_index = MAX(last_index, excluded.last_index);
+                INSERT INTO image_save_counters (save_date, last_index) VALUES ($date, $index)
+                ON CONFLICT(save_date) DO UPDATE SET last_index = MAX(last_index, excluded.last_index);
                 """;
-            cmd.Parameters.AddWithValue("$dir", saveDir);
             cmd.Parameters.AddWithValue("$date", saveDate.ToString("yyyy-MM-dd"));
             cmd.Parameters.AddWithValue("$index", index);
             await cmd.ExecuteNonQueryAsync();
@@ -412,13 +447,7 @@ public sealed class DatabaseService : IDisposable, IImageSaveIndexStore
         }
     }
 
-    /// <inheritdoc />
-    Task<int> IImageSaveIndexStore.GetIndexAsync(string saveDir, DateOnly saveDate) =>
-        GetImageSaveIndexAsync(saveDir, saveDate);
-
-    /// <inheritdoc />
-    Task IImageSaveIndexStore.SetIndexAsync(string saveDir, DateOnly saveDate, int index) =>
-        SetImageSaveIndexAsync(saveDir, saveDate, index);
+    // 序号方法直接满足 IImageSaveIndexStore（同名同签名），无需额外转发。
 
     public async Task TogglePinAsync(long id, bool pinned)
     {

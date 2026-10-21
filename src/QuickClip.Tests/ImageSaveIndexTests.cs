@@ -9,22 +9,21 @@ public class ImageSaveIndexTests
 {
     private sealed class MemoryStore : IImageSaveIndexStore
     {
-        private readonly Dictionary<(string Dir, DateOnly Date), int> _map = new();
+        private readonly Dictionary<DateOnly, int> _map = new();
 
         public int Reads { get; private set; }
         public int Writes { get; private set; }
 
-        public Task<int> GetIndexAsync(string saveDir, DateOnly saveDate)
+        public Task<int> GetImageSaveIndexAsync(DateOnly saveDate)
         {
             Reads++;
-            return Task.FromResult(_map.TryGetValue((saveDir, saveDate), out int v) ? v : 0);
+            return Task.FromResult(_map.TryGetValue(saveDate, out int v) ? v : 0);
         }
 
-        public Task SetIndexAsync(string saveDir, DateOnly saveDate, int index)
+        public Task SetImageSaveIndexAsync(DateOnly saveDate, int index)
         {
             Writes++;
-            var key = (saveDir, saveDate);
-            _map[key] = Math.Max(_map.TryGetValue(key, out int v) ? v : 0, index);
+            _map[saveDate] = Math.Max(_map.TryGetValue(saveDate, out int v) ? v : 0, index);
             return Task.CompletedTask;
         }
     }
@@ -170,15 +169,14 @@ public class ImageSaveIndexTests
         {
             string source = await PrepareSourceAsync(dir);
             var store = new MemoryStore();
-            string dirKey = ImageSaveService.NormalizeDirKey(saveDir);
             var today = DateOnly.FromDateTime(DateTime.Now);
 
             // 昨天用了 5 个号
-            await store.SetIndexAsync(dirKey, today.AddDays(-1), 5);
-            Assert.Equal(5, await store.GetIndexAsync(dirKey, today.AddDays(-1)));
+            await store.SetImageSaveIndexAsync(today.AddDays(-1), 5);
+            Assert.Equal(5, await store.GetImageSaveIndexAsync(today.AddDays(-1)));
 
             // 今天没有记录，第一次保存从 1 开始
-            Assert.Equal(0, await store.GetIndexAsync(dirKey, today));
+            Assert.Equal(0, await store.GetImageSaveIndexAsync(today));
             string next = await ImageSaveService.SaveWithIndexAsync(
                 source, saveDir, "QC_yyyyMMdd_{index}", Item(), store);
             Assert.Equal($"QC_{DateTime.Now:yyyyMMdd}_1.png", Path.GetFileName(next));
@@ -212,12 +210,26 @@ public class ImageSaveIndexTests
     }
 
     [Fact]
-    public void Directory_key_is_case_insensitive_and_ignores_trailing_separator()
+    public async Task Changing_the_save_directory_keeps_the_daily_counter()
     {
-        string a = ImageSaveService.NormalizeDirKey(@"C:\Shots");
-        string b = ImageSaveService.NormalizeDirKey(@"c:\shots\");
+        string dir = TempDir();
+        string first = Path.Combine(dir, "a");
+        string second = Path.Combine(dir, "b");
+        try
+        {
+            string source = await PrepareSourceAsync(dir);
+            var store = new MemoryStore();
 
-        Assert.Equal(a, b);
+            await ImageSaveService.SaveWithIndexAsync(source, first, "QC_yyyyMMdd_{index}", Item(), store);
+            string moved = await ImageSaveService.SaveWithIndexAsync(source, second, "QC_yyyyMMdd_{index}", Item(), store);
+
+            // 序号与目录无关：换目录继续当日计数
+            Assert.Equal($"QC_{DateTime.Now:yyyyMMdd}_2.png", Path.GetFileName(moved));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
     }
 
     [Fact]

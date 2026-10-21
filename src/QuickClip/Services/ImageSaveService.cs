@@ -7,13 +7,11 @@ using QuickClip.Models;
 
 namespace QuickClip.Services;
 
-/// <summary>
-/// 图片保存序号存储（由数据库实现）。序号只增不减，按「目录 + 日期」每天从 1 开始。
-/// </summary>
+/// <summary>图片保存序号存储：按日期取号，每天从 1 开始。</summary>
 public interface IImageSaveIndexStore
 {
-    Task<int> GetIndexAsync(string saveDir, DateOnly saveDate);
-    Task SetIndexAsync(string saveDir, DateOnly saveDate, int index);
+    Task<int> GetImageSaveIndexAsync(DateOnly saveDate);
+    Task SetImageSaveIndexAsync(DateOnly saveDate, int index);
 }
 
 /// <summary>
@@ -95,8 +93,7 @@ public static class ImageSaveService
     }
 
     /// <summary>
-    /// 命名规则的「骨架」：把序号占位符替换成标记后的完整文件名（不含目录）。
-    /// 同一天/同一前缀的保存共用一条计数记录，跨天会自动从 1 重新开始。
+    /// 命名规则的「骨架」：序号占位符处换成标记，用于拼出前后缀。
     /// </summary>
     internal static (string Prefix, string Suffix) BuildIndexSkeleton(
         string? pattern,
@@ -119,7 +116,7 @@ public static class ImageSaveService
         string prefix = skeleton[..slot];
         string suffix = skeleton[(slot + IndexMarker.Length)..];
 
-        // 骨架里若自带图片扩展名，去掉后再用作比对（扩展名单独作为键的一部分）
+        // 骨架里若自带图片扩展名，去掉后再拼号（扩展名由调用方单独追加）
         string skeletonExt = Path.GetExtension(suffix);
         if (!string.IsNullOrEmpty(skeletonExt) && IsImageExtension(skeletonExt))
         {
@@ -127,48 +124,6 @@ public static class ImageSaveService
         }
 
         return (prefix, suffix);
-    }
-
-    /// <summary>
-    /// 扫描目录里符合骨架的文件，取最大序号（外部改名、换机、删库后的兜底修正）。
-    /// </summary>
-    internal static int ScanMaxIndex(string directory, string prefix, string suffix, string ext)
-    {
-        if (string.IsNullOrEmpty(directory) || !Directory.Exists(directory))
-        {
-            return 0;
-        }
-
-        int max = 0;
-        try
-        {
-            foreach (string file in Directory.EnumerateFiles(directory, "*" + ext))
-            {
-                string stem = Path.GetFileNameWithoutExtension(file);
-                if (stem.Length <= prefix.Length + suffix.Length)
-                {
-                    continue;
-                }
-
-                if (!stem.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ||
-                    !stem.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                string middle = stem[prefix.Length..^suffix.Length];
-                if (int.TryParse(middle, out int value) && value > max)
-                {
-                    max = value;
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            DebugLog.LogException("扫描图片目录推断序号失败", ex);
-        }
-
-        return max;
     }
 
     /// <summary>序号槽位标记（不会出现在用户命名规则里）。</summary>
@@ -187,13 +142,13 @@ public static class ImageSaveService
     }
 
     /// <summary>
-    /// 给「另存为」对话框生成建议文件名：按目录现有文件推算下一个序号（只读，不写计数）。
+    /// 给「另存为」对话框生成建议文件名，与快速保存共用当日序号（只读，不写计数）。
     /// </summary>
     public static string BuildSuggestedFileName(
         string? pattern,
         ClipboardItem item,
         string? sourcePath,
-        string directory)
+        int nextIndex)
     {
         string ext = NormalizeExtension(Path.GetExtension(sourcePath ?? string.Empty));
         var (prefix, suffix) = BuildIndexSkeleton(pattern, item, sourcePath, ext);
@@ -204,15 +159,14 @@ public static class ImageSaveService
             return BuildFileName(pattern, 1, item, sourcePath, ext);
         }
 
-        int next = ScanMaxIndex(directory, prefix, suffix, ext) + 1;
-        return ComposeFileName(prefix, next, suffix, ext);
+        return ComposeFileName(prefix, Math.Max(nextIndex, 1), suffix, ext);
     }
 
     /// <summary>
     /// 生成文件名（含扩展名，不含目录）。
     /// </summary>
     /// <param name="pattern">命名规则；空则用默认规则。</param>
-    /// <param name="index">序号（1 起，建议由 <see cref="ResolveNextIndex"/> 推算）。</param>
+    /// <param name="index">序号（1 起）。</param>
     /// <param name="item">条目（提供 id 等）。</param>
     /// <param name="sourcePath">源图片路径（用于取尺寸与扩展名）。</param>
     /// <param name="ext">目标扩展名（含点）。</param>
@@ -471,82 +425,14 @@ public static class ImageSaveService
         }
     }
 
-    /// <summary>在同名文件存在时追加 _2、_3…，绝不覆盖用户已有文件。</summary>
-    public static string EnsureUniquePath(string directory, string fileName)
-    {
-        string path = Path.Combine(directory, fileName);
-        if (!File.Exists(path))
-        {
-            return path;
-        }
-
-        string stem = Path.GetFileNameWithoutExtension(fileName);
-        string ext = Path.GetExtension(fileName);
-        for (int i = 2; i < 1000; i++)
-        {
-            string candidate = Path.Combine(directory, $"{stem}_{i}{ext}");
-            if (!File.Exists(candidate))
-            {
-                return candidate;
-            }
-        }
-
-        return Path.Combine(directory, $"{stem}_{DateTime.Now:HHmmssfff}{ext}");
-    }
-
     /// <summary>
-    /// 保存图片：目录不存在时自动创建，同名自动避让。
-    /// </summary>
-    /// <returns>实际落盘路径。</returns>
-    public static async Task<string> SaveAsync(
-        string sourcePath,
-        string directory,
-        string fileName,
-        CancellationToken cancellationToken = default)
-    {
-        Directory.CreateDirectory(directory);
-
-        await using var source = new FileStream(
-            sourcePath,
-            FileMode.Open,
-            FileAccess.Read,
-            FileShare.Read,
-            81920,
-            useAsync: true);
-
-        for (int attempt = 0; ; attempt++)
-        {
-            string target = EnsureUniquePath(directory, fileName);
-            try
-            {
-                await using var dest = new FileStream(
-                    target,
-                    FileMode.CreateNew,
-                    FileAccess.Write,
-                    FileShare.None,
-                    81920,
-                    useAsync: true);
-                await source.CopyToAsync(dest, cancellationToken);
-                return target;
-            }
-            catch (IOException) when (attempt < 2)
-            {
-                // 文件名在检查与创建之间被占用：清掉半成品后换个序号重试
-                TryDelete(target);
-                source.Position = 0;
-            }
-        }
-    }
-
-    /// <summary>
-    /// 带序号记忆的保存：先查序号表（O(1)），缺失或与实际文件冲突时才扫描目录兜底，
-    /// 保存成功后把序号写回表，后续保存不再触碰文件系统枚举。
+    /// 按日期取号保存：序号由计数表给出，跨天从 1 开始；同名冲突在落盘时自动顺延，绝不覆盖。
     /// </summary>
     /// <param name="sourcePath">源图片（预览缓存文件）。</param>
     /// <param name="directory">目标目录。</param>
     /// <param name="pattern">命名规则。</param>
     /// <param name="item">条目（提供 id）。</param>
-    /// <param name="counters">序号存储；为 null 时退化为每次扫描目录。</param>
+    /// <param name="counters">序号存储；为 null 时当日从 1 起算。</param>
     /// <returns>实际落盘路径。</returns>
     public static async Task<string> SaveWithIndexAsync(
         string sourcePath,
@@ -561,22 +447,11 @@ public static class ImageSaveService
         string ext = NormalizeExtension(Path.GetExtension(sourcePath));
         var (prefix, suffix) = BuildIndexSkeleton(pattern, item, sourcePath, ext);
 
-        // 序号按「目录 + 日期」记账：每天从 1 重新开始，与命名规则解耦（改规则不会丢记忆）
-        string saveDir = NormalizeDirKey(directory);
+        // 序号按日期记账：每天从 1 重新开始
         DateOnly today = DateOnly.FromDateTime(DateTime.Now);
 
-        int last = counters == null ? 0 : await counters.GetIndexAsync(saveDir, today).ConfigureAwait(false);
+        int last = counters == null ? 0 : await counters.GetImageSaveIndexAsync(today).ConfigureAwait(false);
         int candidate = last + 1;
-
-        // 序号表缺失，或算出来的名字已被外部文件占用：扫描目录修正一次
-        if (last <= 0 || File.Exists(Path.Combine(directory, ComposeFileName(prefix, candidate, suffix, ext))))
-        {
-            int scanned = ScanMaxIndex(directory, prefix, suffix, ext);
-            if (scanned + 1 > candidate)
-            {
-                candidate = scanned + 1;
-            }
-        }
 
         string target = await SaveWithUniqueSuffixAsync(sourcePath, directory, prefix, suffix, ext, candidate, cancellationToken)
             .ConfigureAwait(false);
@@ -587,29 +462,28 @@ public static class ImageSaveService
             int used = ExtractIndex(Path.GetFileNameWithoutExtension(target), prefix, suffix);
             if (used > 0)
             {
-                await counters.SetIndexAsync(saveDir, today, used).ConfigureAwait(false);
+                await counters.SetImageSaveIndexAsync(today, used).ConfigureAwait(false);
             }
         }
 
         return target;
     }
 
-    /// <summary>目录键：去尾部分隔符并统一小写，让同一目录的不同写法命中同一行。</summary>
-    internal static string NormalizeDirKey(string directory)
+    /// <summary>从用户最终选定的路径反推序号；命名不符合规则时返回 0。</summary>
+    public static int ExtractIndexFromPath(
+        string filePath,
+        string? pattern,
+        ClipboardItem item,
+        string? sourcePath)
     {
-        string dir = string.IsNullOrWhiteSpace(directory) ? string.Empty : directory.Trim();
-        try
+        string ext = NormalizeExtension(Path.GetExtension(filePath));
+        var (prefix, suffix) = BuildIndexSkeleton(pattern, item, sourcePath, ext);
+        if (string.IsNullOrEmpty(prefix) && string.IsNullOrEmpty(suffix))
         {
-            dir = Path.GetFullPath(dir);
-        }
-        catch
-        {
-            // 非法路径按原样使用
+            return 0;
         }
 
-        return dir
-            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-            .ToLowerInvariant();
+        return ExtractIndex(Path.GetFileNameWithoutExtension(filePath), prefix, suffix);
     }
 
     private static string ComposeFileName(string prefix, int index, string suffix, string ext) =>

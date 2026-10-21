@@ -98,12 +98,11 @@ public class ImageSaveCounterDatabaseTests
         {
             using var db = new DatabaseService(dbPath);
             var day = new DateOnly(2026, 10, 21);
-            const string dirKey = @"c:\shots";
 
-            await db.SetImageSaveIndexAsync(dirKey, day, 5);
-            await db.SetImageSaveIndexAsync(dirKey, day, 3);
+            await db.SetImageSaveIndexAsync(day, 5);
+            await db.SetImageSaveIndexAsync(day, 3);
 
-            Assert.Equal(5, await db.GetImageSaveIndexAsync(dirKey, day));
+            Assert.Equal(5, await db.GetImageSaveIndexAsync(day));
         }
         finally
         {
@@ -120,14 +119,13 @@ public class ImageSaveCounterDatabaseTests
         try
         {
             using var db = new DatabaseService(dbPath);
-            const string dirKey = @"c:\shots";
 
-            await db.SetImageSaveIndexAsync(dirKey, new DateOnly(2026, 10, 21), 4);
-            await db.SetImageSaveIndexAsync(dirKey, new DateOnly(2026, 10, 22), 1);
+            await db.SetImageSaveIndexAsync(new DateOnly(2026, 10, 21), 4);
+            await db.SetImageSaveIndexAsync(new DateOnly(2026, 10, 22), 1);
 
-            Assert.Equal(4, await db.GetImageSaveIndexAsync(dirKey, new DateOnly(2026, 10, 21)));
-            Assert.Equal(1, await db.GetImageSaveIndexAsync(dirKey, new DateOnly(2026, 10, 22)));
-            Assert.Equal(0, await db.GetImageSaveIndexAsync(dirKey, new DateOnly(2026, 10, 23)));
+            Assert.Equal(4, await db.GetImageSaveIndexAsync(new DateOnly(2026, 10, 21)));
+            Assert.Equal(1, await db.GetImageSaveIndexAsync(new DateOnly(2026, 10, 22)));
+            Assert.Equal(0, await db.GetImageSaveIndexAsync(new DateOnly(2026, 10, 23)));
         }
         finally
         {

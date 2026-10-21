@@ -2203,11 +2203,12 @@ public partial class MainWindow : FluentWindow
     {
         string sourcePath = vm.Item.PreviewPath!;
         string directory = ImageSaveService.ResolveDirectory(_services.Settings.ImageSaveDirectory, _services.Paths);
+        int nextIndex = await _services.Database.GetImageSaveIndexAsync(DateOnly.FromDateTime(DateTime.Now)) + 1;
         string suggestedName = ImageSaveService.BuildSuggestedFileName(
             _services.Settings.ImageFileNamePattern,
             vm.Item,
             sourcePath,
-            directory);
+            nextIndex);
 
         var dialog = new Microsoft.Win32.SaveFileDialog
         {
@@ -2225,10 +2226,39 @@ public partial class MainWindow : FluentWindow
             return;
         }
 
+        if (File.Exists(dialog.FileName) && !IsSameFile(dialog.FileName, sourcePath))
+        {
+            var overwrite = ShowOwnedModal(() => System.Windows.MessageBox.Show(
+                this,
+                $"文件已存在，要覆盖吗？\n\n{dialog.FileName}",
+                "保存图片",
+                System.Windows.MessageBoxButton.YesNo,
+                MessageBoxImage.Warning,
+                System.Windows.MessageBoxResult.No));
+
+            if (overwrite != System.Windows.MessageBoxResult.Yes)
+            {
+                return;
+            }
+        }
+
         try
         {
             File.Copy(sourcePath, dialog.FileName, true);
             await PersistSavedPathAsync(vm, dialog.FileName);
+
+            // 手动另存也占用当日序号，避免下次快速保存重复用同一个号
+            int used = ImageSaveService.ExtractIndexFromPath(
+                dialog.FileName,
+                _services.Settings.ImageFileNamePattern,
+                vm.Item,
+                sourcePath);
+            if (used > 0)
+            {
+                await _services.Database.SetImageSaveIndexAsync(
+                    DateOnly.FromDateTime(DateTime.Now), used);
+            }
+
             _viewModel.StatusText = $"已保存: {dialog.FileName}";
             DebugLog.Log($"图片已保存到本地: {dialog.FileName}");
         }
@@ -2236,6 +2266,22 @@ public partial class MainWindow : FluentWindow
         {
             DebugLog.LogException("保存图片失败", ex);
             _viewModel.StatusText = "保存失败，请检查目标路径权限";
+        }
+    }
+
+    /// <summary>判断两个路径是否指向同一文件（比较规范化后的完整路径）。</summary>
+    private static bool IsSameFile(string a, string b)
+    {
+        try
+        {
+            return string.Equals(
+                Path.GetFullPath(a),
+                Path.GetFullPath(b),
+                StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
         }
     }
 

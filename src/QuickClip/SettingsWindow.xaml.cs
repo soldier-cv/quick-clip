@@ -203,7 +203,7 @@ public partial class SettingsWindow : Window
             // 直接显示实际生效的目录：未配置时就是默认目录，避免输入框空白让人不知道图片存到哪
             ImageSaveDirBox.Text = ImageSaveService.ResolveDirectory(s.ImageSaveDirectory, _services.Paths);
             ImageFileNameBox.Text = s.ImageFileNamePattern;
-            RefreshImageSavePanel(s);
+            RefreshImageSavePanel();
             VersionText.Text = "v" + UpdateService.CurrentVersion;
 
             OcrEngineBox.SelectedIndex = s.OcrEngine switch
@@ -672,19 +672,28 @@ public partial class SettingsWindow : Window
     {
         if (_suppressUiEvents) return;
         _services.Settings.SetImageQuickSaveEnabled(QuickSaveImageCheck.IsChecked == true);
-        RefreshImageSavePanel(_services.Settings);
+        RefreshImageSavePanel();
     }
 
-    /// <summary>刷新图片保存区的示例文件名。</summary>
-    private void RefreshImageSavePanel(SettingsService settings)
+    /// <summary>刷新图片保存区的示例文件名（按当日下一个真实序号）。</summary>
+    private async void RefreshImageSavePanel()
     {
-        string preview = ImageSaveService.BuildFileName(
-            settings.ImageFileNamePattern,
-            1,
+        int next = 1;
+        try
+        {
+            next = await _services.Database.GetImageSaveIndexAsync(DateOnly.FromDateTime(DateTime.Now)) + 1;
+        }
+        catch (Exception ex)
+        {
+            DebugLog.LogException("读取图片保存序号失败", ex);
+        }
+
+        ImageSaveHintText.Text = ImageSaveService.BuildFileName(
+            _services.Settings.ImageFileNamePattern,
+            next,
             new ClipboardItem { Id = 1 },
             null,
             ".png");
-        ImageSaveHintText.Text = preview;
     }
 
     private void OnImageSaveDirLostFocus(object sender, RoutedEventArgs e)
@@ -725,7 +734,7 @@ public partial class SettingsWindow : Window
         _services.Settings.SetImageSaveDirectory(isDefault ? null : value);
         ImageSaveDirBox.Text = ImageSaveService.ResolveDirectory(
             _services.Settings.ImageSaveDirectory, _services.Paths);
-        RefreshImageSavePanel(_services.Settings);
+        RefreshImageSavePanel();
     }
 
     private void OnImageSaveDirBrowseClicked(object sender, RoutedEventArgs e)
@@ -749,7 +758,7 @@ public partial class SettingsWindow : Window
 
         ImageSaveDirBox.Text = dialog.FolderName;
         _services.Settings.SetImageSaveDirectory(dialog.FolderName);
-        RefreshImageSavePanel(_services.Settings);
+        RefreshImageSavePanel();
     }
 
     private void OnImageFileNameLostFocus(object sender, RoutedEventArgs e)
@@ -757,7 +766,7 @@ public partial class SettingsWindow : Window
         if (_suppressUiEvents) return;
         _services.Settings.SetImageFileNamePattern(ImageFileNameBox.Text);
         ImageFileNameBox.Text = _services.Settings.ImageFileNamePattern;
-        RefreshImageSavePanel(_services.Settings);
+        RefreshImageSavePanel();
     }
 
     private async void OnMaxHistoryLostFocus(object sender, RoutedEventArgs e)

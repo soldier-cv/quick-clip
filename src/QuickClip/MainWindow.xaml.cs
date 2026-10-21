@@ -2177,14 +2177,14 @@ public partial class MainWindow : FluentWindow
         {
             string sourcePath = vm.Item.PreviewPath!;
             string directory = ImageSaveService.ResolveDirectory(_services.Settings.ImageSaveDirectory, _services.Paths);
-            string fileName = ImageSaveService.BuildFileName(
-                _services.Settings.ImageFileNamePattern,
-                vm.Index,
-                vm.Item,
-                sourcePath,
-                Path.GetExtension(sourcePath));
 
-            string target = await ImageSaveService.SaveAsync(sourcePath, directory, fileName);
+            string target = await ImageSaveService.SaveWithIndexAsync(
+                sourcePath,
+                directory,
+                _services.Settings.ImageFileNamePattern,
+                vm.Item,
+                _services.Database);
+
             await PersistSavedPathAsync(vm, target);
             _viewModel.StatusText = $"已保存: {target}";
             DebugLog.Log($"图片已快速保存: {target}");
@@ -2203,18 +2203,17 @@ public partial class MainWindow : FluentWindow
     {
         string sourcePath = vm.Item.PreviewPath!;
         string directory = ImageSaveService.ResolveDirectory(_services.Settings.ImageSaveDirectory, _services.Paths);
-        string fileName = ImageSaveService.BuildFileName(
+        string suggestedName = ImageSaveService.BuildSuggestedFileName(
             _services.Settings.ImageFileNamePattern,
-            vm.Index,
             vm.Item,
             sourcePath,
-            Path.GetExtension(sourcePath));
+            directory);
 
         var dialog = new Microsoft.Win32.SaveFileDialog
         {
             Title = "保存图片",
             Filter = "PNG 图片 (*.png)|*.png|所有文件 (*.*)|*.*",
-            FileName = fileName,
+            FileName = suggestedName,
             DefaultExt = Path.GetExtension(sourcePath),
             InitialDirectory = Directory.Exists(directory) ? directory : null
         };

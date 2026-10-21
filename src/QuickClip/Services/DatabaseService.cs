@@ -5,7 +5,7 @@ using QuickClip.Models;
 namespace QuickClip.Services;
 
 /// <summary>SQLite 本地存储：剪贴板历史；超出条数上限时淘汰最旧非置顶。</summary>
-public sealed class DatabaseService : IDisposable
+public sealed class DatabaseService : IDisposable, IImageSaveIndexStore
 {
     private readonly SqliteConnection _connection;
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -120,6 +120,12 @@ public sealed class DatabaseService : IDisposable
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 );
                 CREATE INDEX IF NOT EXISTS idx_snippets_category ON snippets(category);
+
+                -- 图片保存序号：按「目录 + 命名骨架 + 扩展名」维护，避免每次保存都扫描整个目录
+                CREATE TABLE IF NOT EXISTS image_save_counters (
+                    scope_key TEXT PRIMARY KEY,
+                    last_index INTEGER NOT NULL DEFAULT 0
+                );
                 """;
             cmd.ExecuteNonQuery();
         }
@@ -352,6 +358,56 @@ public sealed class DatabaseService : IDisposable
             _gate.Release();
         }
     }
+
+    /// <summary>读取图片保存序号的当前值；没有记录时返回 0。</summary>
+    public async Task<int> GetImageSaveIndexAsync(string scopeKey)
+    {
+        await _gate.WaitAsync();
+        try
+        {
+            using var cmd = _connection.CreateCommand();
+            cmd.CommandText = "SELECT last_index FROM image_save_counters WHERE scope_key = $key;";
+            cmd.Parameters.AddWithValue("$key", scopeKey);
+            object? value = await cmd.ExecuteScalarAsync();
+            return value is long n ? (int)n : 0;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <summary>把图片保存序号推进到指定值（只增不减，避免外部状态回退导致重号）。</summary>
+    public async Task SetImageSaveIndexAsync(string scopeKey, int index)
+    {
+        if (index <= 0)
+        {
+            return;
+        }
+
+        await _gate.WaitAsync();
+        try
+        {
+            using var cmd = _connection.CreateCommand();
+            cmd.CommandText = """
+                INSERT INTO image_save_counters (scope_key, last_index) VALUES ($key, $index)
+                ON CONFLICT(scope_key) DO UPDATE SET last_index = MAX(last_index, excluded.last_index);
+                """;
+            cmd.Parameters.AddWithValue("$key", scopeKey);
+            cmd.Parameters.AddWithValue("$index", index);
+            await cmd.ExecuteNonQueryAsync();
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <inheritdoc />
+    Task<int> IImageSaveIndexStore.GetIndexAsync(string scopeKey) => GetImageSaveIndexAsync(scopeKey);
+
+    /// <inheritdoc />
+    Task IImageSaveIndexStore.SetIndexAsync(string scopeKey, int index) => SetImageSaveIndexAsync(scopeKey, index);
 
     public async Task TogglePinAsync(long id, bool pinned)
     {

@@ -285,6 +285,14 @@ public sealed class SettingsService
     /// <summary>仅记录文本/链接，忽略图片与文件。</summary>
     public bool TextOnlyCapture { get; private set; }
 
+    /// <summary>图片快速保存：开启后点击保存按钮直接按目录与命名规则落盘，不再弹另存为。</summary>
+    public bool ImageQuickSaveEnabled { get; private set; }
+
+    /// <summary>图片保存目录（空表示使用 <see cref="AppPaths.DefaultImageSaveDir"/>）。</summary>
+    public string ImageSaveDirectory { get; private set; } = string.Empty;
+
+    /// <summary>图片文件名规则（不含扩展名，支持 {index} 与常用短语占位符）。</summary>
+    public string ImageFileNamePattern { get; private set; } = ImageSaveService.DefaultFileNamePattern;
     /// <summary>暂停捕获：临时不记录任何剪贴板内容（复制密码等敏感内容时使用）。</summary>
     public bool CapturePaused { get; private set; }
 
@@ -382,6 +390,13 @@ public sealed class SettingsService
             ApplyAiAndFeatureSettingsFromDto(dto, dto.OcrEngine);
 
             TextOnlyCapture = dto.TextOnlyCapture ?? false;
+            ImageQuickSaveEnabled = dto.ImageQuickSaveEnabled ?? false;
+            ImageSaveDirectory = string.IsNullOrWhiteSpace(dto.ImageSaveDirectory)
+                ? string.Empty
+                : dto.ImageSaveDirectory.Trim();
+            ImageFileNamePattern = string.IsNullOrWhiteSpace(dto.ImageFileNamePattern)
+                ? ImageSaveService.DefaultFileNamePattern
+                : dto.ImageFileNamePattern.Trim();
             CapturePaused = dto.CapturePaused ?? false;
             AutoCheckUpdates = dto.AutoCheckUpdates ?? true;
             LastUpdateCheckUtc = ParseUtc(dto.LastUpdateCheckUtc);
@@ -471,6 +486,34 @@ public sealed class SettingsService
     {
         if (TextOnlyCapture == enabled) return;
         TextOnlyCapture = enabled;
+        Save();
+    }
+
+    /// <summary>切换图片快速保存开关并持久化。</summary>
+    public void SetImageQuickSaveEnabled(bool enabled)
+    {
+        if (ImageQuickSaveEnabled == enabled) return;
+        ImageQuickSaveEnabled = enabled;
+        Save();
+    }
+
+    /// <summary>更新图片保存目录并持久化（空值表示默认目录）。</summary>
+    public void SetImageSaveDirectory(string? directory)
+    {
+        string next = string.IsNullOrWhiteSpace(directory) ? string.Empty : directory.Trim();
+        if (string.Equals(ImageSaveDirectory, next, StringComparison.Ordinal)) return;
+        ImageSaveDirectory = next;
+        Save();
+    }
+
+    /// <summary>更新图片文件名规则并持久化（空值表示默认规则）。</summary>
+    public void SetImageFileNamePattern(string? pattern)
+    {
+        string next = string.IsNullOrWhiteSpace(pattern)
+            ? ImageSaveService.DefaultFileNamePattern
+            : pattern.Trim();
+        if (string.Equals(ImageFileNamePattern, next, StringComparison.Ordinal)) return;
+        ImageFileNamePattern = next;
         Save();
     }
 
@@ -1174,6 +1217,9 @@ public sealed class SettingsService
                 VisionApiCachedModels = AiCachedModels.Count > 0 ? AiCachedModels : null,
                 MaxHistoryItems = MaxHistoryItems,
                 TextOnlyCapture = TextOnlyCapture,
+                ImageQuickSaveEnabled = ImageQuickSaveEnabled,
+                ImageSaveDirectory = string.IsNullOrWhiteSpace(ImageSaveDirectory) ? null : ImageSaveDirectory,
+                ImageFileNamePattern = ImageFileNamePattern,
                 CapturePaused = CapturePaused,
                 AutoCheckUpdates = AutoCheckUpdates,
                 LastUpdateCheckUtc = LastUpdateCheckUtc?.ToUniversalTime().ToString("o"),
@@ -1251,6 +1297,9 @@ public sealed class SettingsData
     public string? OpenAiApiKey { get; set; }
     public int? MaxHistoryItems { get; set; }
     public bool? TextOnlyCapture { get; set; }
+    public bool? ImageQuickSaveEnabled { get; set; }
+    public string? ImageSaveDirectory { get; set; }
+    public string? ImageFileNamePattern { get; set; }
     public bool? CapturePaused { get; set; }
     public bool? AutoCheckUpdates { get; set; }
     public string? LastUpdateCheckUtc { get; set; }

@@ -101,6 +101,7 @@ public sealed class DatabaseService : IDisposable
                     html_content TEXT,
                     rtf_content TEXT,
                     preview_path TEXT,
+                    saved_path TEXT,
                     qr_content TEXT,
                     char_count INTEGER,
                     is_pinned INTEGER DEFAULT 0,
@@ -127,6 +128,7 @@ public sealed class DatabaseService : IDisposable
         EnsureColumn(connection, "html_content", "TEXT");
         EnsureColumn(connection, "rtf_content", "TEXT");
         EnsureColumn(connection, "pinned_order", "INTEGER DEFAULT 0");
+        EnsureColumn(connection, "saved_path", "TEXT");
     }
 
     private static void EnsureColumn(SqliteConnection connection, string column, string type)
@@ -279,7 +281,8 @@ public sealed class DatabaseService : IDisposable
             using var cmd = _connection.CreateCommand();
             cmd.CommandText = """
                 SELECT id, content_type, text_content, html_content, rtf_content,
-                       preview_path, qr_content, char_count, is_pinned, created_at, pinned_order
+                       preview_path, qr_content, char_count, is_pinned, created_at, pinned_order,
+                       saved_path
                 FROM clipboard_items
                 ORDER BY is_pinned DESC, pinned_order ASC, created_at DESC, id DESC
                 LIMIT $limit;
@@ -323,6 +326,24 @@ public sealed class DatabaseService : IDisposable
             using var cmd = _connection.CreateCommand();
             cmd.CommandText = "UPDATE clipboard_items SET qr_content = $qr WHERE id = $id;";
             cmd.Parameters.AddWithValue("$qr", qrContent);
+            cmd.Parameters.AddWithValue("$id", id);
+            await cmd.ExecuteNonQueryAsync();
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <summary>记录图片已保存到本地的路径（占用原保存按钮的定位入口）。</summary>
+    public async Task UpdateSavedPathAsync(long id, string? savedPath)
+    {
+        await _gate.WaitAsync();
+        try
+        {
+            using var cmd = _connection.CreateCommand();
+            cmd.CommandText = "UPDATE clipboard_items SET saved_path = $path WHERE id = $id;";
+            cmd.Parameters.AddWithValue("$path", (object?)savedPath ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$id", id);
             await cmd.ExecuteNonQueryAsync();
         }
@@ -809,7 +830,8 @@ public sealed class DatabaseService : IDisposable
             CharCount = reader.GetInt64(7),
             IsPinned = reader.GetInt64(8) != 0,
             CreatedAt = reader.IsDBNull(9) ? DateTime.Now : ParseDate(reader.GetString(9)),
-            PinnedOrder = reader.FieldCount > 10 && !reader.IsDBNull(10) ? reader.GetInt32(10) : 0
+            PinnedOrder = reader.FieldCount > 10 && !reader.IsDBNull(10) ? reader.GetInt32(10) : 0,
+            SavedPath = reader.FieldCount > 11 && !reader.IsDBNull(11) ? reader.GetString(11) : null
         };
     }
 

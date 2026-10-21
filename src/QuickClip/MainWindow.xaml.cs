@@ -12,6 +12,7 @@ using Wpf.Ui.Controls;
 using MouseEventArgs = System.Windows.Input.MouseEventArgs;
 using Point = System.Windows.Point;
 using Cursors = System.Windows.Input.Cursors;
+using MenuItem = System.Windows.Controls.MenuItem;
 
 namespace QuickClip;
 
@@ -2119,8 +2120,12 @@ public partial class MainWindow : FluentWindow
         _ = _viewModel.OcrSelectedAsync(vm);
     }
 
-    /// <summary>保存选中图片到本地（另存为对话框 + 复制预览 PNG）。</summary>
-    private void OnSaveImageClicked(object sender, RoutedEventArgs e)
+    /// <summary>
+    /// 图片保存入口：
+    /// 已有本地副本 → 在资源管理器中定位；副本不存在 → 按保存流程重新保存；
+    /// 开启快速保存 → 直接按目录与命名规则落盘，否则弹另存为对话框。
+    /// </summary>
+    private async void OnSaveImageClicked(object sender, RoutedEventArgs e)
     {
         if (GetCardViewModel(sender) is not { } vm)
         {
@@ -2135,12 +2140,83 @@ public partial class MainWindow : FluentWindow
             return;
         }
 
+        string? savedPath = vm.Item.SavedPath;
+        if (!string.IsNullOrEmpty(savedPath))
+        {
+            if (File.Exists(savedPath))
+            {
+                if (ImageSaveService.RevealInExplorer(savedPath))
+                {
+                    _viewModel.StatusText = "已在文件夹中定位";
+                }
+                else
+                {
+                    _viewModel.StatusText = "定位失败，请检查资源管理器";
+                }
+
+                return;
+            }
+
+            // 文件被移动或删除：清掉失效记录，退回保存流程
+            vm.SetSavedPath(null);
+            await _services.Database.UpdateSavedPathAsync(vm.Item.Id, null);
+        }
+
+        if (_services.Settings.ImageQuickSaveEnabled && await QuickSaveImageAsync(vm))
+        {
+            return;
+        }
+
+        await SaveImageAsAsync(vm);
+    }
+
+    /// <summary>快速保存：按默认目录与命名规则直接落盘，不弹对话框。</summary>
+    private async Task<bool> QuickSaveImageAsync(ClipboardItemViewModel vm)
+    {
+        try
+        {
+            string sourcePath = vm.Item.PreviewPath!;
+            string directory = ImageSaveService.ResolveDirectory(_services.Settings.ImageSaveDirectory, _services.Paths);
+            string fileName = ImageSaveService.BuildFileName(
+                _services.Settings.ImageFileNamePattern,
+                vm.Index,
+                vm.Item,
+                sourcePath,
+                Path.GetExtension(sourcePath));
+
+            string target = await ImageSaveService.SaveAsync(sourcePath, directory, fileName);
+            await PersistSavedPathAsync(vm, target);
+            _viewModel.StatusText = $"已保存: {target}";
+            DebugLog.Log($"图片已快速保存: {target}");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            DebugLog.LogException("快速保存图片失败", ex);
+            _viewModel.StatusText = "快速保存失败，请检查保存目录权限";
+            return false;
+        }
+    }
+
+    /// <summary>另存为：用户自选路径；保存成功后同样切换为定位按钮。</summary>
+    private async Task SaveImageAsAsync(ClipboardItemViewModel vm)
+    {
+        string sourcePath = vm.Item.PreviewPath!;
+        string directory = ImageSaveService.ResolveDirectory(_services.Settings.ImageSaveDirectory, _services.Paths);
+        string fileName = ImageSaveService.BuildFileName(
+            _services.Settings.ImageFileNamePattern,
+            vm.Index,
+            vm.Item,
+            sourcePath,
+            Path.GetExtension(sourcePath));
+
         var dialog = new Microsoft.Win32.SaveFileDialog
         {
             Title = "保存图片",
-            Filter = "PNG 图片 (*.png)|*.png|JPEG 图片 (*.jpg)|*.jpg|所有文件 (*.*)|*.*",
-            FileName = $"QuickClip_{DateTime.Now:yyyyMMdd_HHmmss}.png",
-            DefaultExt = ".png"
+            Filter = "PNG 图片 (*.png)|*.png|所有文件 (*.*)|*.*",
+            FileName = fileName,
+            DefaultExt = Path.GetExtension(sourcePath),
+            InitialDirectory = Directory.Exists(directory) ? directory : null
         };
 
         // 模态对话框期间主窗失焦，不能让「失焦即隐」把面板藏到对话框后面
@@ -2152,7 +2228,8 @@ public partial class MainWindow : FluentWindow
 
         try
         {
-            File.Copy(previewPath, dialog.FileName, true);
+            File.Copy(sourcePath, dialog.FileName, true);
+            await PersistSavedPathAsync(vm, dialog.FileName);
             _viewModel.StatusText = $"已保存: {dialog.FileName}";
             DebugLog.Log($"图片已保存到本地: {dialog.FileName}");
         }
@@ -2160,6 +2237,20 @@ public partial class MainWindow : FluentWindow
         {
             DebugLog.LogException("保存图片失败", ex);
             _viewModel.StatusText = "保存失败，请检查目标路径权限";
+        }
+    }
+
+    /// <summary>保存成功后写入数据库并刷新卡片按钮状态。</summary>
+    private async Task PersistSavedPathAsync(ClipboardItemViewModel vm, string path)
+    {
+        vm.SetSavedPath(path);
+        try
+        {
+            await _services.Database.UpdateSavedPathAsync(vm.Item.Id, path);
+        }
+        catch (Exception ex)
+        {
+            DebugLog.LogException("记录图片保存路径失败", ex);
         }
     }
 
@@ -2673,6 +2764,42 @@ public partial class MainWindow : FluentWindow
             _ = _viewModel.AddSnippetAsync(dialog.ResultItem);
             _viewModel.StatusText = "已保存为常用短语";
         }
+    }
+
+    /// <summary>右键菜单打开前按条目类型裁剪：仅图片显示「另存为图片…」。</summary>
+    private void OnItemContextMenuOpening(object sender, ContextMenuEventArgs e)
+    {
+        if (sender is not FrameworkElement element || element.ContextMenu is not { } menu)
+        {
+            return;
+        }
+
+        bool isImage = element.DataContext is ClipboardItemViewModel { IsImage: true };
+        foreach (var item in menu.Items)
+        {
+            if (item is MenuItem { Tag: "SaveImage" } saveItem)
+            {
+                saveItem.Visibility = isImage ? Visibility.Visible : Visibility.Collapsed;
+            }
+        }
+    }
+
+    /// <summary>右键「另存为图片…」：始终走另存为，不受快速保存开关影响。</summary>
+    private void OnMenuSaveImageAsClicked(object sender, RoutedEventArgs e)
+    {
+        if (ResolveMenuTarget(sender) is not { IsImage: true } vm)
+        {
+            return;
+        }
+
+        string? previewPath = vm.Item.PreviewPath;
+        if (string.IsNullOrEmpty(previewPath) || !File.Exists(previewPath))
+        {
+            _viewModel.StatusText = "图片文件已不存在，无法保存";
+            return;
+        }
+
+        _ = SaveImageAsAsync(vm);
     }
 
     private void OnMenuStickyClicked(object sender, RoutedEventArgs e)

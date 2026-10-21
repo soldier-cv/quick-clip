@@ -129,6 +129,29 @@ public sealed class ClipboardItemViewModel : INotifyPropertyChanged
 
     public bool IsImage => Item.ContentType == ClipboardContentType.Image;
 
+    /// <summary>是否已有本地保存副本（用于把保存按钮切成定位按钮）。</summary>
+    public bool HasSavedCopy => IsImage && !string.IsNullOrEmpty(Item.SavedPath);
+
+    /// <summary>保存按钮图标：未保存为下载，已保存为在文件夹中定位。</summary>
+    public SymbolRegular SaveActionIcon =>
+        HasSavedCopy ? SymbolRegular.FolderOpen24 : SymbolRegular.ArrowDownload24;
+
+    public string SaveActionToolTip => HasSavedCopy ? "在文件夹中定位" : "保存到本地";
+
+    /// <summary>记录保存结果并通知绑定刷新（按钮图标、提示随之切换）。</summary>
+    public void SetSavedPath(string? savedPath)
+    {
+        if (string.Equals(Item.SavedPath, savedPath, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        Item.SavedPath = savedPath;
+        OnPropertyChanged(nameof(HasSavedCopy));
+        OnPropertyChanged(nameof(SaveActionIcon));
+        OnPropertyChanged(nameof(SaveActionToolTip));
+    }
+
     private bool _isOcrBusy;
 
     /// <summary>该条目正在 OCR，按钮禁用并显示环状等待，识别结束才恢复。</summary>
@@ -317,11 +340,19 @@ public sealed class ClipboardItemViewModel : INotifyPropertyChanged
     {
         bool pinnedChanged = Item.IsPinned != item.IsPinned;
         bool qrChanged = Item.QrContent != item.QrContent;
+        bool savedChanged = !string.Equals(Item.SavedPath, item.SavedPath, StringComparison.OrdinalIgnoreCase);
         Item = item;
 
         if (pinnedChanged)
         {
             OnPropertyChanged(nameof(IsPinned));
+        }
+
+        if (savedChanged)
+        {
+            OnPropertyChanged(nameof(HasSavedCopy));
+            OnPropertyChanged(nameof(SaveActionIcon));
+            OnPropertyChanged(nameof(SaveActionToolTip));
         }
 
         if (qrChanged)

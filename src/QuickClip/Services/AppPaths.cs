@@ -12,6 +12,9 @@ public sealed class AppPaths
     public string DatabasePath { get; }
     public string SettingsPath { get; }
 
+    /// <summary>图片快速保存的默认目录：应用数据目录下的 images，绝不与预览缓存混用。</summary>
+    public string DefaultImageSaveDir { get; }
+
     public AppPaths()
     {
         BaseDir = Path.Combine(
@@ -22,6 +25,7 @@ public sealed class AppPaths
         OcrDir = Path.Combine(BaseDir, "ocr");
         DatabasePath = Path.Combine(BaseDir, "quickclip.db");
         SettingsPath = Path.Combine(BaseDir, "settings.json");
+        DefaultImageSaveDir = Path.Combine(BaseDir, "images");
     }
 
     public void EnsureCreated()

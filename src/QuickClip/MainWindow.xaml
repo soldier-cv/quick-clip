@@ -405,7 +405,8 @@
                             SnapsToDevicePixels="True"
                             RenderTransformOrigin="0.5,0.5"
                             MouseEnter="OnCardMouseEnter"
-                            MouseLeave="OnCardMouseLeave">
+                            MouseLeave="OnCardMouseLeave"
+                            ContextMenuOpening="OnItemContextMenuOpening">
                         <Border.ContextMenu>
                             <ContextMenu Background="{DynamicResource Theme.Card}"
                                          BorderBrush="{DynamicResource Theme.Border}"
@@ -430,6 +431,13 @@
                                 <MenuItem Header="存为常用短语…" Click="OnMenuSaveAsSnippetClicked">
                                     <MenuItem.Icon>
                                         <ui:SymbolIcon Symbol="Bookmark24" FontSize="14" />
+                                    </MenuItem.Icon>
+                                </MenuItem>
+                                <MenuItem Tag="SaveImage"
+                                          Header="另存为图片…"
+                                          Click="OnMenuSaveImageAsClicked">
+                                    <MenuItem.Icon>
+                                        <ui:SymbolIcon Symbol="ArrowDownload24" FontSize="14" />
                                     </MenuItem.Icon>
                                 </MenuItem>
                                 <MenuItem Header="贴图置顶到桌面" Click="OnMenuStickyClicked">
@@ -729,10 +737,10 @@
                                                    Padding="5"
                                                    Margin="2,0"
                                                    CornerRadius="6"
-                                                   ToolTip="保存到本地"
+                                                   ToolTip="{Binding SaveActionToolTip}"
                                                    Visibility="{Binding IsImage, Converter={StaticResource BoolToVis}}"
                                                    Click="OnSaveImageClicked">
-                                            <ui:SymbolIcon Symbol="ArrowDownload24" FontSize="15" />
+                                            <ui:SymbolIcon Symbol="{Binding SaveActionIcon}" FontSize="15" />
                                         </ui:Button>
                                         <ui:Button Appearance="Transparent"
                                                    Padding="5"

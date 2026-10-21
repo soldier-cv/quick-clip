@@ -198,6 +198,11 @@ public partial class SettingsWindow : Window
             AutoCheckUpdatesCheck.IsChecked = s.AutoCheckUpdates;
             TextOnlyCheck.IsChecked = s.TextOnlyCapture;
             MaxHistoryBox.Text = s.MaxHistoryItems.ToString();
+
+            QuickSaveImageCheck.IsChecked = s.ImageQuickSaveEnabled;
+            ImageSaveDirBox.Text = s.ImageSaveDirectory;
+            ImageFileNameBox.Text = s.ImageFileNamePattern;
+            RefreshImageSavePanel(s);
             VersionText.Text = "v" + UpdateService.CurrentVersion;
 
             OcrEngineBox.SelectedIndex = s.OcrEngine switch
@@ -659,6 +664,95 @@ public partial class SettingsWindow : Window
     {
         if (_suppressUiEvents) return;
         _services.Settings.SetTextOnlyCapture(TextOnlyCheck.IsChecked == true);
+    }
+
+    /// <summary>切换快速保存；关闭时仍保留目录与规则配置，便于下次直接启用。</summary>
+    private void OnQuickSaveImageToggled(object sender, RoutedEventArgs e)
+    {
+        if (_suppressUiEvents) return;
+        _services.Settings.SetImageQuickSaveEnabled(QuickSaveImageCheck.IsChecked == true);
+        RefreshImageSavePanel(_services.Settings);
+    }
+
+    /// <summary>刷新图片保存区的示例文件名。</summary>
+    private void RefreshImageSavePanel(SettingsService settings)
+    {
+        string defaultDir = ImageSaveService.ResolveDirectory(null, _services.Paths);
+        ImageSaveDirBox.ToolTip = string.IsNullOrWhiteSpace(settings.ImageSaveDirectory)
+            ? $"默认目录：{defaultDir}"
+            : "留空使用默认目录";
+
+        string preview = ImageSaveService.BuildFileName(
+            settings.ImageFileNamePattern,
+            1,
+            new ClipboardItem { Id = 1 },
+            null,
+            ".png");
+        ImageSaveHintText.Text = string.IsNullOrWhiteSpace(settings.ImageSaveDirectory)
+            ? $"{preview}   ·   默认目录 {defaultDir}"
+            : preview;
+    }
+
+    private void OnImageSaveDirLostFocus(object sender, RoutedEventArgs e)
+    {
+        if (_suppressUiEvents) return;
+        string value = ImageSaveDirBox.Text.Trim();
+        if (value.Length > 0)
+        {
+            string expanded;
+            try
+            {
+                expanded = Environment.ExpandEnvironmentVariables(value);
+            }
+            catch
+            {
+                expanded = value;
+            }
+
+            if (!Path.IsPathRooted(expanded))
+            {
+                // 相对路径会随启动目录漂移：保留原值并提示，不落盘错误配置
+                ImageSaveDirBox.Text = _services.Settings.ImageSaveDirectory;
+                ImageSaveHintText.Text = "请填写绝对路径";
+                return;
+            }
+        }
+
+        _services.Settings.SetImageSaveDirectory(value);
+        ImageSaveDirBox.Text = _services.Settings.ImageSaveDirectory;
+        RefreshImageSavePanel(_services.Settings);
+    }
+
+    private void OnImageSaveDirBrowseClicked(object sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        var dialog = new OpenFolderDialog
+        {
+            Title = "选择图片保存目录"
+        };
+
+        string current = ImageSaveService.ResolveDirectory(_services.Settings.ImageSaveDirectory, _services.Paths);
+        if (Directory.Exists(current))
+        {
+            dialog.InitialDirectory = current;
+        }
+
+        if (dialog.ShowDialog(this) != true || string.IsNullOrWhiteSpace(dialog.FolderName))
+        {
+            return;
+        }
+
+        ImageSaveDirBox.Text = dialog.FolderName;
+        _services.Settings.SetImageSaveDirectory(dialog.FolderName);
+        RefreshImageSavePanel(_services.Settings);
+    }
+
+    private void OnImageFileNameLostFocus(object sender, RoutedEventArgs e)
+    {
+        if (_suppressUiEvents) return;
+        _services.Settings.SetImageFileNamePattern(ImageFileNameBox.Text);
+        ImageFileNameBox.Text = _services.Settings.ImageFileNamePattern;
+        RefreshImageSavePanel(_services.Settings);
     }
 
     private async void OnMaxHistoryLostFocus(object sender, RoutedEventArgs e)

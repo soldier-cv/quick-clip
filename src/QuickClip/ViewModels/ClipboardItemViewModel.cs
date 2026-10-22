@@ -68,63 +68,55 @@ public sealed class ClipboardItemViewModel : INotifyPropertyChanged
         }
     }
 
-    private bool _isDragging;
-    public bool IsDragging
+    /// <summary>备注摘要。空则卡片不占这一行。</summary>
+    public string NoteText => Item.Note ?? string.Empty;
+
+    private bool _isDragSource;
+    /// <summary>这条正在被拖出，原卡片变淡，内容由浮层带着走。</summary>
+    public bool IsDragSource
     {
-        get => _isDragging;
+        get => _isDragSource;
         set
         {
-            if (_isDragging != value)
+            if (_isDragSource == value)
             {
-                _isDragging = value;
-                OnPropertyChanged(nameof(IsDragging));
+                return;
             }
+
+            _isDragSource = value;
+            OnPropertyChanged();
         }
     }
 
-    private bool _isDropTargetCandidate;
-    /// <summary>是否为拖拽置顶时的有效可放置候选目标（其他置顶项）。</summary>
-    public bool IsDropTargetCandidate
+    /// <summary>拖出浮层显示正文。图片不走这里，浮层直接显示缩略图。</summary>
+    public string DragGhostText
     {
-        get => _isDropTargetCandidate;
-        set
+        get
         {
-            if (_isDropTargetCandidate != value)
+            if (Item.ContentType == ClipboardContentType.File)
             {
-                _isDropTargetCandidate = value;
-                OnPropertyChanged(nameof(IsDropTargetCandidate));
+                return PreviewText;
             }
+
+            string text = (Item.TextContent ?? string.Empty).Replace("\r\n", " ").Replace('\n', ' ').Trim();
+            return text.Length <= 48 ? text : text[..48] + "…";
         }
     }
 
-    private bool _isOutOfReorderRange;
-    /// <summary>是否超出置顶拖拽调序范围（非置顶条目在置顶调序期间半透明弱化显示）。</summary>
-    public bool IsOutOfReorderRange
-    {
-        get => _isOutOfReorderRange;
-        set
-        {
-            if (_isOutOfReorderRange != value)
-            {
-                _isOutOfReorderRange = value;
-                OnPropertyChanged(nameof(IsOutOfReorderRange));
-            }
-        }
-    }
+    public bool HasNote => !string.IsNullOrWhiteSpace(Item.Note);
 
-    private bool _isRangeBoundaryVisible;
-    /// <summary>是否在当前条目下方显示置顶拖拽范围截止分割线（置顶条目末尾）。</summary>
-    public bool IsRangeBoundaryVisible
+    /// <summary>写入备注并刷新卡片上那一行。</summary>
+    public void SetNote(string? note)
     {
-        get => _isRangeBoundaryVisible;
-        set
+        string? stored = string.IsNullOrWhiteSpace(note) ? null : note.Trim();
+        if (string.Equals(Item.Note, stored, StringComparison.Ordinal))
         {
-            if (_isRangeBoundaryVisible != value)
-            {
-                _isRangeBoundaryVisible = value;
-                OnPropertyChanged(nameof(IsRangeBoundaryVisible));
-            }
+            return;
         }
+
+        Item.Note = stored;
+        OnPropertyChanged(nameof(NoteText));
+        OnPropertyChanged(nameof(HasNote));
     }
 
     public bool IsImage => Item.ContentType == ClipboardContentType.Image;
@@ -341,11 +333,18 @@ public sealed class ClipboardItemViewModel : INotifyPropertyChanged
         bool pinnedChanged = Item.IsPinned != item.IsPinned;
         bool qrChanged = Item.QrContent != item.QrContent;
         bool savedChanged = !string.Equals(Item.SavedPath, item.SavedPath, StringComparison.OrdinalIgnoreCase);
+        bool noteChanged = !string.Equals(Item.Note, item.Note, StringComparison.Ordinal);
         Item = item;
 
         if (pinnedChanged)
         {
             OnPropertyChanged(nameof(IsPinned));
+        }
+
+        if (noteChanged)
+        {
+            OnPropertyChanged(nameof(NoteText));
+            OnPropertyChanged(nameof(HasNote));
         }
 
         if (savedChanged)

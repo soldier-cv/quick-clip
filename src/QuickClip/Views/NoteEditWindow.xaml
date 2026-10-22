@@ -1,0 +1,80 @@
+<ui:FluentWindow x:Class="QuickClip.Views.NoteEditWindow"
+                  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+                  Title="备注"
+                  Width="420" Height="280"
+                  MinWidth="360" MinHeight="240"
+                  WindowStartupLocation="CenterOwner"
+                  Topmost="True"
+                  ResizeMode="CanResizeWithGrip"
+                  ExtendsContentIntoTitleBar="True"
+                  WindowBackdropType="None"
+                  Background="{DynamicResource Theme.Panel}"
+                  BorderBrush="{DynamicResource Theme.Border}"
+                  BorderThickness="1"
+                  KeyDown="OnWindowKeyDown">
+
+    <Grid Background="{DynamicResource Theme.Panel}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <ui:TitleBar Grid.Row="0"
+                     Title="备注"
+                     ShowMinimize="False"
+                     ShowMaximize="False"
+                     ShowClose="True" />
+
+        <Grid Grid.Row="1" Margin="20,8,20,12">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <TextBlock Grid.Row="0"
+                       Margin="0,0,0,8"
+                       FontSize="11.5"
+                       Foreground="{DynamicResource Theme.TextSecondary}"
+                       Text="只用于辨认和搜索，粘贴与拖出都不带备注。" />
+
+            <TextBox x:Name="NoteBox"
+                     Grid.Row="1"
+                     AcceptsReturn="True"
+                     TextWrapping="Wrap"
+                     VerticalScrollBarVisibility="Auto"
+                     Padding="10"
+                     FontSize="12.5"
+                     Background="{DynamicResource Theme.Search}"
+                     BorderBrush="{DynamicResource Theme.Border}"
+                     BorderThickness="1"
+                     Foreground="{DynamicResource Theme.Text}"
+                     CaretBrush="{DynamicResource Theme.Text}" />
+        </Grid>
+
+        <Border Grid.Row="2"
+                Background="{DynamicResource Theme.Search}"
+                BorderBrush="{DynamicResource Theme.Border}"
+                BorderThickness="0,1,0,0"
+                Padding="20,12">
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <ui:Button Appearance="Secondary"
+                           Content="清除"
+                           Width="68"
+                           Margin="0,0,8,0"
+                           Click="OnClearClicked" />
+                <ui:Button Appearance="Secondary"
+                           Content="取消"
+                           Width="68"
+                           Margin="0,0,8,0"
+                           Click="OnCancelClicked" />
+                <ui:Button Appearance="Primary"
+                           Content="保存"
+                           Width="68"
+                           Click="OnSaveClicked" />
+            </StackPanel>
+        </Border>
+    </Grid>
+</ui:FluentWindow>

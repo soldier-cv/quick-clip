@@ -132,6 +132,7 @@ public sealed class DatabaseService : IDisposable, IImageSaveIndexStore
         EnsureColumn(connection, "rtf_content", "TEXT");
         EnsureColumn(connection, "pinned_order", "INTEGER DEFAULT 0");
         EnsureColumn(connection, "saved_path", "TEXT");
+        EnsureColumn(connection, "note", "TEXT");
     }
 
     /// <summary>
@@ -238,7 +239,7 @@ public sealed class DatabaseService : IDisposable, IImageSaveIndexStore
             {
                 using var findCmd = _connection.CreateCommand();
                 findCmd.CommandText = """
-                    SELECT id, is_pinned, qr_content
+                    SELECT id, is_pinned, qr_content, note
                     FROM clipboard_items
                     WHERE content_type = $type AND text_content = $text
                     ORDER BY id DESC LIMIT 1;
@@ -252,6 +253,7 @@ public sealed class DatabaseService : IDisposable, IImageSaveIndexStore
                     long existingId = reader.GetInt64(0);
                     bool isPinned = reader.GetInt32(1) == 1;
                     string? qr = reader.IsDBNull(2) ? null : reader.GetString(2);
+                    string? note = reader.IsDBNull(3) ? null : reader.GetString(3);
                     reader.Close();
 
                     using var updateCmd = _connection.CreateCommand();
@@ -273,6 +275,11 @@ public sealed class DatabaseService : IDisposable, IImageSaveIndexStore
                     if (!string.IsNullOrEmpty(qr))
                     {
                         item.QrContent = qr;
+                    }
+
+                    if (!string.IsNullOrEmpty(note))
+                    {
+                        item.Note = note;
                     }
 
                     return (existingId, false);
@@ -332,7 +339,7 @@ public sealed class DatabaseService : IDisposable, IImageSaveIndexStore
             cmd.CommandText = """
                 SELECT id, content_type, text_content, html_content, rtf_content,
                        preview_path, qr_content, char_count, is_pinned, created_at, pinned_order,
-                       saved_path
+                       saved_path, note
                 FROM clipboard_items
                 ORDER BY is_pinned DESC, pinned_order ASC, created_at DESC, id DESC
                 LIMIT $limit;
@@ -376,6 +383,25 @@ public sealed class DatabaseService : IDisposable, IImageSaveIndexStore
             using var cmd = _connection.CreateCommand();
             cmd.CommandText = "UPDATE clipboard_items SET qr_content = $qr WHERE id = $id;";
             cmd.Parameters.AddWithValue("$qr", qrContent);
+            cmd.Parameters.AddWithValue("$id", id);
+            await cmd.ExecuteNonQueryAsync();
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <summary>写入条目备注。空白视为清除，存 null。</summary>
+    public async Task UpdateNoteAsync(long id, string? note)
+    {
+        string? stored = string.IsNullOrWhiteSpace(note) ? null : note.Trim();
+        await _gate.WaitAsync();
+        try
+        {
+            using var cmd = _connection.CreateCommand();
+            cmd.CommandText = "UPDATE clipboard_items SET note = $note WHERE id = $id;";
+            cmd.Parameters.AddWithValue("$note", (object?)stored ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$id", id);
             await cmd.ExecuteNonQueryAsync();
         }
@@ -927,7 +953,8 @@ public sealed class DatabaseService : IDisposable, IImageSaveIndexStore
             IsPinned = reader.GetInt64(8) != 0,
             CreatedAt = reader.IsDBNull(9) ? DateTime.Now : ParseDate(reader.GetString(9)),
             PinnedOrder = reader.FieldCount > 10 && !reader.IsDBNull(10) ? reader.GetInt32(10) : 0,
-            SavedPath = reader.FieldCount > 11 && !reader.IsDBNull(11) ? reader.GetString(11) : null
+            SavedPath = reader.FieldCount > 11 && !reader.IsDBNull(11) ? reader.GetString(11) : null,
+            Note = reader.FieldCount > 12 && !reader.IsDBNull(12) ? reader.GetString(12) : null
         };
     }
 

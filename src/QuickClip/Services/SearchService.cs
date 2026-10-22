@@ -25,8 +25,11 @@ public static class SearchService
         string q = query.Trim().ToLowerInvariant();
         string text = item.TextContent ?? string.Empty;
         string lower = text.ToLowerInvariant();
+        string note = item.Note ?? string.Empty;
+        string noteLower = note.ToLowerInvariant();
 
-        if (lower.Contains(q, StringComparison.Ordinal))
+        if (lower.Contains(q, StringComparison.Ordinal) ||
+            noteLower.Contains(q, StringComparison.Ordinal))
         {
             return true;
         }
@@ -38,10 +41,17 @@ public static class SearchService
         }
 
         // 拼音首字母：sjjg 匹配「设计架构」。单字符不走这条，避免 a 命中 applesj 这类首字母串。
+        // 备注与正文同等对待，但只在汉字上取首字母。
         if (q.Length >= 2)
         {
             string textInitials = HanInitials(lower);
             if (textInitials.Contains(q, StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            string noteInitials = HanInitials(noteLower);
+            if (noteInitials.Contains(q, StringComparison.Ordinal))
             {
                 return true;
             }

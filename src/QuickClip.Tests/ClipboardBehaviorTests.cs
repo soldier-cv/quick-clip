@@ -1,3 +1,4 @@
+using System.IO;
 using QuickClip.Models;
 using QuickClip.Services;
 using Xunit;
@@ -25,6 +26,72 @@ public class ClipboardBehaviorTests
         Assert.True(SearchService.IsMatch(item, "sjjg"));
         Assert.True(SearchService.IsMatch(item, "设计"));
         Assert.False(SearchService.IsMatch(item, "a"));
+    }
+
+    [Fact]
+    public void Search_matches_note_text_and_its_pinyin_initials()
+    {
+        var item = new ClipboardItem { TextContent = "hello", Note = "周会材料" };
+
+        Assert.True(SearchService.IsMatch(item, "周会"));
+        Assert.True(SearchService.IsMatch(item, "zhcl"));
+        Assert.False(SearchService.IsMatch(item, "zz"));
+    }
+
+    [Fact]
+    public void Drag_payload_keeps_text_and_leaves_the_note_behind()
+    {
+        var data = DragPayload.Create(new ClipboardItem
+        {
+            ContentType = ClipboardContentType.Text,
+            TextContent = "只要正文",
+            Note = "这是备注"
+        });
+
+        Assert.NotNull(data);
+        Assert.Equal("只要正文", data!.GetText());
+        Assert.DoesNotContain("备注", data.GetText());
+    }
+
+    [Fact]
+    public void Drag_payload_drops_files_that_are_gone()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "quickclip-drag-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        string kept = Path.Combine(dir, "keep.txt");
+        File.WriteAllText(kept, "a");
+        try
+        {
+            var data = DragPayload.Create(new ClipboardItem
+            {
+                ContentType = ClipboardContentType.File,
+                TextContent = kept + "\r\n" + Path.Combine(dir, "missing.txt"),
+                Note = "不要带上"
+            });
+
+            Assert.NotNull(data);
+            var files = data!.GetFileDropList();
+            Assert.NotNull(files);
+            Assert.Single(files!);
+            Assert.Equal(kept, files[0]);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Drag_payload_is_empty_when_the_image_file_is_missing()
+    {
+        var data = DragPayload.Create(new ClipboardItem
+        {
+            ContentType = ClipboardContentType.Image,
+            PreviewPath = Path.Combine(Path.GetTempPath(), "quickclip-missing-" + Guid.NewGuid().ToString("N") + ".png"),
+            Note = "备注"
+        });
+
+        Assert.Null(data);
     }
 
     [Fact]

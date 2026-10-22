@@ -49,17 +49,11 @@ public partial class MainWindow : FluentWindow
     /// <summary>上次 IME 组合结束的时间戳（TickCount64），用于短暂过滤选词上屏的回车。</summary>
     private long _lastImeCompositionEndTicks;
 
-    /// <summary>置顶条目长按拖拽调序计时器与状态。</summary>
-    private DispatcherTimer? _longPressDragTimer;
-    private ClipboardItemViewModel? _longPressCandidate;
-    private Point _longPressStartPos;
-    private double _dragGrabOffsetY;
-    private double _dragMinY;
-    private double _dragMaxY;
-    private double _dragBoundaryBottomY;
-    private bool _isDragReordering;
-    private ClipboardItemViewModel? _draggedItem;
-    private bool _hasOrderChanged;
+    /// <summary>按住卡片准备拖出：超过阈值才真正交给目标窗口，短按仍是单击选中。</summary>
+    private ClipboardItemViewModel? _dragOutCandidate;
+    private Point _dragOutStartPos;
+    private bool _isDragOutInProgress;
+    private Views.DragGhostWindow? _dragGhost;
 
     /// <summary>视图模型（设置窗口切换数据库后需要刷新列表）。</summary>
     public MainViewModel ViewModel => _viewModel;
@@ -357,8 +351,6 @@ public partial class MainWindow : FluentWindow
 
     private void OnWindowDeactivated(object? sender, EventArgs e)
     {
-        CancelLongPressDrag();
-
         // 热键唤起时前台锁常让 Activate 失败，WPF 会立刻打 Deactivated。
         // 宽限内不藏，否则用户只看到托盘、点图标之后 Win+V 才可用。
         if (DateTime.UtcNow < _suppressDeactivateUntil)
@@ -608,7 +600,7 @@ public partial class MainWindow : FluentWindow
 
     private void HideWindow()
     {
-        CancelLongPressDrag();
+        _dragOutCandidate = null;
         _hotkeyTopmostTimer?.Stop();
         PreviewPopup.IsOpen = false;
         _viewModel.SuppressAutoSelect = false;
@@ -801,13 +793,6 @@ public partial class MainWindow : FluentWindow
         var modifiers = Keyboard.Modifiers &
                         (ModifierKeys.Control | ModifierKeys.Alt | ModifierKeys.Shift | ModifierKeys.Windows);
         var settings = _services.Settings;
-
-        if (_isDragReordering && key == Key.Escape)
-        {
-            CancelLongPressDrag();
-            e.Handled = true;
-            return;
-        }
 
         // 面板快捷键一律读设置（与帮助气泡、设置页同一套绑定）
         if (QrOverlay.Visibility == Visibility.Visible ||
@@ -1131,7 +1116,7 @@ public partial class MainWindow : FluentWindow
             return;
         }
 
-        if (_isDragReordering)
+        if (_isDragOutInProgress)
         {
             return;
         }
@@ -1460,354 +1445,113 @@ public partial class MainWindow : FluentWindow
     }
 
     /// <summary>
-    /// 鼠标左键按下时启动 300ms 长按检测或按住拖动 > 10px 即刻抓起；仅对无搜索、全量列表下的置顶项生效。
-    /// 未满 300ms 松开不影响单击选中与双击粘贴。
+    /// 按下卡片时记下候选。按钮上的点击不拖；没移过阈值就松开，仍是单击选中、双击粘贴。
     /// </summary>
     private void OnItemListPreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        CancelLongPressDrag();
+        _dragOutCandidate = null;
 
         if (e.OriginalSource is not DependencyObject source)
         {
             return;
         }
 
-        // 点击在按钮（复制、删除、置顶等）上：不启动长按拖拽
         if (FindAncestor<System.Windows.Controls.Button>(source) != null)
         {
             return;
         }
 
-        // 仅在无搜索、全量历史模式下支持置顶拖动调序
-        if (!string.IsNullOrWhiteSpace(_viewModel.SearchText) || _viewModel.FilterIndex != 0)
+        if (FindAncestor<ListBoxItem>(source)?.DataContext is ClipboardItemViewModel vm)
         {
-            return;
-        }
-
-        int pinnedCount = _viewModel.Items.Count(x => x.IsPinned);
-        if (pinnedCount < 2)
-        {
-            return;
-        }
-
-        var listBoxItem = FindAncestor<ListBoxItem>(source);
-        if (listBoxItem?.DataContext is ClipboardItemViewModel vm && vm.IsPinned)
-        {
-            _longPressCandidate = vm;
-            _longPressStartPos = e.GetPosition(ItemList);
-
-            _longPressDragTimer?.Stop();
-            _longPressDragTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
-            _longPressDragTimer.Tick += OnLongPressDragTimerTick;
-            _longPressDragTimer.Start();
+            _dragOutCandidate = vm;
+            _dragOutStartPos = e.GetPosition(ItemList);
         }
     }
 
     /// <summary>
-    /// 长按 300ms 触发：抓起卡片进入浮动拖拽模式，光标切换为十字手势，显示置顶有效范围。
-    /// </summary>
-    private void OnLongPressDragTimerTick(object? sender, EventArgs e)
-    {
-        _longPressDragTimer?.Stop();
-
-        if (_longPressCandidate == null || Mouse.LeftButton != MouseButtonState.Pressed)
-        {
-            CancelLongPressDrag();
-            return;
-        }
-
-        StartDragReordering();
-    }
-
-    /// <summary>
-    /// 抓起卡片并进入置顶调序模式：浮动卡片呈现并跟随鼠标垂直移动。
-    /// </summary>
-    private void StartDragReordering()
-    {
-        _longPressDragTimer?.Stop();
-
-        if (_longPressCandidate == null || Mouse.LeftButton != MouseButtonState.Pressed)
-        {
-            CancelLongPressDrag();
-            return;
-        }
-
-        _isDragReordering = true;
-        _draggedItem = _longPressCandidate;
-        _hasOrderChanged = false;
-
-        PreviewPopup.IsOpen = false;
-        Mouse.OverrideCursor = Cursors.SizeAll;
-        ItemList.CaptureMouse();
-
-        // 浮动悬浮卡片初始化：计算起始位置并同步显示，跟随鼠标
-        if (ItemList.ItemContainerGenerator.ContainerFromItem(_draggedItem) is ListBoxItem container)
-        {
-            var card = FindVisualChildByName(container, "ItemCard") ?? (FrameworkElement)container;
-            Point itemPos = card.TranslatePoint(new Point(0, 0), ItemList);
-            _dragGrabOffsetY = _longPressStartPos.Y - itemPos.Y;
-            FloatingDragTransform.Y = itemPos.Y;
-            FloatingDragCard.Width = card.ActualWidth > 0 ? card.ActualWidth : container.ActualWidth;
-            FloatingDragCard.DataContext = _draggedItem;
-            FloatingDragCard.Visibility = Visibility.Visible;
-        }
-
-        _viewModel.UpdateReorderVisualStates(_draggedItem);
-        ItemList.UpdateLayout();
-        UpdateDragBounds();
-        _viewModel.StatusText = "已抓起置顶项，拖动可调换置顶顺序";
-    }
-
-    /// <summary>
-    /// 测量置顶项有效移动边界（Y 轴最小/最大允许位置及截止线底部位置），严防拖出置顶区域。
-    /// </summary>
-    private void UpdateDragBounds()
-    {
-        int pinnedCount = _viewModel.Items.Count(x => x.IsPinned);
-        if (pinnedCount <= 0)
-        {
-            return;
-        }
-
-        if (ItemList.ItemContainerGenerator.ContainerFromIndex(0) is ListBoxItem firstItem)
-        {
-            var firstCard = FindVisualChildByName(firstItem, "ItemCard");
-            Point firstPos = (firstCard ?? (FrameworkElement)firstItem).TranslatePoint(new Point(0, 0), ItemList);
-            _dragMinY = firstPos.Y;
-        }
-
-        if (ItemList.ItemContainerGenerator.ContainerFromIndex(pinnedCount - 1) is ListBoxItem lastItem)
-        {
-            var lastCard = FindVisualChildByName(lastItem, "ItemCard");
-            Point lastPos = (lastCard ?? (FrameworkElement)lastItem).TranslatePoint(new Point(0, 0), ItemList);
-            double lastHeight = (lastCard ?? (FrameworkElement)lastItem).ActualHeight;
-            double floatingHeight = FloatingDragCard.ActualHeight > 0 ? FloatingDragCard.ActualHeight : lastHeight;
-
-            // 最后一个卡片的底部即为置顶卡片区域底部（下方紧跟截止分割线）
-            double cardBottom = lastPos.Y + lastHeight;
-            _dragBoundaryBottomY = cardBottom;
-            _dragMaxY = Math.Max(_dragMinY, cardBottom - floatingHeight);
-        }
-    }
-
-    /// <summary>
-    /// 几何计算当前被拖拽卡片所处的最佳置顶插槽索引。
-    /// 依据其它置顶项构建稳定的虚拟插槽区间，中点切分，彻底杜绝指针盲区与位置震颤。
-    /// </summary>
-    private int CalculateBestPinnedSlot(double clampedY)
-    {
-        if (_draggedItem == null) return -1;
-
-        int pinnedCount = _viewModel.Items.Count(x => x.IsPinned);
-        if (pinnedCount <= 1) return -1;
-
-        // 获取除被拖拽项之外的其他置顶项（保持其相对顺序）
-        var otherPinnedVms = _viewModel.Items
-            .Take(pinnedCount)
-            .Where(x => !ReferenceEquals(x, _draggedItem))
-            .ToList();
-
-        if (otherPinnedVms.Count != pinnedCount - 1)
-        {
-            return -1;
-        }
-
-        // 计算所有有效插槽对应的期望顶部位置
-        var slotTops = new double[pinnedCount];
-        slotTops[0] = _dragMinY;
-
-        for (int i = 0; i < otherPinnedVms.Count; i++)
-        {
-            double otherHeight = 65.0;
-            if (ItemList.ItemContainerGenerator.ContainerFromItem(otherPinnedVms[i]) is DependencyObject container)
-            {
-                var card = FindVisualChildByName(container, "ItemCard");
-                if (card != null && card.ActualHeight > 0)
-                {
-                    otherHeight = card.ActualHeight + 8.0; // 4px top + 4px bottom margin
-                }
-                else if (container is FrameworkElement fe && fe.ActualHeight > 0)
-                {
-                    otherHeight = fe.ActualHeight;
-                }
-            }
-
-            slotTops[i + 1] = slotTops[i] + otherHeight;
-        }
-
-        // 判定 clampedY 落在哪个插槽区间
-        int bestSlot = 0;
-        for (int s = 0; s < pinnedCount - 1; s++)
-        {
-            double mid = (slotTops[s] + slotTops[s + 1]) / 2.0;
-            if (clampedY > mid)
-            {
-                bestSlot = s + 1;
-            }
-        }
-
-        return bestSlot;
-    }
-
-    /// <summary>
-    /// 鼠标移动：未抓起时若按住移动 > 8px 判定为拖拽意图并即刻抓起；抓起后悬浮卡片严格在置顶范围内跟随鼠标垂直移动并让位。
+    /// 按住移动超过 8px 才开始拖出。拖放交给目标窗口，不额外模拟粘贴。
+    /// DoDragDrop 会让主窗失焦，期间面板保持打开。
     /// </summary>
     private void OnItemListPreviewMouseMove(object sender, MouseEventArgs e)
     {
-        if (e.LeftButton != MouseButtonState.Pressed)
-        {
-            if (_isDragReordering || _longPressDragTimer?.IsEnabled == true)
-            {
-                CancelLongPressDrag();
-            }
-            return;
-        }
-
-        Point curPos = e.GetPosition(ItemList);
-
-        // 未触发抓起期间：若按住移动超过 8px，判定为明确拖拽意图，立刻抓起卡片
-        if (!_isDragReordering)
-        {
-            if (_longPressCandidate != null && _longPressDragTimer?.IsEnabled == true)
-            {
-                Vector diff = curPos - _longPressStartPos;
-                if (Math.Abs(diff.X) > 8 || Math.Abs(diff.Y) > 8)
-                {
-                    StartDragReordering();
-                }
-            }
-            return;
-        }
-
-        // 已进入长按拖拽调序：吞掉默认移动事件，实时驱动悬浮卡片跟随与插槽让位
-        e.Handled = true;
-
-        // 限制悬浮卡片垂直位移在置顶区域内 [_dragMinY, _dragMaxY]，严防卡片拖出置顶范围
-        double rawTargetY = curPos.Y - _dragGrabOffsetY;
-        double clampedY = rawTargetY;
-        if (clampedY < _dragMinY) clampedY = _dragMinY;
-        if (_dragMaxY > _dragMinY && clampedY > _dragMaxY) clampedY = _dragMaxY;
-        FloatingDragTransform.Y = clampedY;
-
-        // 若鼠标指针移出置顶截止线下方，光标切换为禁止手势（🚫），提示超出置顶范围
-        if (_dragBoundaryBottomY > 0 && curPos.Y > _dragBoundaryBottomY)
-        {
-            Mouse.OverrideCursor = Cursors.No;
-        }
-        else
-        {
-            Mouse.OverrideCursor = Cursors.SizeAll;
-        }
-
-        if (_draggedItem == null)
+        if (_dragOutCandidate == null || _isDragOutInProgress || e.LeftButton != MouseButtonState.Pressed)
         {
             return;
         }
 
-        int pinnedCount = _viewModel.Items.Count(x => x.IsPinned);
-        if (pinnedCount < 2)
+        Vector diff = e.GetPosition(ItemList) - _dragOutStartPos;
+        if (Math.Abs(diff.X) <= 8 && Math.Abs(diff.Y) <= 8)
         {
             return;
         }
 
-        int oldIndex = _viewModel.Items.IndexOf(_draggedItem);
-        if (oldIndex < 0 || oldIndex >= pinnedCount)
+        var vm = _dragOutCandidate;
+        _dragOutCandidate = null;
+
+        var data = DragPayload.Create(vm.Item);
+        if (data == null)
         {
+            _viewModel.StatusText = "这条内容已不在本地，无法拖出";
             return;
         }
 
-        int bestIndex = CalculateBestPinnedSlot(clampedY);
-        if (bestIndex >= 0 && bestIndex < pinnedCount && bestIndex != oldIndex)
+        _viewModel.SelectedItem = vm;
+        PreviewPopup.IsOpen = false;
+        _isDragOutInProgress = true;
+        _suppressDeactivateUntil = DateTime.UtcNow.AddSeconds(30);
+        ShowDragGhost(vm);
+        System.Windows.GiveFeedbackEventHandler feedback = OnDragGiveFeedback;
+        ItemList.GiveFeedback += feedback;
+        try
         {
-            _viewModel.Items.Move(oldIndex, bestIndex);
-            for (int i = 0; i < _viewModel.Items.Count; i++)
-            {
-                _viewModel.Items[i].Index = i + 1;
-            }
-            _viewModel.UpdateReorderVisualStates(_draggedItem);
-            ItemList.UpdateLayout();
-            UpdateDragBounds();
-            _hasOrderChanged = true;
+            DragDrop.DoDragDrop(ItemList, data, System.Windows.DragDropEffects.Copy);
+        }
+        catch (Exception ex)
+        {
+            DebugLog.LogException("拖出条目失败", ex);
+            _viewModel.StatusText = "拖出失败";
+        }
+        finally
+        {
+            ItemList.GiveFeedback -= feedback;
+            Mouse.OverrideCursor = null;
+            HideDragGhost(vm);
+            _isDragOutInProgress = false;
+            _suppressDeactivateUntil = DateTime.UtcNow.AddMilliseconds(400);
         }
     }
 
     /// <summary>
-    /// 鼠标左键释放：若正处于拖拽重排中，拦截 MouseUp 杜绝单击或双击误触，并异步持久化新顺序。
+    /// 拖动期间界面不再收到鼠标移动。这里压掉系统的禁止光标，并把预览窗跟上指针。
     /// </summary>
+    private void OnDragGiveFeedback(object sender, System.Windows.GiveFeedbackEventArgs e)
+    {
+        Mouse.OverrideCursor = Cursors.Arrow;
+        e.UseDefaultCursors = false;
+        e.Handled = true;
+        _dragGhost?.MoveToCursor();
+    }
+
+    /// <summary>原卡片变淡。内容预览是独立小窗，跟着指针走，不受主面板裁切。</summary>
+    private void ShowDragGhost(ClipboardItemViewModel vm)
+    {
+        vm.IsDragSource = true;
+        _dragGhost ??= new Views.DragGhostWindow();
+        _dragGhost.ShowContent(vm);
+        _dragGhost.MoveToCursor();
+        // 拖动会锁住界面刷新，预览必须先画出来。
+        Dispatcher.Invoke(() => { }, DispatcherPriority.Render);
+    }
+
+    private void HideDragGhost(ClipboardItemViewModel vm)
+    {
+        _dragGhost?.Hide();
+        vm.IsDragSource = false;
+    }
+
     private void OnItemListPreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        _longPressDragTimer?.Stop();
-
-        if (_isDragReordering)
-        {
-            e.Handled = true;
-            EndDragReordering();
-            return;
-        }
-
-        _longPressCandidate = null;
-    }
-
-    private void EndDragReordering()
-    {
-        _longPressDragTimer?.Stop();
-
-        FloatingDragCard.Visibility = Visibility.Collapsed;
-        FloatingDragCard.DataContext = null;
-
-        Mouse.OverrideCursor = null;
-        if (ItemList.IsMouseCaptured)
-        {
-            ItemList.ReleaseMouseCapture();
-        }
-
-        _viewModel.UpdateReorderVisualStates(null);
-
-        if (_hasOrderChanged)
-        {
-            int pinnedCount = _viewModel.Items.Count(x => x.IsPinned);
-            for (int i = 0; i < pinnedCount; i++)
-            {
-                _viewModel.Items[i].Item.PinnedOrder = i + 1;
-            }
-            var orderedIds = _viewModel.Items.Take(pinnedCount).Select(x => x.Item.Id).ToList();
-            _ = _services.Database.UpdatePinnedOrderAsync(orderedIds);
-            _viewModel.StatusText = "置顶顺序已保存";
-        }
-
-        if (_draggedItem != null)
-        {
-            _viewModel.SelectedItem = _draggedItem;
-        }
-
-        _isDragReordering = false;
-        _draggedItem = null;
-        _longPressCandidate = null;
-        _hasOrderChanged = false;
-        _dragMinY = 0;
-        _dragMaxY = 0;
-        _dragBoundaryBottomY = 0;
-    }
-
-    private void CancelLongPressDrag()
-    {
-        _longPressDragTimer?.Stop();
-
-        FloatingDragCard.Visibility = Visibility.Collapsed;
-        FloatingDragCard.DataContext = null;
-        _dragMinY = 0;
-        _dragMaxY = 0;
-        _dragBoundaryBottomY = 0;
-
-        if (_isDragReordering)
-        {
-            EndDragReordering();
-        }
-        else
-        {
-            _longPressCandidate = null;
-            _viewModel.UpdateReorderVisualStates(null);
-        }
+        _dragOutCandidate = null;
     }
 
     /// <summary>单击：仅选中条目（不写系统剪贴板）。复制用卡片「复制」按钮或 Ctrl+C。</summary>
@@ -2956,6 +2700,37 @@ public partial class MainWindow : FluentWindow
         if (ResolveMenuTarget(sender) is { ShowTranslateAction: true } vm)
         {
             await _viewModel.ToggleTranslateItemAsync(vm);
+        }
+    }
+
+    private async void OnMenuNoteClicked(object sender, RoutedEventArgs e)
+    {
+        if (ResolveMenuTarget(sender) is not { } vm)
+        {
+            return;
+        }
+
+        var dialog = new Views.NoteEditWindow(vm.Item.Note, this);
+        bool confirmed = ShowOwnedModal(() => dialog.ShowDialog() == true);
+        if (confirmed)
+        {
+            await _viewModel.SetItemNoteAsync(vm, dialog.ResultNote);
+        }
+    }
+
+    private async void OnMovePinnedUpClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: ClipboardItemViewModel vm })
+        {
+            await _viewModel.MovePinnedItemAsync(vm, -1);
+        }
+    }
+
+    private async void OnMovePinnedDownClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: ClipboardItemViewModel vm })
+        {
+            await _viewModel.MovePinnedItemAsync(vm, 1);
         }
     }
 

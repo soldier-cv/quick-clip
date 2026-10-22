@@ -430,34 +430,29 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         await RefreshAsync();
     }
 
+    /// <summary>全量列表（无搜索、无类型筛选）才允许调整置顶顺序。</summary>
+    public bool CanReorderPinned =>
+        string.IsNullOrWhiteSpace(_searchText) && FilterIndex == 0;
+
     /// <summary>
-    /// 在置顶项之间调换顺序（拖拽调序）。仅在无搜索过滤的全量列表下有效。
+    /// 置顶条目上移或下移一位。搜索或筛选时列表不是完整置顶序，直接拒绝。
     /// </summary>
-    public async Task ReorderPinnedItemsAsync(int oldIndex, int newIndex)
+    public async Task MovePinnedItemAsync(ClipboardItemViewModel? target, int delta)
     {
-        if (!string.IsNullOrWhiteSpace(_searchText) || FilterIndex != 0)
+        if (target == null || delta == 0 || !CanReorderPinned || !target.IsPinned)
         {
             return;
         }
 
         int pinnedCount = Items.Count(x => x.IsPinned);
-        if (pinnedCount <= 1)
-        {
-            return;
-        }
-
+        int oldIndex = Items.IndexOf(target);
+        int newIndex = oldIndex + delta;
         if (oldIndex < 0 || oldIndex >= pinnedCount || newIndex < 0 || newIndex >= pinnedCount)
         {
             return;
         }
 
-        if (oldIndex == newIndex)
-        {
-            return;
-        }
-
         Items.Move(oldIndex, newIndex);
-
         for (int i = 0; i < Items.Count; i++)
         {
             Items[i].Index = i + 1;
@@ -465,58 +460,22 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
         var orderedIds = Items.Take(pinnedCount).Select(x => x.Item.Id).ToList();
         await _services.Database.UpdatePinnedOrderAsync(orderedIds);
+        SelectedItem = target;
         StatusText = "置顶顺序已调整";
     }
 
-    private bool _isReorderingPinned;
-    /// <summary>是否正处于置顶条目拖拽排序模式（用于驱动界面显示可拖拽范围）。</summary>
-    public bool IsReorderingPinned
+    /// <summary>写入备注。空白视为清除，卡片上那一行随之收起。</summary>
+    public async Task SetItemNoteAsync(ClipboardItemViewModel? target, string? note)
     {
-        get => _isReorderingPinned;
-        set
+        if (target == null)
         {
-            if (_isReorderingPinned != value)
-            {
-                _isReorderingPinned = value;
-                OnPropertyChanged();
-            }
-        }
-    }
-
-    /// <summary>
-    /// 更新置顶条目拖拽时的视觉范围状态：
-    /// 1. 被抓起的条目标记为 IsDragging（在列表中呈现为半透明占位槽）
-    /// 2. 最后一个置顶条目下方显示截止线 IsRangeBoundaryVisible
-    /// </summary>
-    public void UpdateReorderVisualStates(ClipboardItemViewModel? draggedItem)
-    {
-        if (draggedItem == null)
-        {
-            IsReorderingPinned = false;
-            foreach (var item in Items)
-            {
-                item.IsDragging = false;
-                item.IsRangeBoundaryVisible = false;
-            }
             return;
         }
 
-        IsReorderingPinned = true;
-        int lastPinnedIndex = -1;
-        for (int i = 0; i < Items.Count; i++)
-        {
-            if (Items[i].IsPinned)
-            {
-                lastPinnedIndex = i;
-            }
-        }
-
-        for (int i = 0; i < Items.Count; i++)
-        {
-            var item = Items[i];
-            item.IsDragging = ReferenceEquals(item, draggedItem);
-            item.IsRangeBoundaryVisible = (i == lastPinnedIndex && Items.Count > lastPinnedIndex + 1);
-        }
+        string? stored = string.IsNullOrWhiteSpace(note) ? null : note.Trim();
+        await _services.Database.UpdateNoteAsync(target.Item.Id, stored);
+        target.SetNote(stored);
+        StatusText = stored == null ? "已清除备注" : "已保存备注";
     }
 
     public async Task GenerateQrForSelectedAsync()

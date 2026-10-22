@@ -1,0 +1,38 @@
+<Window x:Class="QuickClip.Views.DragGhostWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        Topmost="True"
+        ShowInTaskbar="False"
+        ShowActivated="False"
+        SizeToContent="WidthAndHeight"
+        WindowStartupLocation="Manual"
+        IsHitTestVisible="False">
+
+    <Border Margin="8"
+            MaxWidth="280"
+            Padding="10,8"
+            CornerRadius="10"
+            Background="{DynamicResource Theme.CardSelected}"
+            BorderBrush="{DynamicResource Theme.Accent}"
+            BorderThickness="1.5">
+        <Border.Effect>
+            <DropShadowEffect BlurRadius="18" ShadowDepth="6" Direction="270" Color="#000000" Opacity="0.45" />
+        </Border.Effect>
+        <Grid>
+            <Image x:Name="GhostImage"
+                   MaxWidth="180"
+                   MaxHeight="120"
+                   Stretch="Uniform"
+                   Visibility="Collapsed" />
+            <TextBlock x:Name="GhostText"
+                       FontSize="13"
+                       Foreground="{DynamicResource Theme.Text}"
+                       TextTrimming="CharacterEllipsis"
+                       MaxWidth="240"
+                       Visibility="Collapsed" />
+        </Grid>
+    </Border>
+</Window>

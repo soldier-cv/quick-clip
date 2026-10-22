@@ -54,6 +54,35 @@ internal static class NativeMethods
     public const uint SWP_NOOWNERZORDER = 0x0200;
     public const uint SWP_NOSENDCHANGING = 0x0400;
 
+    [StructLayout(LayoutKind.Sequential)]
+    public struct POINT
+    {
+        public int X;
+        public int Y;
+    }
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool GetCursorPos(out POINT point);
+
+    [DllImport("user32.dll", EntryPoint = "SetWindowLong")]
+    private static extern int SetWindowLong32(IntPtr hWnd, int nIndex, int dwNewLong);
+
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtr")]
+    private static extern IntPtr SetWindowLongPtr64(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
+
+    public static void SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong)
+    {
+        if (IntPtr.Size == 8)
+        {
+            SetWindowLongPtr64(hWnd, nIndex, new IntPtr(dwNewLong));
+        }
+        else
+        {
+            SetWindowLong32(hWnd, nIndex, dwNewLong);
+        }
+    }
+
     /// <summary>小图标推荐宽度（托盘图标槽，含 DPI）。</summary>
     public const int SM_CXSMICON = 49;
 

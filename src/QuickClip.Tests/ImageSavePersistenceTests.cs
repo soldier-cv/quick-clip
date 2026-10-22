@@ -38,6 +38,53 @@ public class ImageSavePersistenceTests
             await db.UpdateSavedPathAsync(item.Id, @"C:\saved\QC_20261021_1.png");
             var reloaded = await db.GetRecentAsync(10);
             Assert.Equal(@"C:\saved\QC_20261021_1.png", reloaded[0].SavedPath);
+            Assert.Null(reloaded[0].Note);
+
+            await db.UpdateNoteAsync(item.Id, "  周会要用  ");
+            var noted = await db.GetRecentAsync(10);
+            Assert.Equal("周会要用", noted[0].Note);
+
+            await db.UpdateNoteAsync(item.Id, "   ");
+            var cleared = await db.GetRecentAsync(10);
+            Assert.Null(cleared[0].Note);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Bumping_a_duplicate_keeps_its_note()
+    {
+        string dir = CreateTempDir();
+        string dbPath = Path.Combine(dir, "test.db");
+        try
+        {
+            using var db = new DatabaseService(dbPath);
+            var item = new ClipboardItem
+            {
+                ContentType = ClipboardContentType.Text,
+                TextContent = "同一段",
+                CharCount = 3
+            };
+            await db.UpsertRecentAsync(item);
+            await db.UpdateNoteAsync(item.Id, "周会要用");
+
+            var again = new ClipboardItem
+            {
+                ContentType = ClipboardContentType.Text,
+                TextContent = "同一段",
+                CharCount = 3,
+                CreatedAt = DateTime.Now
+            };
+            var (_, isNew) = await db.UpsertRecentAsync(again);
+
+            Assert.False(isNew);
+            Assert.Equal("周会要用", again.Note);
+            var loaded = await db.GetRecentAsync(10);
+            Assert.Equal("周会要用", loaded[0].Note);
         }
         finally
         {

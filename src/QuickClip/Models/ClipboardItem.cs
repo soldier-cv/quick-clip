@@ -30,6 +30,9 @@ public sealed class ClipboardItem
     /// <summary>用户保存到本地后的图片路径（仅图片类型，未保存为 null）。</summary>
     public string? SavedPath { get; set; }
 
+    /// <summary>用户备注。只用于展示和搜索，不进入粘贴与拖出。</summary>
+    public string? Note { get; set; }
+
     /// <summary>从图片中识别出的二维码内容。</summary>
     public string? QrContent { get; set; }
 

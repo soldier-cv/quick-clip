@@ -288,6 +288,22 @@ public sealed class PasteService
         _ = CopyFilesAsync(files);
 
     /// <summary>
+    /// 收集栈出栈专用：在调用线程上同步回填文本，单次 OpenClipboard 尝试、被占用立刻返回 false。
+    /// 供低级键盘钩子同步调用（必须尽快返回），成功后调用方直接放行用户物理按下的 Ctrl+V，
+    /// 让目标窗口收到真实按键而不是合成事件（浏览器密码插件等输入层会区别对待两者）。
+    /// </summary>
+    public bool TryFillTextNow(string? text, string? html, string? rtf)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return false;
+        }
+
+        return SetClipboard(() =>
+            NativeClipboard.TrySetText(text, plainOnly: false, html, rtf, openAttempts: 1));
+    }
+
+    /// <summary>
     /// 由 UI 线程主动将前台焦点转交给目标窗口（尤其在置顶且面板保持打开时）。
     /// 当前台窗口属主线程主动转交时，Windows 前台锁无条件放行。
     /// </summary>

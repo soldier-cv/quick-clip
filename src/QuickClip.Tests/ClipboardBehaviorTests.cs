@@ -132,4 +132,19 @@ public class ClipboardBehaviorTests
         Assert.False(ClipboardPipeline.ShouldDropClipboardNotification(capturePaused: false));
         Assert.True(ClipboardPipeline.ShouldDropClipboardNotification(capturePaused: true));
     }
+
+    [Theory]
+    [InlineData(ClipboardContentType.Text, "账号", true)]
+    [InlineData(ClipboardContentType.Link, "https://example.com", true)]
+    [InlineData(ClipboardContentType.Text, "", false)]
+    [InlineData(ClipboardContentType.Image, "C:\\preview.png", false)]
+    [InlineData(ClipboardContentType.File, "C:\\a.txt", false)]
+    public void Stack_paste_passes_physical_ctrl_v_through_only_for_text(
+        ClipboardContentType type, string? text, bool expected)
+    {
+        var item = new ClipboardItem { ContentType = type, TextContent = text };
+
+        Assert.Equal(expected, StackPasteService.CanPassThroughPhysicalPaste(item));
+        Assert.False(StackPasteService.CanPassThroughPhysicalPaste(null));
+    }
 }

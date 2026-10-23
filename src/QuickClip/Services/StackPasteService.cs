@@ -439,10 +439,12 @@ public sealed class StackPasteService : IDisposable
     };
 
     /// <summary>
-    /// 出栈一个条目并模拟粘贴到目标窗口。
-    /// 返回 true 表示成功出栈粘贴；返回 false 表示栈已空。
+    /// 出栈一个条目。
+    /// 纯文本条目会同步回填剪贴板并返回 <see cref="CtrlVInterceptResult.PassThrough"/>，
+    /// 由用户自己的物理 Ctrl+V 完成粘贴；图片 / 文件，或剪贴板被占用时退回后台注入并返回
+    /// <see cref="CtrlVInterceptResult.Swallow"/>。返回 NotHandled 表示栈已空。
     /// </summary>
-    public bool PopAndPaste()
+    public CtrlVInterceptResult PopAndPaste()
     {
         ClipboardItem? item = null;
         int remaining = 0;
@@ -460,18 +462,27 @@ public sealed class StackPasteService : IDisposable
         if (item == null)
         {
             Stop();
-            return false;
+            return CtrlVInterceptResult.NotHandled;
         }
 
-        Task pasteTask = item.ContentType switch
+        // 放行优先：目标窗口收到用户真实的 Ctrl+V，与普通粘贴行为一致。
+        // 图片与文件要重建 DIB / HDROP，耗时不可控，仍走注入路径。
+        bool passThrough = CanPassThroughPhysicalPaste(item)
+            && _pasteService.TryFillTextNow(item.TextContent, item.HtmlContent, item.RtfContent);
+
+        Task? pasteTask = null;
+        if (!passThrough)
         {
-            ClipboardContentType.Image =>
-                _pasteService.PasteImageAsync(item.PreviewPath, stayOnForeground: true),
-            ClipboardContentType.File when !string.IsNullOrEmpty(item.TextContent) =>
-                _pasteService.PasteFilesAsync(ClipboardItem.SplitFilePaths(item.TextContent), stayOnForeground: true),
-            _ => _pasteService.PasteTextAsync(
-                item.TextContent, plainOnly: false, item.HtmlContent, item.RtfContent, stayOnForeground: true)
-        };
+            pasteTask = item.ContentType switch
+            {
+                ClipboardContentType.Image =>
+                    _pasteService.PasteImageAsync(item.PreviewPath, stayOnForeground: true),
+                ClipboardContentType.File when !string.IsNullOrEmpty(item.TextContent) =>
+                    _pasteService.PasteFilesAsync(ClipboardItem.SplitFilePaths(item.TextContent), stayOnForeground: true),
+                _ => _pasteService.PasteTextAsync(
+                    item.TextContent, plainOnly: false, item.HtmlContent, item.RtfContent, stayOnForeground: true)
+            };
+        }
 
         if (remaining == 0)
         {
@@ -491,14 +502,28 @@ public sealed class StackPasteService : IDisposable
             NotifyStateChanged();
         }
 
-        return true;
+        return passThrough ? CtrlVInterceptResult.PassThrough : CtrlVInterceptResult.Swallow;
     }
 
-    private async Task FinishLastItemAsync(Task pasteTask, int session)
+    /// <summary>
+    /// 该条目能否放行物理 Ctrl+V（只回填剪贴板，不模拟按键）。
+    /// 仅纯文本：图片 / 文件需要重建剪贴板格式，耗时不可控，不能阻塞键盘钩子线程。
+    /// </summary>
+    public static bool CanPassThroughPhysicalPaste(ClipboardItem? item) =>
+        item != null &&
+        item.ContentType is ClipboardContentType.Text or ClipboardContentType.Link &&
+        !string.IsNullOrEmpty(item.TextContent);
+
+    private async Task FinishLastItemAsync(Task? pasteTask, int session)
     {
         try
         {
-            await pasteTask.ConfigureAwait(false);
+            if (pasteTask != null)
+            {
+                await pasteTask.ConfigureAwait(false);
+            }
+
+            // 注入路径要等目标读完剪贴板；放行物理按键也要留出读取时间，两者统一 250ms
             await Task.Delay(250).ConfigureAwait(false);
         }
         catch
@@ -513,9 +538,10 @@ public sealed class StackPasteService : IDisposable
 
         _lastPasteInFlight = false;
         // 带轻量重试清空系统剪贴板（避免目标窗口短暂占用导致清空失败）
+        bool cleared = false;
         for (int i = 0; i < 3; i++)
         {
-            bool cleared = await StaTask.Run(() =>
+            cleared = await StaTask.Run(() =>
             {
                 if (NativeClipboard.TryClear())
                 {
@@ -530,6 +556,13 @@ public sealed class StackPasteService : IDisposable
                 break;
             }
             await Task.Delay(100).ConfigureAwait(false);
+        }
+
+        // 剪贴板确实清空后立即解除守卫：否则接下来所有程序的 Ctrl+V 都会被静默吞掉，
+        // 直到用户重新复制一次内容。清理失败时保留守卫，继续防止误贴最后一条。
+        if (cleared)
+        {
+            _shouldSuppressPostStackPaste = false;
         }
     }
 

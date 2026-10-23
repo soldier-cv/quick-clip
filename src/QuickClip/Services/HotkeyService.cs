@@ -66,10 +66,19 @@ public sealed class HotkeyService : IDisposable
     private volatile bool _plainPasteEnabled = true;
     private volatile HotkeyBinding _startStackBinding = HotkeyBinding.StartStackDefault;
 
-    // 钩子按下标记：过滤系统按键自动重复，避免长按 Win+V / 纯文本组合导致反复触发
+    // 钩子按下标记：过滤系统按键自动重复，避免长按 Win+V / 纯文本组合 / 收集栈出栈导致反复触发
     private volatile bool _winVKeyDown;
     private volatile bool _plainPasteKeyDown;
     private volatile bool _startStackKeyDown;
+
+    /// <summary>本次 Ctrl+V 已被收集栈接管：吞掉自动重复，直到 V 键抬起。</summary>
+    private volatile bool _ctrlVHandledUntilRelease;
+
+    /// <summary>接管 Ctrl+V 的时间戳（TickCount64），V 抬起丢失时据此自愈。</summary>
+    private long _ctrlVHandledTicks;
+
+    /// <summary>接管 Ctrl+V 后等待 V 抬起的最长时间；锁屏 / 前台切换可能丢掉抬起事件。</summary>
+    private const long CtrlVReleaseStaleMilliseconds = 2000;
 
     // 切换请求防抖时间戳（TickCount64），避免钩子与 WM_HOTKEY 极端并发导致双触发
     private long _lastToggleTicks;
@@ -86,8 +95,11 @@ public sealed class HotkeyService : IDisposable
     /// <summary>钩子安装失败时触发（提示用户可能无法接管 Win+V）。</summary>
     public event Action<string>? HotkeyInstallFailed;
 
-    /// <summary>收集栈等特殊模式下拦截物理 Ctrl+V 的外部委托。返回 true 表示已处理并吞掉该按键。</summary>
-    public Func<bool>? InterceptCtrlV { get; set; }
+    /// <summary>
+    /// 收集栈等特殊模式下拦截物理 Ctrl+V 的外部委托。
+    /// 返回 <see cref="CtrlVInterceptResult.Swallow"/> 吞掉按键，返回 <see cref="CtrlVInterceptResult.PassThrough"/> 放行真实按键。
+    /// </summary>
+    public Func<CtrlVInterceptResult>? InterceptCtrlV { get; set; }
 
     /// <summary>收集栈等特殊模式下拦截 Esc 键的外部委托。返回 true 表示已处理并吞掉该按键。</summary>
     public Func<bool>? InterceptEscape { get; set; }
@@ -432,6 +444,7 @@ public sealed class HotkeyService : IDisposable
         _winKeyReplayed = false;
         _winChordHandled = false;
         _winVKeyDown = false;
+        _ctrlVHandledUntilRelease = false;
         _winKeyDownTicks = 0;
     }
 
@@ -559,9 +572,28 @@ public sealed class HotkeyService : IDisposable
                 {
                     if (hook.vkCode == NativeMethods.VK_V && ctrlDown && !shiftDown && !altDown && InterceptCtrlV != null)
                     {
-                        if (InterceptCtrlV.Invoke())
+                        // 本次按下已由收集栈处理过：吞掉按键自动重复，避免长按连续出栈或目标窗口重复粘贴
+                        if (_ctrlVHandledUntilRelease)
                         {
-                            return new IntPtr(1);
+                            if (Environment.TickCount64 - _ctrlVHandledTicks <= CtrlVReleaseStaleMilliseconds)
+                            {
+                                return new IntPtr(1);
+                            }
+
+                            // V 抬起丢失（锁屏 / 前台切换）：超时后按新的一次按下放行，避免 Ctrl+V 长期失效
+                            _ctrlVHandledUntilRelease = false;
+                        }
+
+                        CtrlVInterceptResult intercept = InterceptCtrlV.Invoke();
+                        if (intercept != CtrlVInterceptResult.NotHandled)
+                        {
+                            _ctrlVHandledUntilRelease = true;
+                            _ctrlVHandledTicks = Environment.TickCount64;
+
+                            if (intercept == CtrlVInterceptResult.Swallow)
+                            {
+                                return new IntPtr(1);
+                            }
                         }
                     }
                     else if (hook.vkCode == NativeMethods.VK_ESCAPE && !ctrlDown && !shiftDown && !altDown && InterceptEscape != null)
@@ -598,6 +630,7 @@ public sealed class HotkeyService : IDisposable
                 if (hook.vkCode == NativeMethods.VK_V && !isKeyDown)
                 {
                     _winVKeyDown = false;
+                    _ctrlVHandledUntilRelease = false;
                 }
 
                 // 固定纯文本粘贴组合（RegisterHotKey 注册失败时回退）。

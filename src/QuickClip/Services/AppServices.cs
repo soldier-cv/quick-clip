@@ -68,23 +68,26 @@ public sealed class AppServices : IDisposable
             }
         };
 
-        // 收集栈模式下拦截物理 Ctrl+V 出栈模拟粘贴
+        // 收集栈模式下拦截物理 Ctrl+V 出栈。
+        // 文本条目同步回填剪贴板后放行物理按键（PassThrough），让目标窗口收到用户真正的 Ctrl+V：
+        // 浏览器密码插件等输入层会区别对待合成按键（注入标记 / 修饰键抖动），自己造键会表现为
+        // 焦点跳到别处、页面闪烁且内容贴不进去。图片/文件或剪贴板被占用时才退回「吞掉 + 注入」。
         // 注意：焦点在 QuickClip 自身窗口时一律放行，避免劫持面板内的正常 Ctrl+V
         Hotkey.InterceptCtrlV = () =>
         {
             if (IsOwnProcessForeground())
             {
-                return false;
+                return CtrlVInterceptResult.NotHandled;
             }
 
             if (StackPaste.LastPasteInFlight || StackPaste.ShouldSuppressPostStackPaste)
             {
-                return true;
+                return CtrlVInterceptResult.Swallow;
             }
 
             if (!StackPaste.IsActive || StackPaste.Count == 0)
             {
-                return false;
+                return CtrlVInterceptResult.NotHandled;
             }
 
             return StackPaste.PopAndPaste();

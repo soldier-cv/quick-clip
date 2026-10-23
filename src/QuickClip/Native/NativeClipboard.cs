@@ -280,9 +280,12 @@ public static class NativeClipboard
     /// 让目标程序（Word / 浏览器 / 富文本编辑器）能保留原格式。
     /// 纯文本始终先写入且必须成功，富文本属于尽力而为（失败不影响粘贴）。
     /// </summary>
-    public static bool TrySetText(string text, bool plainOnly, string? html, string? rtf)
+    /// <param name="openAttempts">
+    /// OpenClipboard 尝试次数。钩子线程等不允许阻塞的场景传 1：被占用时立刻失败，由调用方走降级路径。
+    /// </param>
+    public static bool TrySetText(string text, bool plainOnly, string? html, string? rtf, int openAttempts = WriteOpenAttempts)
     {
-        if (!TryOpen(WriteOpenAttempts))
+        if (!TryOpen(openAttempts))
         {
             return false;
         }

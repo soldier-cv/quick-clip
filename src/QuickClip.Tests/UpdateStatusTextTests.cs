@@ -10,8 +10,8 @@ public class UpdateStatusTextTests
     {
         var pending = new PendingUpdate
         {
-            Version = "1.4.4",
-            TagName = "v1.4.4",
+            Version = "9.9.9",
+            TagName = "v9.9.9",
             LocalPath = "x.exe",
             Channel = ReleaseChannel.Setup
         };
@@ -22,8 +22,28 @@ public class UpdateStatusTextTests
             failed: null,
             activity: new UpdateActivity { Phase = UpdatePhase.Idle });
 
-        Assert.Contains("v1.4.4", text);
+        Assert.Contains("v9.9.9", text);
         Assert.Contains("已下载就绪", text);
+    }
+
+    [Fact]
+    public void Pending_older_than_installed_is_not_shown_as_ready()
+    {
+        var pending = new PendingUpdate
+        {
+            Version = "1.0.0",
+            TagName = "v1.0.0",
+            LocalPath = "x.exe",
+            Channel = ReleaseChannel.Setup
+        };
+
+        string text = UpdateService.ResolveStatusText(
+            pending,
+            pendingFileExists: true,
+            failed: null,
+            activity: new UpdateActivity { Phase = UpdatePhase.Idle });
+
+        Assert.DoesNotContain("已下载就绪", text);
     }
 
     [Fact]

@@ -97,11 +97,102 @@ public sealed class UpdateService : IDisposable
     private int _consecutiveFailures;
     private string? _notifiedFoundTag;
     private string? _notifiedFailTag;
+    private string? _notifiedReadyTag;
     private DateTime _lastProgressUiUtc = DateTime.MinValue;
 
-    /// <summary>当前程序版本（来自程序集版本号）。</summary>
+    /// <summary>当前进程内程序集版本（真正在跑的代码版本）。</summary>
     public static string CurrentVersion =>
         typeof(UpdateService).Assembly.GetName().Version?.ToString(3) ?? "1.0.0";
+
+    /// <summary>
+    /// 磁盘上已安装的版本：取「运行中程序集版本」与「exe 文件版本」中较大者。
+    ///
+    /// 更新包写入磁盘后，旧进程会一直运行到用户退出/重启为止；此时运行版本已经落后于磁盘版本。
+    /// 判断「有没有新版本、能不能安装」必须按磁盘版本算，否则旧进程会把已经装好的版本
+    /// 当成新版本重复提示、重复下载，甚至把新版降级回旧版。
+    /// </summary>
+    public static string InstalledVersion => PickInstalledVersion(CurrentVersion, ResolveOnDiskExePath());
+
+    /// <summary>
+    /// 磁盘上正在生效的程序 exe：优先取程序集所在目录（安装目录/绿色目录）里的 QuickClip.exe，
+    /// 取不到再退回当前进程路径。不能用进程路径兜底测试宿主等场景。
+    /// </summary>
+    private static string? ResolveOnDiskExePath()
+    {
+        try
+        {
+            string local = Path.Combine(AppContext.BaseDirectory, "QuickClip.exe");
+            if (File.Exists(local))
+            {
+                return local;
+            }
+        }
+        catch
+        {
+            // 目录不可读时不阻塞更新判断
+        }
+
+        return Environment.ProcessPath;
+    }
+
+    /// <summary>按运行版本与指定 exe 的文件版本挑选更高者（便于测试）。</summary>
+    internal static string PickInstalledVersion(string runningVersion, string? exePath)
+    {
+        try
+        {
+            if (!string.IsNullOrEmpty(exePath) && File.Exists(exePath))
+            {
+                string? fileVersion = NormalizeVersion(FileVersionInfo.GetVersionInfo(exePath).FileVersion);
+                if (fileVersion != null && IsNewer(fileVersion, runningVersion))
+                {
+                    return fileVersion;
+                }
+            }
+        }
+        catch
+        {
+            // 读不到文件版本（权限/损坏）时退回运行版本
+        }
+
+        return runningVersion;
+    }
+
+    /// <summary>把 "1.4.11.0"、"v1.4.11" 之类规范化为 "1.4.11"；无法解析返回 null。</summary>
+    internal static string? NormalizeVersion(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return null;
+        }
+
+        string value = text.Trim();
+        if (value.StartsWith('v') || value.StartsWith('V'))
+        {
+            value = value[1..];
+        }
+
+        return TryParseVersion(value, out int[] parts) ? $"{parts[0]}.{parts[1]}.{parts[2]}" : null;
+    }
+
+    /// <summary>判断安装包文件的版本号是否与目标版本一致（防止复用同名旧包）。</summary>
+    internal static bool MatchesFileVersion(string path, string expectedVersion)
+    {
+        try
+        {
+            string? actual = NormalizeVersion(FileVersionInfo.GetVersionInfo(path).FileVersion);
+            string? expected = NormalizeVersion(expectedVersion);
+            return actual != null && expected != null &&
+                   string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>是否存在「版本高于磁盘上已安装版本」的待安装包，可安全提示/安装。</summary>
+    public bool HasActionablePending =>
+        Pending is { } pending && File.Exists(pending.LocalPath) && IsNewer(pending.Version, InstalledVersion);
 
     /// <summary>安装目录旁有 QuickClip.installed 才视为安装版（绿色版不得改写自启动）。</summary>
     public static bool IsInstalledCopy()
@@ -119,12 +210,12 @@ public sealed class UpdateService : IDisposable
     /// <summary>启动时是否应自动安装已下载包（开机自启、24h 内已尝试过则否）。</summary>
     public bool ShouldAutoApplyOnStartup()
     {
-        if (Pending == null || !File.Exists(Pending.LocalPath))
+        if (!HasActionablePending)
         {
             return false;
         }
 
-        return !IsAutoApplyDeferred(Pending.Version);
+        return !IsAutoApplyDeferred(Pending!.Version);
     }
 
     /// <summary>当前发布渠道：固定为安装版。</summary>
@@ -155,7 +246,7 @@ public sealed class UpdateService : IDisposable
         DownloadFailedInfo? failed,
         UpdateActivity activity)
     {
-        if (pending != null && pendingFileExists)
+        if (pending != null && pendingFileExists && IsNewer(pending.Version, InstalledVersion))
         {
             return ReadyStatusText(pending.TagName);
         }
@@ -170,7 +261,7 @@ public sealed class UpdateService : IDisposable
                 ? DownloadFailedStatusText(failed.TagName)
                 : (string.IsNullOrEmpty(activity.Message) ? "检查更新失败" : activity.Message),
             UpdatePhase.UpToDate => string.IsNullOrEmpty(activity.Message)
-                ? $"当前已是最新版本 v{CurrentVersion}"
+                ? $"当前已是最新版本 v{InstalledVersion}"
                 : activity.Message,
             UpdatePhase.Ready => activity.TagName != null
                 ? ReadyStatusText(activity.TagName)
@@ -246,7 +337,7 @@ public sealed class UpdateService : IDisposable
 
             if (result.Status == UpdateCheckStatus.Ready && result.Pending != null)
             {
-                InstallReady?.Invoke(result.Pending);
+                NotifyReadyOnce(result.Pending);
             }
             return;
         }
@@ -432,9 +523,10 @@ public sealed class UpdateService : IDisposable
     private UpdateCheckResult FinishCheck(ReleaseInfo release, string source)
     {
         DebugLog.Log(
-            $"检查更新完成({source}): 最新 {release.TagName}，当前 v{CurrentVersion}，渠道 {CurrentChannel}");
+            $"检查更新完成({source}): 最新 {release.TagName}，当前 v{CurrentVersion}，磁盘 v{InstalledVersion}，渠道 {CurrentChannel}");
 
-        if (!IsNewer(release.Version, CurrentVersion))
+        // 以磁盘上的版本为准：旧进程（更新包已落盘但尚未重启）不能再把已安装版本当成新版本。
+        if (!IsNewer(release.Version, InstalledVersion))
         {
             return UpdateCheckResult.UpToDate();
         }
@@ -464,11 +556,17 @@ public sealed class UpdateService : IDisposable
 
         try
         {
-            if (_paths != null &&
-                Pending is { } existing &&
-                File.Exists(existing.LocalPath) &&
-                IsNewer(existing.Version, CurrentVersion))
+            // 内存里可能残留着旧版本进程下载的包：磁盘已经升级后，它不再是「新版本」。
+            if (Pending is { } stale && !HasActionablePending)
             {
+                DebugLog.Log($"丢弃已过期的更新包: {stale.TagName}（磁盘已是 v{InstalledVersion}）");
+                TryDeleteFile(stale.LocalPath);
+                SetPending(null);
+            }
+
+            if (_paths != null && HasActionablePending)
+            {
+                PendingUpdate existing = Pending!;
                 SetDownloadFailed(null);
                 PublishActivity(new UpdateActivity
                 {
@@ -493,11 +591,11 @@ public sealed class UpdateService : IDisposable
                     PublishActivity(new UpdateActivity
                     {
                         Phase = UpdatePhase.UpToDate,
-                        Message = check.Message ?? $"当前已是最新版本 v{CurrentVersion}"
+                        Message = check.Message ?? $"当前已是最新版本 v{InstalledVersion}"
                     });
                     if (interactive)
                     {
-                        UserNotify?.Invoke("QuickClip", check.Message ?? $"当前已是最新版本 v{CurrentVersion}");
+                        UserNotify?.Invoke("QuickClip", check.Message ?? $"当前已是最新版本 v{InstalledVersion}");
                     }
                 }
                 else if (check.Status == UpdateCheckStatus.Failed)
@@ -600,6 +698,26 @@ public sealed class UpdateService : IDisposable
         UserNotify?.Invoke("QuickClip", message);
     }
 
+    /// <summary>
+    /// 「新版本已下载」提示每个进程只弹一次：待安装包会一直留在磁盘上，
+    /// 每 12 小时重复弹一次会让用户以为又下载了新版本。
+    /// </summary>
+    private void NotifyReadyOnce(PendingUpdate pending)
+    {
+        if (!IsNewer(pending.Version, InstalledVersion))
+        {
+            return;
+        }
+
+        if (string.Equals(_notifiedReadyTag, pending.Version, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        _notifiedReadyTag = pending.Version;
+        InstallReady?.Invoke(pending);
+    }
+
     private void PublishActivity(UpdateActivity activity)
     {
         Activity = activity;
@@ -662,6 +780,17 @@ public sealed class UpdateService : IDisposable
         if (pending == null || !File.Exists(pending.LocalPath))
         {
             message = "还没有已下载的更新";
+            return false;
+        }
+
+        // 拒绝安装不高于磁盘版本的包：避免旧进程把已升级的安装回退成旧版本。
+        if (!IsNewer(pending.Version, InstalledVersion))
+        {
+            DebugLog.Log(
+                $"忽略已过期的更新包: {pending.TagName}（磁盘已是 v{InstalledVersion}）");
+            TryDeleteFile(pending.LocalPath);
+            SetPending(null);
+            message = $"当前已是 v{InstalledVersion}，无需安装 {pending.TagName}";
             return false;
         }
 
@@ -783,34 +912,26 @@ public sealed class UpdateService : IDisposable
 
         try
         {
-            const string prefix = "QuickClip-Setup-";
-            PendingUpdate? best = null;
-            foreach (string file in Directory.GetFiles(_paths.UpdatesDir, "QuickClip-Setup-*.exe"))
+            string installed = InstalledVersion;
+            string[] packages = Directory.GetFiles(_paths.UpdatesDir, "QuickClip-Setup-*.exe");
+            PendingUpdate? best = FindRestorableUpdate(packages, installed);
+
+            // 旧版本/损坏的安装包只占空间，还可能被误当成「已下载的新版本」，启动时一并清掉。
+            foreach (string file in packages)
             {
-                string name = Path.GetFileName(file);
-                if (!name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ||
-                    !name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+                if (best != null &&
+                    string.Equals(file, best.LocalPath, StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
 
-                string versionPart = name.Substring(prefix.Length, name.Length - prefix.Length - 4);
-                if (!IsNewer(versionPart, CurrentVersion) || new FileInfo(file).Length < 1024)
+                if (File.Exists(file) && TryDeleteFile(file))
                 {
-                    continue;
-                }
-
-                if (best == null || IsNewer(versionPart, best.Version))
-                {
-                    best = new PendingUpdate
-                    {
-                        Version = versionPart,
-                        TagName = "v" + versionPart,
-                        LocalPath = file,
-                        Channel = ReleaseChannel.Setup
-                    };
+                    DebugLog.Log($"已清理过期更新包: {Path.GetFileName(file)}（磁盘版本 v{installed}）");
                 }
             }
+
+            CleanupPartialDownloads(_paths.UpdatesDir);
 
             if (best != null)
             {
@@ -824,9 +945,91 @@ public sealed class UpdateService : IDisposable
         }
     }
 
+    /// <summary>从更新目录里挑出版本高于 <paramref name="installedVersion"/> 的最佳安装包。</summary>
+    internal static PendingUpdate? FindRestorableUpdate(IEnumerable<string> files, string installedVersion)
+    {
+        const string prefix = "QuickClip-Setup-";
+        PendingUpdate? best = null;
+        foreach (string file in files)
+        {
+            string name = Path.GetFileName(file);
+            if (!name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ||
+                !name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            string versionPart = name.Substring(prefix.Length, name.Length - prefix.Length - 4);
+            if (!IsNewer(versionPart, installedVersion) || new FileInfo(file).Length < 1024)
+            {
+                continue;
+            }
+
+            if (best == null || IsNewer(versionPart, best.Version))
+            {
+                best = new PendingUpdate
+                {
+                    Version = versionPart,
+                    TagName = "v" + versionPart,
+                    LocalPath = file,
+                    Channel = ReleaseChannel.Setup
+                };
+            }
+        }
+
+        return best;
+    }
+
+    /// <summary>删除一小时前的下载残留（保留别的实例可能正在写的 .part）。</summary>
+    private static void CleanupPartialDownloads(string dir)
+    {
+        try
+        {
+            foreach (string file in Directory.GetFiles(dir, "QuickClip-Setup-*.part"))
+            {
+                if (DateTime.UtcNow - File.GetLastWriteTimeUtc(file) < TimeSpan.FromHours(1))
+                {
+                    continue;
+                }
+
+                if (TryDeleteFile(file))
+                {
+                    DebugLog.Log($"已清理未完成的下载: {Path.GetFileName(file)}");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            DebugLog.LogException("清理未完成下载失败", ex);
+        }
+    }
+
+    private static bool TryDeleteFile(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+                return true;
+            }
+        }
+        catch
+        {
+            // 文件被占用时下次启动再清
+        }
+
+        return false;
+    }
+
     private void SetPending(PendingUpdate? pending)
     {
         Pending = pending;
+        if (pending == null)
+        {
+            _notifiedReadyTag = null;
+        }
+
         PendingChanged?.Invoke(pending);
     }
 
@@ -844,14 +1047,21 @@ public sealed class UpdateService : IDisposable
         if (File.Exists(dest))
         {
             long existing = new FileInfo(dest).Length;
-            if (release.AssetSize <= 0 || existing == release.AssetSize)
+            bool sizeMatches = release.AssetSize <= 0 || existing == release.AssetSize;
+            // 体积一致还不够：安装包内容必须确实是目标版本，避免复用同名旧包。
+            bool versionMatches = MatchesFileVersion(dest, release.Version);
+            if (sizeMatches && versionMatches)
             {
                 DebugLog.Log($"复用已下载更新: {destName} ({existing} 字节)");
                 return dest;
             }
+
+            DebugLog.Log($"已下载文件与 {release.TagName} 不匹配，重新下载: {destName}");
+            TryDeleteFile(dest);
         }
 
-        string part = dest + ".part";
+        // 每个进程用自己的临时文件：多会话同时检查更新时不能互相覆盖同一个 .part。
+        string part = $"{dest}.{Environment.ProcessId}.part";
         try
         {
             if (File.Exists(part))
@@ -1109,7 +1319,7 @@ public sealed class UpdateService : IDisposable
     }
 
     /// <summary>比较两个版本号（x.y.z），candidate 大于 current 时为 true。</summary>
-    private static bool IsNewer(string candidate, string current)
+    internal static bool IsNewer(string candidate, string current)
     {
         if (!TryParseVersion(candidate, out var c) || !TryParseVersion(current, out var cur))
         {
@@ -1177,7 +1387,7 @@ public sealed class UpdateCheckResult
     public static UpdateCheckResult UpToDate() => new()
     {
         Status = UpdateCheckStatus.UpToDate,
-        Message = $"当前已是最新版本 v{UpdateService.CurrentVersion}"
+        Message = $"当前已是最新版本 v{UpdateService.InstalledVersion}"
     };
 
     public static UpdateCheckResult UpdateAvailable(ReleaseInfo release) => new()

@@ -589,7 +589,7 @@ public partial class SettingsWindow : Window
         var pending = _services.Update.Pending;
         var failed = _services.Update.DownloadFailed;
         var activity = _services.Update.Activity;
-        bool ready = pending != null && File.Exists(pending.LocalPath);
+        bool ready = _services.Update.HasActionablePending;
 
         InstallUpdateButton.Visibility = ready ? Visibility.Visible : Visibility.Collapsed;
         if (ready)

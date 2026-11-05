@@ -154,16 +154,22 @@ public sealed class AppServices : IDisposable
 
         var ui = Dispatcher.CurrentDispatcher;
         Update.PendingChanged += pending =>
-            ui.BeginInvoke(() => Tray.SetInstallUpdateVisible(pending != null, pending?.TagName));
+            ui.BeginInvoke(() => Tray.SetInstallUpdateVisible(Update.HasActionablePending, pending?.TagName));
         Update.UserNotify += (title, message) =>
             ui.BeginInvoke(() => Tray.ShowBalloonTip(title, message));
-        // 更新已下载：提示可直接点击安装
+        // 更新已下载：提示可直接点击安装（只对真正高于当前版本的包提示）
         Update.InstallReady += pending =>
-            ui.BeginInvoke(() => Tray.ShowInstallReadyToast(pending.TagName));
+            ui.BeginInvoke(() =>
+            {
+                if (Update.HasActionablePending)
+                {
+                    Tray.ShowInstallReadyToast(pending.TagName);
+                }
+            });
         if (Update.Pending != null)
         {
-            Tray.SetInstallUpdateVisible(true, Update.Pending.TagName);
-            if (fromAutostart)
+            Tray.SetInstallUpdateVisible(Update.HasActionablePending, Update.Pending.TagName);
+            if (fromAutostart && Update.HasActionablePending)
             {
                 Tray.ShowInstallReadyToast(Update.Pending.TagName);
             }

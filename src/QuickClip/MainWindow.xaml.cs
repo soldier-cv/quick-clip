@@ -2491,8 +2491,11 @@ public partial class MainWindow : FluentWindow
                 break;
             case Services.UpdateCheckStatus.Ready:
                 // 已下载：提示可直接点击安装（无需再走托盘右键「立即更新」）
-                _services.Tray.ShowInstallReadyToast(
-                    result.Pending?.TagName ?? _services.Update.Pending?.TagName);
+                if (_services.Update.HasActionablePending)
+                {
+                    _services.Tray.ShowInstallReadyToast(
+                        result.Pending?.TagName ?? _services.Update.Pending?.TagName);
+                }
                 break;
             case Services.UpdateCheckStatus.UpdateAvailable:
                 _services.Tray.ShowBalloonTip("QuickClip", result.Message ?? "正在处理更新…");

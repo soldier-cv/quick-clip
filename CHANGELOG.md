@@ -2,7 +2,7 @@
 
 本项目版本记录遵循 [Keep a Changelog](https://keepachangelog.com/) 风格。
 
-## [Unreleased]
+## [1.4.12] — 2026-11-05
 
 ### 修复
 

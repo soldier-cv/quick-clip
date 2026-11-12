@@ -571,6 +571,115 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
+    /// <summary>
+    /// 对图片条目执行「识别并翻译」：先 OCR，再把识别结果送入翻译服务，
+    /// 译文复用卡片上的抽屉面板展示，省去先 OCR 再手动点翻译的两步操作。
+    /// </summary>
+    public async Task OcrTranslateSelectedAsync(ClipboardItemViewModel? target = null)
+    {
+        var selected = target ?? SelectedItem;
+        if (selected == null || !selected.IsImage)
+        {
+            StatusText = "非图片不支持识别并翻译";
+            return;
+        }
+
+        if (selected.IsOcrBusy || selected.IsOcrTranslating || selected.IsTranslating)
+        {
+            return;
+        }
+
+        // 与文本翻译按钮一致：译文已展开时再次点击收起，不重复识别
+        if (selected.IsTranslated)
+        {
+            selected.IsTranslated = false;
+            return;
+        }
+
+        if (!_ocrBusyIds.Add(selected.Item.Id))
+        {
+            return;
+        }
+
+        if (_services.Ocr.IsSystemEngine && !_services.Ocr.IsSupported)
+        {
+            _ocrBusyIds.Remove(selected.Item.Id);
+            StatusText = "系统 OCR 需要 Windows 10 及以上系统";
+            return;
+        }
+
+        selected.IsOcrTranslating = true;
+        StatusText = "正在识别图片文字…";
+        try
+        {
+            string? result = await _services.Ocr.RecognizeAsync(selected.Item.PreviewPath!);
+            string? warning = _services.Ocr.LastWarning;
+
+            if (string.IsNullOrWhiteSpace(result))
+            {
+                selected.TranslationEngineInfo = "识别失败";
+                selected.TranslatedText = warning ?? "未识别到文字";
+                selected.IsTranslated = true;
+                StatusText = warning ?? "未识别到文字";
+                return;
+            }
+
+            selected.TranslationEngineInfo = string.Empty;
+            selected.IsTranslating = true;
+            StatusText = "正在翻译…";
+            try
+            {
+                var res = await _services.Translation.TranslateAsync(result);
+                if (res.Success)
+                {
+                    selected.TranslatedText = res.TranslatedText;
+                    selected.TranslationEngineInfo = res.Engine;
+                    selected.IsTranslated = true;
+                    StatusText = string.IsNullOrWhiteSpace(warning)
+                        ? "识别并翻译完成"
+                        : $"{warning} · 已翻译";
+                }
+                else
+                {
+                    selected.TranslatedText = $"翻译失败: {res.ErrorMessage}";
+                    selected.TranslationEngineInfo = "失败";
+                    selected.IsTranslated = true;
+                    StatusText = $"翻译失败: {res.ErrorMessage}";
+                }
+            }
+            catch (Exception ex)
+            {
+                DebugLog.LogException("识别后翻译失败", ex);
+                selected.TranslatedText = $"翻译异常: {ex.Message}";
+                selected.TranslationEngineInfo = "异常";
+                selected.IsTranslated = true;
+                StatusText = $"翻译异常: {ex.Message}";
+            }
+            finally
+            {
+                selected.IsTranslating = false;
+            }
+        }
+        finally
+        {
+            _ocrBusyIds.Remove(selected.Item.Id);
+            void ClearBusy()
+            {
+                var live = Items.FirstOrDefault(item => item.Item.Id == selected.Item.Id) ?? selected;
+                live.IsOcrTranslating = false;
+            }
+
+            if (System.Windows.Application.Current.Dispatcher.CheckAccess())
+            {
+                ClearBusy();
+            }
+            else
+            {
+                await System.Windows.Application.Current.Dispatcher.InvokeAsync(ClearBusy);
+            }
+        }
+    }
+
     /// <summary>复制当前选中项内容到系统剪贴板（自身回写由剪贴板序列号识别，不会重复入库）。</summary>
     public Task CopySelectedToClipboard() =>
         CopyItemToClipboardAsync(SelectedItem);

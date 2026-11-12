@@ -446,7 +446,16 @@
                                         <ui:SymbolIcon Symbol="Layer24" FontSize="14" />
                                     </MenuItem.Icon>
                                 </MenuItem>
-                                <MenuItem Header="翻译文本" Click="OnMenuTranslateClicked">
+                                <MenuItem Tag="OcrTranslate"
+                                          Header="识别并翻译"
+                                          Click="OnMenuOcrTranslateClicked">
+                                    <MenuItem.Icon>
+                                        <ui:SymbolIcon Symbol="TranslateAuto24" FontSize="14" />
+                                    </MenuItem.Icon>
+                                </MenuItem>
+                                <MenuItem Tag="TranslateText"
+                                          Header="翻译文本"
+                                          Click="OnMenuTranslateClicked">
                                     <MenuItem.Icon>
                                         <ui:SymbolIcon Symbol="LocalLanguage24" FontSize="14" />
                                     </MenuItem.Icon>
@@ -651,6 +660,9 @@
                                                     <DataTrigger Binding="{Binding IsOcrBusy}" Value="True">
                                                         <Setter Property="Visibility" Value="Visible" />
                                                     </DataTrigger>
+                                                    <DataTrigger Binding="{Binding IsOcrTranslating}" Value="True">
+                                                        <Setter Property="Visibility" Value="Visible" />
+                                                    </DataTrigger>
                                                 </Style.Triggers>
                                             </Style>
                                         </WrapPanel.Style>
@@ -730,6 +742,61 @@
                                                                     </DataTrigger.EnterActions>
                                                                     <DataTrigger.ExitActions>
                                                                         <StopStoryboard BeginStoryboardName="OcrSpinBoard" />
+                                                                    </DataTrigger.ExitActions>
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </Ellipse.Style>
+                                                </Ellipse>
+                                            </Grid>
+                                        </ui:Button>
+                                        <ui:Button Appearance="Transparent"
+                                                   Padding="5"
+                                                   Margin="2,0"
+                                                   CornerRadius="6"
+                                                   ToolTip="{Binding OcrTranslateToolTip}"
+                                                   Visibility="{Binding IsImage, Converter={StaticResource BoolToVis}}"
+                                                   Click="OnOcrTranslateClicked">
+                                            <Grid Width="16" Height="16">
+                                                <ui:SymbolIcon Symbol="TranslateAuto24" FontSize="15">
+                                                    <ui:SymbolIcon.Style>
+                                                        <Style TargetType="ui:SymbolIcon">
+                                                            <Setter Property="Visibility" Value="Visible" />
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding IsOcrTranslating}" Value="True">
+                                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </ui:SymbolIcon.Style>
+                                                </ui:SymbolIcon>
+                                                <Ellipse Width="14"
+                                                         Height="14"
+                                                         Stroke="{DynamicResource Theme.Accent}"
+                                                         StrokeThickness="1.8"
+                                                         StrokeDashArray="9 5"
+                                                         RenderTransformOrigin="0.5,0.5">
+                                                    <Ellipse.RenderTransform>
+                                                        <RotateTransform />
+                                                    </Ellipse.RenderTransform>
+                                                    <Ellipse.Style>
+                                                        <Style TargetType="Ellipse">
+                                                            <Setter Property="Visibility" Value="Collapsed" />
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding IsOcrTranslating}" Value="True">
+                                                                    <Setter Property="Visibility" Value="Visible" />
+                                                                    <DataTrigger.EnterActions>
+                                                                        <BeginStoryboard x:Name="OcrTranslateSpinBoard">
+                                                                            <Storyboard RepeatBehavior="Forever">
+                                                                                <DoubleAnimation Storyboard.TargetProperty="RenderTransform.Angle"
+                                                                                                 From="0"
+                                                                                                 To="360"
+                                                                                                 Duration="0:0:0.75" />
+                                                                            </Storyboard>
+                                                                        </BeginStoryboard>
+                                                                    </DataTrigger.EnterActions>
+                                                                    <DataTrigger.ExitActions>
+                                                                        <StopStoryboard BeginStoryboardName="OcrTranslateSpinBoard" />
                                                                     </DataTrigger.ExitActions>
                                                                 </DataTrigger>
                                                             </Style.Triggers>

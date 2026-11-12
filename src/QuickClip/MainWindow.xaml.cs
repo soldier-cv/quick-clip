@@ -1942,13 +1942,25 @@ public partial class MainWindow : FluentWindow
     private void OnOcrClicked(object sender, RoutedEventArgs e)
     {
         e.Handled = true;
-        if (GetCardViewModel(sender) is not { } vm || vm.IsOcrBusy)
+        if (GetCardViewModel(sender) is not { } vm || vm.IsOcrBusy || vm.IsOcrTranslating)
         {
             return;
         }
 
         _viewModel.SelectedItem = vm;
         _ = _viewModel.OcrSelectedAsync(vm);
+    }
+
+    private void OnOcrTranslateClicked(object sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        if (GetCardViewModel(sender) is not { } vm || vm.IsOcrBusy || vm.IsOcrTranslating)
+        {
+            return;
+        }
+
+        _viewModel.SelectedItem = vm;
+        _ = _viewModel.OcrTranslateSelectedAsync(vm);
     }
 
     /// <summary>
@@ -2645,7 +2657,7 @@ public partial class MainWindow : FluentWindow
         }
     }
 
-    /// <summary>右键菜单打开前按条目类型裁剪：仅图片显示「另存为图片…」。</summary>
+    /// <summary>右键菜单打开前按条目类型裁剪：图片显示识别/另存，文本显示翻译。</summary>
     private void OnItemContextMenuOpening(object sender, ContextMenuEventArgs e)
     {
         if (sender is not FrameworkElement element || element.ContextMenu is not { } menu)
@@ -2654,11 +2666,20 @@ public partial class MainWindow : FluentWindow
         }
 
         bool isImage = element.DataContext is ClipboardItemViewModel { IsImage: true };
+        bool canTranslateText = element.DataContext is ClipboardItemViewModel { ShowTranslateAction: true };
         foreach (var item in menu.Items)
         {
-            if (item is MenuItem { Tag: "SaveImage" } saveItem)
+            switch (item)
             {
-                saveItem.Visibility = isImage ? Visibility.Visible : Visibility.Collapsed;
+                case MenuItem { Tag: "SaveImage" } saveItem:
+                    saveItem.Visibility = isImage ? Visibility.Visible : Visibility.Collapsed;
+                    break;
+                case MenuItem { Tag: "OcrTranslate" } ocrItem:
+                    ocrItem.Visibility = isImage ? Visibility.Visible : Visibility.Collapsed;
+                    break;
+                case MenuItem { Tag: "TranslateText" } textItem:
+                    textItem.Visibility = canTranslateText ? Visibility.Visible : Visibility.Collapsed;
+                    break;
             }
         }
     }
@@ -2695,6 +2716,16 @@ public partial class MainWindow : FluentWindow
         {
             _viewModel.PushItemToStack(vm);
             _viewModel.StatusText = $"已压入收集栈（当前共 {_viewModel.StackCount} 项）";
+        }
+    }
+
+    private void OnMenuOcrTranslateClicked(object sender, RoutedEventArgs e)
+    {
+        if (ResolveMenuTarget(sender) is { IsImage: true } vm &&
+            !vm.IsOcrBusy &&
+            !vm.IsOcrTranslating)
+        {
+            _ = _viewModel.OcrTranslateSelectedAsync(vm);
         }
     }
 

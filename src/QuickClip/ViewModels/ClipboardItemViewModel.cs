@@ -164,9 +164,34 @@ public sealed class ClipboardItemViewModel : INotifyPropertyChanged
         }
     }
 
-    public bool IsOcrEnabled => !_isOcrBusy;
+    private bool _isOcrTranslating;
 
-    public string OcrToolTip => _isOcrBusy ? "正在识别…" : "OCR";
+    /// <summary>该条目正在执行「识别并翻译」，按钮显示环状等待，结束后恢复。</summary>
+    public bool IsOcrTranslating
+    {
+        get => _isOcrTranslating;
+        set
+        {
+            if (_isOcrTranslating == value)
+            {
+                return;
+            }
+
+            _isOcrTranslating = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(IsOcrEnabled));
+            OnPropertyChanged(nameof(OcrToolTip));
+            OnPropertyChanged(nameof(OcrTranslateToolTip));
+        }
+    }
+
+    public bool IsOcrEnabled => !_isOcrBusy && !_isOcrTranslating;
+
+    public string OcrToolTip => _isOcrBusy
+        ? "正在识别…"
+        : _isOcrTranslating ? "正在识别并翻译…" : "OCR";
+
+    public string OcrTranslateToolTip => _isOcrTranslating ? "正在识别并翻译…" : "识别并翻译";
 
     /// <summary>文本/链接/文件条目（有全文可预览）。</summary>
     public bool IsTextual => Item.ContentType != ClipboardContentType.Image;
